@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Solo Accounting AI
 
-## Getting Started
+個人事業主・小規模事業者向けの経理・決算準備・確定申告準備アプリ。
 
-First, run the development server:
+## Stack
+
+- Next.js 16 (App Router / Turbopack) + React 19 + TypeScript
+- Firebase Authentication / Cloud Firestore / Cloud Storage / Cloud Functions
+- Firebase Emulator Suite(開発はEmulatorのみ。本番Firebaseへ接続しない)
+- Vitest(単体テスト) / Playwright(E2E)
+- Tailwind CSS 4
+
+開発ルール・計画は [AGENTS.md](AGENTS.md)・[PLAN.md](PLAN.md)・[docs/](docs/) を参照。
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm exec playwright install chromium   # E2E実行時のみ必要
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+環境変数は `.env.development` がコミット済みで、`demo-*` プロジェクト +
+Emulator接続の設定になっている。そのまま `pnpm dev` で動く。
+変数の一覧は [.env.example](.env.example) を参照。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+本番Firebaseの値を `.env*` に書かないこと(demo-* 以外のプロジェクトIDを
+使わない)。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Commands
 
-## Learn More
+| Command | Description |
+|---|---|
+| `pnpm dev` | 開発サーバー起動 |
+| `pnpm build` / `pnpm start` | 本番ビルド / 起動 |
+| `pnpm lint` | ESLint |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm test` | Vitest(単体テスト) |
+| `pnpm test:watch` | Vitest ウォッチモード |
+| `pnpm test:e2e` | Playwright E2E(dev serverを自動起動) |
+| `pnpm emulators` | Firebase Emulator Suite 起動(UI: http://localhost:4000) |
 
-To learn more about Next.js, take a look at the following resources:
+Firestore/Storage の Emulator には **JDK 21以上** が必要(firebase-tools 15系)。
+PATH上の `java` が21未満の場合は `JAVA_HOME` を指定して起動する。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm emulators
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Emulator起動中に `pnpm dev` を使うと、アプリは自動でEmulatorに接続する
+(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`)。
 
-## Deploy on Vercel
+## Testing Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `pnpm typecheck` は `LayoutProps` 等のグローバル型に依存する。
+  初回は `pnpm exec next typegen` で生成するか `pnpm dev` / `pnpm build`
+  を一度実行してから行うこと(生成物は `.next/` 配下でgit管理外)。
+- E2Eは `pnpm test:e2e`。dev serverを自動起動する(port 3000)。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Directory
+
+```
+src/app/            App Router のページ・レイアウト
+src/lib/firebase/   Firebase 初期化(client.ts=ブラウザ用, admin.ts=サーバー用)
+e2e/                Playwright テスト
+docs/               要件・スキーマ・会計・セキュリティ・AI方針・ADR
+firebase.json       Emulator/ルール設定( ports: auth 9099, firestore 8080, storage 9199 )
+firestore.rules     Firestore Security Rules(骨格・全拒否。docs/SECURITY_RULES.md を参照)
+storage.rules       Storage Security Rules(骨格・全拒否)
+```
+
+## Development Flow
+
+- mainへ直接変更しない。1タスク1Worktree
+- 作業内容は [REVIEW.md](REVIEW.md) に記録する
+- Required Checks: `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` / Firebase Emulator tests

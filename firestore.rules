@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// 注意: このファイルは意図的に未完成の骨格。
+// docs/SECURITY_RULES.md の方針に基づき、Emulatorテストとともに実装すること。
+// 実装が必要な内容(推測で完成させないこと):
+//   - businesses/{businessId} 配下はmembersロール(owner/editor/viewer)で認可
+//   - 締め済みfiscalPeriodに属するデータのupdate/delete禁止
+//   - auditLogsはappend-only
+//   - aiSuggestionフィールドはクライアントから書き込み不可(Admin SDKのみ)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 安全側デフォルト: すべて拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
