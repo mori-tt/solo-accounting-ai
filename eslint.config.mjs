@@ -12,6 +12,14 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Test artifacts:
+    "coverage/**",
+    "playwright-report/**",
+    "test-results/**",
+    // Firebase local artifacts:
+    ".firebase/**",
+    "emulator-data/**",
+    "firebase-export-*/**",
   ]),
 ]);
 
