@@ -12,29 +12,29 @@
 
 ## Phase 1: Core Accounting
 
-- [ ] Business
+- [x] Business
 - [ ] Members
-- [ ] Transactions
-- [ ] Expenses
-- [ ] Receipts
-- [ ] Monthly summaries
+- [x] Transactions
+- [x] Expenses
+- [x] Receipts
+- [x] Monthly summaries
 
 ## Phase 2: Sales and Billing
 
-- [ ] Customers
-- [ ] Projects
-- [ ] Invoices
-- [ ] Payments
-- [ ] Unpaid detection
+- [x] Customers
+- [x] Projects
+- [x] Invoices
+- [x] Payments
+- [x] Unpaid detection
 
 ## Phase 3: Closing
 
-- [ ] Closing checklist
-- [ ] Missing receipt check
-- [ ] Unpaid expense check
-- [ ] Unpaid sales check
-- [ ] Fiscal period closing
-- [ ] Audit logs
+- [x] Closing checklist
+- [x] Missing receipt check
+- [x] Unpaid expense check
+- [x] Unpaid sales check
+- [x] Fiscal period closing
+- [x] Audit logs
 
 ## Phase 4: AI
 

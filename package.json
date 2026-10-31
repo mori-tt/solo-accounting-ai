@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:emulators": "firebase emulators:exec --only firestore --project demo-solo-accounting-ai 'pnpm vitest run tests/emulator'",
     "emulators": "firebase emulators:start"
   },
   "dependencies": {
