@@ -16,6 +16,88 @@
 
 ## Log
 
+## 2026-10-31: Next.js画面(UI)の実装
+
+- Worktree: web-ui(ブランチ `mori-tt/web-ui`)
+
+### 実装内容
+
+要求された11画面 + その周辺基盤を実装。画面はすべて `(app)` ルートグループ配下で、
+`AppShell`(認証ゲート + サイドナビ + 事業切替)内に描画される。
+
+- **ログイン** `/login`: メール+パスワードのログイン/新規登録。Firebase client SDKで認証し、
+  `onIdTokenChanged` → `/api/session`(POST)でIDトークンを httpOnly Cookie(`__session`)に同期
+- **ダッシュボード** `/dashboard`: 当月の売上/経費/損益カード、要対応項目(下書き・AI提案待ち・
+  未処理領収書・未払経費・未入金請求)、最近の取引
+- **取引一覧** `/transactions`: 月ナビ・種別/状態フィルタ・行展開(編集/確定/削除/AI提案カード)。
+  登録は常に下書き、確定は別ボタン(AI提案採用では確定しない設計のまま)
+- **経費登録** `/expenses/new`: 登録フォーム(消費税区分・税額・支払期日)+ 経費一覧(支払状況・支払済化)
+- **領収書確認** `/receipts`: アップロード(multipart → `/api/receipts` でStorage保存+メタ登録)、
+  画像プレビュー(`/api/receipts/[id]` がメンバーシップ検証後にStorageから返却)、取引への紐付け、
+  アーカイブ(確認ダイアログ)、AI抽出提案の採用/却下
+- **顧客一覧** `/customers`、**案件一覧** `/projects`: 一覧+登録/編集フォーム
+- **請求・入金** `/invoices`: 明細行の可変フォーム(数量×単価→合計プレビュー)、発行(draft→issued)、
+  入金記録(残額バリデーション)
+- **月次レポート** `/reports/monthly`: 月ナビ・売上/経費/損益・科目別内訳・集計の保存(再計算)
+- **決算チェック** `/closing`: 期間選択/作成、チェックリスト(下書き残・証憑未添付・未処理領収書・
+  未払・未入金)、オーナーのみ期次締め(確認ダイアログ)
+- **設定** `/settings`: アカウント表示、事業情報(オーナーのみ編集可)、メンバー招待/ロール変更/削除
+  (オーナー・確認ダイアログ)、新規事業作成
+
+### アーキテクチャ
+
+- **データアクセス集中**: 画面はServer Actions(`src/lib/actions/`)とルートハンドラのみ呼ぶ。
+  Firestore/Storage SDKは画面に置かない。Actionsは `requireViewer/requireEditor/requireOwner`
+  でセッションCookie検証 + membership/role検証(businessId越権をサーバー側で遮断)してから
+  `AccountingStore` ポート経由でドメインサービスを呼ぶ
+- **クライアント基盤**: `api-client.ts`(ActionResult→throw変換 + UNAUTHORIZED時にIDトークン
+  再取得してセッションCookie更新→1回リトライ)、`useApiData`(loading/error/emptyの統一)、
+  `useBrowserOnly`(React 19.3の `use(browser())` でブラウザ専用描画を宣言)
+- **UIルール準拠**: AI提案は `AiSuggestionCard`(破線indigo・「採用しても自動確定されません」明記)、
+  LoadingBlock/ErrorState/EmptyState全画面統一、破壊的操作はConfirmDialog(取引削除・領収書
+  アーカイブ・メンバー削除・期次締め)、全フォームZod検証(クライアント+サーバー同一スキーマ)、
+  金額は `Amount` コンポーネント(Intl JPY・¥表記)で統一表示
+- **Cache Components対応**: 認証依存画面はSuspense + `browser()` でブラウザ専用化、
+  `(app)/layout.tsx` と各pageに `export const instant = false`(instant検証の対象外)
+
+### 実行したチェック
+
+- `pnpm lint` — 合格(警告1件: 認証付きAPI経由の証憑画像に `<img>` 使用。意図的)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(10ファイル93件、emulator4件はskip)
+- `pnpm build` — 合格(全15ルート、画面はstatic・APIはdynamic)
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm test:emulators` — 合格(4件)
+- `pnpm test:e2e` — 合格(home.specをログイン誘導の確認に更新)
+
+### 変更ファイル
+
+- 新規: `src/app/(app)/**`(11画面+layout+error)、`src/app/login/**`、`src/app/api/{session,receipts}`、
+  `src/components/**`(auth-provider/app-shell/ui/status-badge/ai-suggestion-card)、
+  `src/lib/actions/**`(9ファイル)、`src/lib/api/**`(session/result/store/queries)、
+  `src/lib/{api-client,accounts,format,validation/schemas}.ts`、`src/lib/hooks/**`
+- 更新: `src/app/layout.tsx`(AppProvider組込)、`src/app/page.tsx`(/dashboardへリダイレクト)、
+  `src/lib/firebase/admin.ts`(getReceiptsBucket追加)、`.env.development`(emulator接続先の明示)、
+  `e2e/home.spec.ts`、`PLAN.md`
+
+### 未解決事項・備考
+
+- **worktree共有ディレクトリ問題は前回記録通り再発**: このworktreeでも `rm node_modules .next`
+  して `pnpm install` 済み(共有 .next への同時ビルドでturbopackがデッドロックする事例も確認)
+- viewerロールはUI上も登録/編集系ボタンを出さない。`listInvoiceRows` のoverdue最良努力更新は
+  editor以上のみ実行(viewerは書き込みを行わせない)
+- 確定済み取引の削除はオーナー限定(サーバー側で強制)。UIはmutableなら削除ボタンを出すが、
+  権限不足時はエラー表示でフィードバック
+- メンバー招待はメール→Authユーザー引きのため、招待相手が先にサインアップしている必要がある
+- `useApiData` の loader は `Promise<T>` を返す形に統一(callApi内でSession再取得リトライ)
+
+### 次の担当者への注意事項
+
+- 画面追加時も「画面→Server Action→AccountingStore」経路を守り、Firestore/Storage SDKを
+  client componentにimportしないこと
+- `pnpm typecheck` は `.next/types` の生成型に依存。`pnpm build` か `next typegen` 後に実行
+- React 19.3では effect本体内の同期setState・render中のref更新がlint errorになる。
+  ローディング制御はqueueMicrotask/派生値/useSyncExternalStoreで対処済み(各ファイル参照)
+
 ## 2026-10-31: 経理ドメインの実装
 
 - Worktree: accounting-domain(ブランチ `mori-tt/accounting-domain`)

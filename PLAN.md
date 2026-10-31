@@ -5,7 +5,7 @@
 - [x] Next.js初期設定
 - [x] Firebase初期設定
 - [x] Firebase Emulator
-- [ ] Authentication
+- [x] Authentication
 - [ ] Firestore Rules
 - [ ] Storage Rules
 - [ ] CI
@@ -13,7 +13,7 @@
 ## Phase 1: Core Accounting
 
 - [x] Business
-- [ ] Members
+- [x] Members
 - [x] Transactions
 - [x] Expenses
 - [x] Receipts
@@ -42,3 +42,17 @@
 - [ ] Account suggestion
 - [ ] Duplicate detection
 - [ ] Monthly explanation
+
+## Phase 5: Web UI
+
+- [x] ログイン画面
+- [x] ダッシュボード
+- [x] 取引一覧
+- [x] 経費登録
+- [x] 領収書確認
+- [x] 顧客一覧
+- [x] 案件一覧
+- [x] 請求・入金
+- [x] 月次レポート
+- [x] 決算チェック
+- [x] 設定
