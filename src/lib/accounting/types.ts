@@ -43,6 +43,8 @@ export interface Business {
   ownerUid: string;
   fiscalYearStartMonth: number;
   taxMode: TaxMode;
+  /** 家事按分の事業割合(%)。科目コード→0-100の整数。未設定科目は100%扱い */
+  allocationRatios?: Record<string, number>;
   /** 年度ごとの期首残高(資産系科目+任意コード)。未設定は空扱い */
   openingBalances?: OpeningBalance[];
   createdAt: string;

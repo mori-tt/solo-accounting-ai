@@ -71,6 +71,17 @@ export const businessSchema = z.object({
     .min(1, "1〜12で入力してください")
     .max(12, "1〜12で入力してください"),
   taxMode: z.enum(["exempt", "simple", "standard"]),
+  /** 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い */
+  allocationRatios: z
+    .record(
+      z.string(),
+      z
+        .number({ error: "事業割合は数値で入力してください" })
+        .int("事業割合は整数で入力してください")
+        .min(0, "事業割合は0〜100で入力してください")
+        .max(100, "事業割合は0〜100で入力してください"),
+    )
+    .optional(),
 });
 export type BusinessInput = z.infer<typeof businessSchema>;
 

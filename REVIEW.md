@@ -16,9 +16,38 @@
 
 ## Log
 
+## 2026-11-02: 家事按分(科目別事業割合)(Issue #43)
+- Worktree: household-alloc
+### 実装内容
+経費科目ごとの事業割合(%)をBusinessに保存し、月次レポートで按分後金額を表示列として確認できるようにした。依存追加なし。
+- `src/lib/accounting/types.ts`: `Business.allocationRatios?: Record<accountCode, number(0-100)>` を追加(オプショナル。未設定科目は100%扱い)
+- `src/lib/accounting/domain/allocation.ts`(新規): 按分ドメインロジック
+  - `isAllocationRatio` / `assertAllocationRatio`: 0-100整数の割合検証
+  - `allocatedAmount(amountYen, ratioPercent)`: `floor(amount*ratio/100)` で円・整数。端数は切り捨て(ACCOUNTING_RULES.mdの初期版ルールに合わせ、経費を過大計上しない丸め)
+  - `allocationRatioFor(ratios, account)`: 未設定・範囲外の保存値は100%へフォールバック(表示側を壊さない)
+  - `applyAllocation(breakdown, ratios)` / `allocatedExpenseTotal`: 科目別集計へ按分後列を付与する表示用関数。`MonthlySummary.accountBreakdown` と同じ `{income,expense}` 構造を入力に取り、summary.ts等の既存集計は変更していない
+- `src/lib/validation/schemas.ts`: `businessSchema` に `allocationRatios`(z.record(0-100整数))をオプション追加
+- `src/lib/actions/businesses.ts`: Issue指定どおり既存のbusiness更新actionを利用
+  - `MyBusiness` / `listMyBusinesses` で `allocationRatios` を返すようにした(画面側の読み取り経路)
+  - `updateBusinessSettings` は `allocationRatios` が指定された時のみ上書き。未指定(既存の設定画面)は現値を維持するため、設定画面・firestore.rulesの変更は不要(ownerUid不変ルールのみで追加フィールドを拒否しない)
+- `src/app/(app)/allocations/`(新規): 専用ページ(/settings配下ではない)。経費科目(ACCOUNT_OPTIONSのkind=expense)ごとに0-100を入力保存。未入力=未設定(100%)。UIに無い科目の保存済み割合は上書きしない(マージ保存)。ownerのみ編集可(流用するactionがowner必須のため)、非ownerは読み取り表示
+- `src/app/(app)/reports/monthly/monthly-report-screen.tsx`: `applyAllocation` で按分率・按分後支出列と「差引(按分後)」を追加。割合未設定時は従来表示のまま
+- `src/components/app-shell.tsx`: ナビに「家事按分」を1行追加
+- `docs/FIRESTORE_SCHEMA.md`: businessesに `allocationRatios` を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(30ファイル374件、skip 10。`domain/allocation.test.ts` 11件を新規追加)
+- `pnpm build` — 合格(`/allocations` が静的ルートとして登録)
+- Firebase Emulator テスト — 未実施(Issue制約でEmulator起動禁止。rules変更なしのため影響なしと判断)
+### 未解決事項・次の担当者への注意事項
+- 按分は表示専用で `monthlySummaries` 等の保存データには反映していない(Issueの「表示列追加レベル」指定どおり)。確定申告出力・決算書で按分額が必要になったら同じ `domain/allocation.ts` を再利用する
+- 割合編集はownerのみ(`updateBusinessSettings` 流用のため)。editorにも開放する場合はaction側の認可変更が必要
+- 按分ページは事業名等の既存値を `useApp().business` から同時送信する。別タブで事業設定を直後に変更した場合に古い値で上書きする可能性がある(設定画面と同じ既知の性質)
 ## 2026-11-02: 定期取引テンプレート(Issue #45)
 - Worktree: recurring-tx
-### 実装内容
 毎月繰り返し発生する取引のテンプレート(recurringTemplates)管理と、「今月分を生成」による取引一括作成。依存追加なし。
 - `src/lib/accounting/types.ts`: `RecurringTemplate` 型追加(name/type/account/counterparty/description/amount/dayOfMonth/active/lastGeneratedMonth?/createdBy/createdAt/updatedAt)
 - `src/lib/accounting/store/types.ts`: `CollectionName` に `"recurringTemplates"` 追加。`AccountingReader` に `getRecurringTemplate` / `listRecurringTemplates` 追加。`store/memory.ts`・`store/firestore.ts` に実装
@@ -36,15 +65,10 @@
 - `docs/FIRESTORE_SCHEMA.md`: recurringTemplatesのコレクション定義を追記
 - `tests/rules/helpers.ts` + `tests/rules/firestore.rules.test.ts`: `recurringTemplate` fixtureと describe ブロック追加(読み取り権限・作成/更新/削除・createdBy不一致・dayOfMonth 0/32・type/amount/active不正・createdBy/createdAt不変性)
 - `src/lib/accounting/services/recurring.test.ts`(新規): 13件。登録・更新・無効化、月末調整(31日→2/28)、同月再実行の冪等性、翌月再生成、無効テンプレート除外、closed期間拒否、不正monthKey拒否
-### 実行したテスト
-- `pnpm install --frozen-lockfile` — 成功
 - `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
-- `pnpm exec next typegen` — 成功
-- `pnpm typecheck` — 合格
 - `pnpm test` — 合格(30ファイル378件、skip 10)
 - `pnpm build` — 合格(`/recurring` が静的ルートとして登録)
 - `pnpm test:rules` — 合格(2ファイル71件。JAVA_HOME=openjdk@21でEmulator実行)
-### 未解決事項・次の担当者への注意事項
 - 生成される取引は常に `status="draft"`。「AIだけで仕訳を確定しない」方針に従い、確定は取引一覧側のユーザー操作に委ねる
 - 「今月分を生成」の transact には全体idempotencyKeyを付けていない(月キーで固定すると当月追加されたテンプレートが生成されなくなるため)。代わりに lastGeneratedMonth の読み書き不可分 + 決定的取引ID(`recurring-{templateId}-{yyyyMM}`)で冪等性を担保。Firestore transactionの競合リトライでも重複しない設計
 - テンプレート編集で金額・日付を変更しても、生成済み(lastGeneratedMonth)の月には遡って再生成しない。当月分をやり直したい場合は生成済み取引を削除したうえで lastGeneratedMonth をリセットする運用が必要(画面からは不可・Adminのみ)
@@ -131,7 +155,6 @@
 - 一覧はコレクション全件取得→メモリ絞込(既存のlist系と同方針)。auditLogsが肥大化した場合は`firestore.indexes.json`既存の(targetPath ASC, createdAt DESC)索引を使ったサーバーサイドページングへの移行を検討(action絞り込みには別途索引が必要)
 - `action`フィールドのTS型(`AuditAction`)は4種だが実データにはAI系3種も混在する。画面はstring扱いで未知値をそのまま表示する
 - `writeAuditLog`/`appendAuditLog`経由のエントリはdocに`id`フィールドを持たず、`createdAt`欠損時は空文字フォールバック(表示上は空欄)
-
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
 ### 実装内容
