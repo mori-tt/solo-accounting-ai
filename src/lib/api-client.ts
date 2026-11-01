@@ -1,5 +1,12 @@
 "use client";
 
+import type {
+  AISuggestionJSON,
+  SuggestionKind,
+  SuggestionStatus,
+  SuggestionTarget,
+  SuggestionTargetType,
+} from "@/lib/ai/types";
 import type { ActionResult } from "@/lib/api/result";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
@@ -56,50 +63,74 @@ export async function callApi<T>(
   return res.data;
 }
 
-/**
- * Route Handler の `{ ok, data | error }` レスポンスを処理する fetch ラッパー。
- * callApi と同様に UNAUTHORIZED 時はセッションを張り直して1回リトライする。
- * body に文字列を渡す場合のみ JSON の content-type を付ける
- * (FormData 送信時はブラウザの multipart 境界に任せる)。
- */
-export async function apiFetch<T>(
+// ---------- AI提案 API(/api/ai/suggestions) ----------
+
+interface ApiEnvelope<T> {
+  ok: boolean;
+  data?: T;
+  error?: { code: string; message: string };
+}
+
+async function requestJson<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  let res = await requestApi<T>(path, init);
-  if (!res.ok && res.error.code === "UNAUTHORIZED") {
-    if (await refreshSession(true)) {
-      res = await requestApi<T>(path, init);
-    }
-  }
-  if (!res.ok) {
-    throw new ApiClientError(res.error.code, res.error.message);
-  }
-  return res.data;
-}
-
-async function requestApi<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<ActionResult<T>> {
   const res = await fetch(path, {
     credentials: "same-origin",
     ...init,
-    headers: {
-      ...(typeof init?.body === "string"
-        ? { "content-type": "application/json" }
-        : {}),
-      ...init?.headers,
-    },
   });
-  const json = (await res
-    .json()
-    .catch(() => null)) as ActionResult<T> | null;
-  if (!json || typeof json.ok !== "boolean") {
-    return {
-      ok: false,
-      error: { code: "INTERNAL", message: "サーバーエラーが発生しました" },
-    };
+  const body = (await res.json().catch(() => null)) as ApiEnvelope<T> | null;
+  if (!res.ok || !body?.ok) {
+    throw new ApiClientError(
+      body?.error?.code ?? "INTERNAL",
+      body?.error?.message ?? "通信に失敗しました",
+    );
   }
-  return json;
+  return body.data as T;
+}
+
+/** 提案一覧。絞り込み条件はGETクエリ相当 */
+export async function fetchAiSuggestions(
+  businessId: string,
+  filter: {
+    targetType?: SuggestionTargetType;
+    targetId?: string;
+    kind?: SuggestionKind;
+    status?: SuggestionStatus;
+    limit?: number;
+  } = {},
+): Promise<AISuggestionJSON[]> {
+  const params = new URLSearchParams({ businessId });
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined) params.set(key, String(value));
+  }
+  return requestJson<AISuggestionJSON[]>(`/api/ai/suggestions?${params}`);
+}
+
+/** AI提案を実行する(対象・種別はサーバー側でも検証される) */
+export async function runAiSuggestion(
+  businessId: string,
+  kind: SuggestionKind,
+  target: SuggestionTarget,
+  input: Record<string, unknown> = {},
+): Promise<AISuggestionJSON> {
+  return requestJson<AISuggestionJSON>("/api/ai/suggestions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ businessId, kind, target, input }),
+  });
+}
+
+/** 提案を承認(accepted)・却下(rejected)する。確定データへの反映は行われない */
+export async function decideAiSuggestion(
+  businessId: string,
+  suggestionId: string,
+  decision: "accepted" | "rejected",
+  rejectReason?: string,
+): Promise<AISuggestionJSON> {
+  return requestJson<AISuggestionJSON>(`/api/ai/suggestions/${suggestionId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ businessId, decision, rejectReason }),
+  });
 }

@@ -33,7 +33,6 @@ describe("registerTransaction", () => {
       date: "2026-10-15",
       amount: 100_000,
       status: "draft",
-      aiSuggestion: null,
       createdBy: ACTOR,
     });
 

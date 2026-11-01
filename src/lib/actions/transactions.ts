@@ -5,10 +5,6 @@ import {
   registerTransaction,
 } from "@/lib/accounting/services/transactions";
 import {
-  approveTransactionSuggestion,
-  rejectTransactionSuggestion,
-} from "@/lib/accounting/services/aiSuggestions";
-import {
   assertDateInOpenPeriod,
   auditsFor,
 } from "@/lib/accounting/services/common";
@@ -178,39 +174,5 @@ export async function deleteTransaction(
       targetPath: `businesses/${businessId}/transactions/${transactionId}`,
     });
     return null;
-  });
-}
-
-/** AI提案の採用。提案値を確定フィールドへコピーする(確定は別操作)。 */
-export async function approveTransactionSuggestionAction(
-  businessId: string,
-  transactionId: string,
-): Promise<ActionResult<Transaction>> {
-  return run(async () => {
-    const actor = await requireEditor(businessId);
-    const { transaction } = await approveTransactionSuggestion(
-      getStore(),
-      businessId,
-      actor,
-      transactionId,
-    );
-    return transaction;
-  });
-}
-
-/** AI提案の却下。確定フィールドは変更しない。 */
-export async function rejectTransactionSuggestionAction(
-  businessId: string,
-  transactionId: string,
-): Promise<ActionResult<Transaction>> {
-  return run(async () => {
-    const actor = await requireEditor(businessId);
-    const { transaction } = await rejectTransactionSuggestion(
-      getStore(),
-      businessId,
-      actor,
-      transactionId,
-    );
-    return transaction;
   });
 }

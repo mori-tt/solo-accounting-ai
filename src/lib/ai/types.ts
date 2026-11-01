@@ -136,11 +136,10 @@ export interface AISuggestion {
 export type NewAISuggestion = Omit<AISuggestion, "id">;
 
 /**
- * Route Handler(JSON)経由でクライアントへ返す提案。
- * Response.json が Date を ISO 8601 文字列へ変換するため、
- * 日時フィールドのみ string に置き換えた wire 型。
+ * API経由のJSON表現。TimestampはISO 8601文字列としてシリアライズされる。
+ * クライアント側(fetch/useState)ではこの型で扱う。
  */
-export type AISuggestionDTO = Omit<
+export type AISuggestionJSON = Omit<
   AISuggestion,
   "createdAt" | "updatedAt" | "decidedAt"
 > & {
@@ -148,6 +147,13 @@ export type AISuggestionDTO = Omit<
   updatedAt: string;
   decidedAt: string | null;
 };
+
+/** 未解決(ユーザー判断待ち)の提案かどうか */
+export function isUnresolvedSuggestion(
+  suggestion: Pick<AISuggestion, "status">,
+): boolean {
+  return suggestion.status === "pending" || suggestion.status === "needs_review";
+}
 
 /** 監査ログエントリ。証憑内容・個人情報は含めず対象の識別情報のみ */
 export interface AuditLogEntry {

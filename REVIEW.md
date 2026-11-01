@@ -54,6 +54,160 @@ PR #17 で配線済みの REST API(`/api/ai/suggestions`)と画面を接続し�
 - duplicate_detection の照合対象は画面に読み込まれた同月取引のみ。月またぎの重複は現状検出しない(必要なら全期間取得に拡張)
 - `transactions`/`receipts` の旧 `aiSuggestion` 埋め込みフィールドのUI(既存 AiSuggestionCard)は残置。ADR-0005 では廃止予定だが、既存データ表示の互換維持のため本タスクでは触っていない
 
+## 2026-11-02: AI提案実装の統合(ADR-0005への一本化)
+
+- Worktree: ai-suggestion-consolidation
+
+### 実装内容
+
+`aiSuggestions` コレクションの独立ドキュメント方式(ADR-0005、`src/lib/ai/*`)を正規実装とし、アプリ内の旧実装3系統を削除してUI・ダッシュボード・rules・docsを新shapeへ一本化した。前タスク(ai-api-wiring)が残した「旧 `services/aiSuggestions.ts` 系との統合整理は別タスク」の対応。
+
+- 削除(旧: ドキュメント内 `aiSuggestion` 埋め込みフィールド方式)
+  - `src/lib/accounting/services/aiSuggestions.ts`(+test)、`src/lib/accounting/suggestions.ts`、`src/lib/accounting/domain/ai.ts`
+  - `AccountingService.saveAiSuggestion/acceptAiSuggestion/rejectAiSuggestion` と関連テスト
+  - `src/lib/firebase/server.ts` の `createAiSuggestion`(旧shape・呼び出しなしの死コード)
+  - Server Actions `approveTransactionSuggestionAction`/`rejectTransactionSuggestionAction`/`decideReceiptSuggestionAction`
+  - `Transaction`/`Receipt`/`TransactionEntity`/`ReceiptEntity` の `aiSuggestion` フィールド、旧 `AiSuggestion`/`AiSuggestionStatus` 型、DomainErrorCode の SUGGESTION_* 4コード
+- 追加・変更(新方式への接続)
+  - `src/lib/ai/types.ts`: `AISuggestionJSON`(ISO文字列のJSON表現)と `isUnresolvedSuggestion()` を追加
+  - `src/lib/ai/apply.ts` 新規: 提案payloadから確定フィールドへのコピー値を組み立てる純粋関数。`account_suggestion`→最高信頼度候補のaccount、`transaction_description`→description のみ。採用(状態解決)とは別のユーザー操作として呼ぶADR-0005の「2ステップ」反映側
+  - `src/lib/api-client.ts`: `fetchAiSuggestions`/`runAiSuggestion`/`decideAiSuggestion`(GET/POST/PATCH `/api/ai/suggestions`)
+  - `components/ai-suggestion-card.tsx`: 旧 `suggested` map+`approved` 前提から canonical shape(kind別payload・`accepted`/`rejected`/`needs_review`・issues)へ書き換え
+  - transactions-screen: 提案をコレクションから取得しtarget.idでグルーピング。「科目をAI提案」で `runAiSuggestion`、採用は `decideAiSuggestion`→別操作で `updateTransaction` にpatch反映(確定ステータスにはしない)、却下は `decideAiSuggestion`。locked取引はpatch非適用
+  - receipts-screen: 同様にreceipt対象提案を表示・採否。抽出値の確定データへの自動反映なし(旧UIにも生成トリガーはなかった)
+  - dashboard: `getDashboard` が `getAISuggestionService().list` で未解決件数を数え、`pendingSuggestionTransactionIds` で取引行にAIバッジを出す(旧: transaction埋め込み `aiSuggestion.status==="pending"` の件数)
+  - `heuristic-provider`: フォールバック科目 `miscellaneous`→`misc_expense`(現行科目コードに合わせる)
+- firestore.rules: aiSuggestions update を新shapeに合わせ `pending`/`needs_review`→`accepted`/`rejected` かつ `decidedBy==本人` のみ許可、kind/target/payload等はunaffectedに。`firestore.indexes.json` の旧shape索引2件(targetPath等)を削除
+- テスト: `tests/rules` の aiSuggestion fixture・更新テストを新shapeへ(needs_review遷移・解決済み再操作禁止・payload不変)。`src/lib/ai/apply.test.ts` 新規
+- docs: FIRESTORE_SCHEMAの旧セクション・データフロー図、SECURITY_RULESの権限表、AI_POLICYのデータ分離節、DECISIONS ADR-0005に実装フィールド名の補足を追記
+
+### ドキュメント互換・移行方針
+
+- 既存Firestoreドキュメントに残っている可能性のある旧 `aiSuggestion` mapフィールドは移行・書き換えを行わない(締め済み含む既存データの直接変更を避ける方針と同じ。invoice-taxの税フィールド対応と同型)
+- アプリは型からフィールドを除去済みで読み書きしないため、残存データは無視される。表示・集計・権限判定への影響なし
+- `firestore.rules` は `transactions`/`receipts` への `aiSuggestion` 書き込みを引き続き禁止(rulesテストのガードも維持)。除去が必要になった場合はAdmin SDKで対応する
+- `aiSuggestions` コレクション側は旧shape(`type`/`targetPath`/`suggestion`)ドキュメントが作成される経路をすべて削除した(rulesでcreate禁止+`createAiSuggestion`削除のため新規混入不可)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(22ファイル257件、skip 10)
+- `pnpm build` — 合格
+- `pnpm test:rules` — 合格(63件。JDK21 `JAVA_HOME=/opt/homebrew/opt/openjdk@21/...` 設定)
+- `pnpm test:emulators` — 合格(7件)
+- `tests/firestore` — 合格(3件、emulators:exec経由で確認)
+
+### 未解決事項・次の担当者への注意事項
+
+- 提案の採用→反映は非アトミック: `decideAiSuggestion`(accept)後に `updateTransaction` が失敗すると「提案はacceptedだが取引は未反映」になり得る。UIはpatch適用可能な提案の採用ボタンを「提案を採用して反映」と表示し区別しているが、厳密にはサーバー側で「accepted+反映」を1操作にするApply APIの検討余地あり
+- `retry`(needs_review再実行)はサービス層のみ実装でAPI未公開のまま。UIからの再実行導線は別タスク
+- `monthly_explanation` の表示導線は未実装(kind・payload描画はカード側で対応済み)
+- `getDashboard` は `list(limit=MAX_LIST_LIMIT)` で全提案を走査して未解決を数える。store側の走査上限(MAX_LIST_LIMIT)を超える件数では件数が過小になる
+- `domain/`(旧世代 `service.ts`/`types.ts`)と `services/`+トップレベル型(新世代)の二重定義は今回の統合対象外。`aiSuggestion` 関連のみ除去し、Entity型等の統合整理は引き続き別タスク
+- E2E(`pnpm test:e2e`)は未実施。旧来からAI提案カード操作はE2E未カバー領域で、削除したUIの参照もなかった
+
+## 2026-11-02: 領収書OCR基盤(Issue #21)
+
+- Worktree: receipt-ocr
+
+### 実装内容
+
+receipt_extraction の `input.ocrText` をサーバーサイドで生成する基盤。依存追加なし(既存 openai@7.43.0 を利用)。
+
+- `src/lib/ai/receipt-ocr.ts` 新規:
+  - `ReceiptOcr`(証憑ファイル→テキスト抽出の抽象化)と `OcrCaller`(1回のOCR呼び出し。llm-provider.tsの `LLMCaller` と同じ注入パターン)
+  - `OpenAIReceiptOcr`: MIMEに応じて画像(JPEG/PNG/WebP/GIF)→`input_image`、PDF→`input_file` のdata URLで Responses API へ送信。HEIC/HEIFはOpenAI非対応のため `provider_error`(画像変換は依存追加になるため対象外)
+  - `createOpenAIOcrCaller`: `store: false` 固定・`assertServerSide`・出力は `{"ocrText": "..."}` の構造化JSON(json_schema strict)に限定してパース・返却。非JSON/欠落は `invalid_response` に正規化
+  - `createReceiptOcr(env)`: `AI_OCR_PROVIDER=openai` + `OPENAI_API_KEY` 時のみ有効。モデルは `OPENAI_OCR_MODEL` → `OPENAI_MODEL` → DEFAULT。未設定/unknown/鍵欠落は null(OCR無効)でフォールバックし本体機能を妨げない
+  - `ReceiptOcrResolver`: AIProviderのデコレータ。receipt_extraction のみ介入し、(1)クライアント指定の ocrText があればそのまま(Emulator/開発用)、(2)未指定なら対象 receipt の `storagePath` からダウンロード→OCR→`input.ocrText` へ注入して inner へ委譲。storagePath は登録済みレコード由来のため任意パス参照は起きない。OCR失敗は service 層で needs_review+retriable として記録される経路
+- `src/lib/api/ai.ts`: `getAISuggestionService()` の provider を `ReceiptOcrResolver(inner=createAIProvider(), ocr=createReceiptOcr(), getReceipt=getStore().getReceipt, downloadFile=Admin SDK)` で構成
+- `.env.example`: AI関連の環境変数(AI_LLM_PROVIDER/AI_OCR_PROVIDER/OPENAI_API_KEY/OPENAI_MODEL/OPENAI_OCR_MODEL)を追記
+- `src/lib/ai/receipt-ocr.test.ts` 新規(@vitest-environment node): ファクトリ分岐、MIME→input種別マッピング、SDKエラーの正規化(証憑内容を含まないこと)、callerの `store:false`・content shape、resolver の委譲/短絡/サイズ上限/404、AISuggestionService 統合(OCR→heuristic→pending提案)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格(要 `pnpm exec next typegen`: LayoutProps は Next 16 生成型で worktree 直後は .next/types が未生成)
+- `pnpm test` — 合格(23ファイル292件、skip 10)
+- `pnpm build` — 合格
+- `pnpm test:rules` — 合格(62件)
+- `pnpm test:emulators` — 合格(7件)
+
+### 未解決事項・次の担当者への注意事項
+
+- worktree 作成直後は `pnpm install` だけでなく `pnpm exec next typegen` も必要(typecheck が LayoutProps で落ちる)。AGENTS.md の Environment 節に追記検討
+- AI_OCR_PROVIDER 未設定の既定動作: クライアント指定 ocrText 必須のまま(未指定は needs_review)。UI からの OCR 実行導線・新旧2系統の統合は Issue #20/#22 側
+- HEIC/HEIF アップロードは現状 OCR 不可(provider_error→needs_review)。対応する場合はアップロード時変換か別OCR系が必要
+- `input_file`/`input_image` のモデル対応は gpt-5系前提。OPENAI_OCR_MODEL で変えられるが非対応モデルはAPIエラーになる
+## 2026-11-02: 申告レベル消費税計算(Issue #24)
+
+- Worktree: tax-filing-precision
+
+### 実装内容
+
+- `src/lib/accounting/domain/tax.ts` に確定申告レベルの計算を追加(既存公開APIは不変・純粋関数・整数演算のみ・Firebase非依存)。付表1-3/第二表の手順に対応する割戻し方式
+  - `computeTaxableBase(amountInclusiveYen, rate)`: 課税資産の譲渡等の対価(税込合計)×100/110(軽減は×100/108)→千円未満切捨て。税率区分ごとに別々に算出
+  - `computeConsumptionTaxFiling(mode, amounts, {businessClass})`: 税率別の売上/仕入(税込合計)から申告書相当額を算出
+    - 課税標準額に対する消費税額(国税): 標準7.8%・軽減6.24%、1円未満切捨て
+    - 控除対象仕入税額(本則課税): 税込支払対価×7.8/110・軽減6.24/108、1円未満切捨て
+    - 簡易課税: みなし仕入率を消費税額合計に適用(businessClass必須、他方式は指定拒否。既存APIと同じバリデーション)
+    - 差引税額(balance)は百円切捨て前の値で保持。納付側は国税・地方消費税とも百円未満切捨て、還付側は1円精度
+    - 地方消費税 = 差引税額(切捨て前)×22/78→百円未満切捨て(譲渡割額は還付税額×22/78・円精度)
+    - 戻り値 `ConsumptionTaxFiling`: 税率別内訳(breakdown)、課税標準額/消費税額/控除額/差引/国地別納付額/合計、還付額
+  - 同一rateの入力行は合算してから課税標準額を算出(対価の合計額×係数が法定手順)
+- `src/lib/accounting/domain/tax.test.ts`: 12件追加(課税標準額の千円切捨て・税率別内訳・合算順序・還付・百円切捨て・地方税の課税標準が切捨て前・簡易課税・免税・バリデーション)
+
+### 設計上の判断
+
+- **国税率は 6.3% ではなく 7.8%/6.24%**: Issue記載の「国税6.3%/地方税2.2%」は2019/9までの旧8%時代の率で、6.3+2.2=8.5%となり標準10%と整合しない。現行の法定率は標準10%=国税7.8%+地方2.2%、軽減8%=国税6.24%+地方1.76%(地方税はいずれも消費税額×22/78)。国税庁タックスアンサーNo.6371・付表1-3記載要領に従い実装
+- **地方消費税の課税標準は百円切捨て前の差引税額**: 付表1-3では差引税額⑨(→第一表・百円切捨て)と⑪(→第二表⑳・円精度)が別行で、地方税は⑪×22/78。切捨て後を基礎にすると差が出るケースを専用テストで担保(78,390→22,100。誤実装だと22,000)
+- **還付は円精度**: 百円未満切捨ては納付税額のみに適用(通則法の端数処理)。還付税額・譲渡割額は1円精度で返す
+- **簡易課税の税率別内訳**: みなし仕入れは消費税額合計への一括適用(申告書の手順)のため、breakdown行の `deductibleInputTax` は0とし合計側のみに値を持たせる
+- **exempt**: 納付義務なし。入力バリデーションは実施した上で全額0・breakdown空を返す
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` による型生成後)
+- `pnpm test` — 合格(22ファイル287件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 該当なし(rules変更なし、domain層のみ)
+
+### 未解決事項・次の担当者への注意事項
+
+- 中間納付額の相殺(第一表⑫-⑬)・売上対価の返還等/貸倒れ(付表③⑤⑥)・課税売上割合95%未満の個別対応/一括比例配分・2割特例は未対応。確定申告UI接続時に必要に応じて拡張
+- 旧税率(3/4/6.3%)適用取引がある課税期間は付表が異なり地方税計算も別式。対象外とした
+- 本関数への入力(税率別・税込対価合計の集計)は Transaction/Expense 側に税率区分フィールドを持ち回る必要があり、集計側の実装は別タスク
+- `domain/`(旧世代)と`services/`(新世代)の2系統併存・TaxCategory表記不統一は従前どおり別タスク
+## 2026-11-02: @types/node を ^20 → ^26 へ更新(Issue #23)
+
+- Worktree: types-node-update
+
+### 実装内容
+
+- `package.json` の devDependencies `@types/node` を `^20` → `^26` へ変更し `pnpm install` で lockfile 更新(解決結果: 26.6.6)。実行環境は `.node-version` = 26(実機 v26.13.0)で型定義とランタイムが一致した
+- 型差分による typecheck/test の失敗・コード修正はゼロだった(Node 20→26 の型差分が本コードベースの使用APIに非該当)
+
+### 変更ファイル
+
+- `package.json`: `@types/node` の specifier のみ
+- `pnpm-lock.yaml`: `@types/node@20.19.43` → `@types/node@26.6.6`(直接依存 + peer 解決先の next/@vitejs/plugin-react/firebase-tools の参照更新)
+
+### 実行したテスト
+
+- `pnpm install` — 合格
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(先に `pnpm exec next typegen` が必要。worktree 初回は `.next/types` 未生成で `LayoutProps` 未解決になる既知の手順)
+- `pnpm test` — 合格(22ファイル272件、skip 10)
+- `pnpm build` — 合格(全ルート生成)
+- Firebase Emulator tests — 未実施(型定義依存の更新のみで rules・サーバーロジックに変更なし)
+
+### 未解決事項・次の担当者への注意事項
+
+- ci-node-version タスク時点の未解決事項「`@types/node` が `^20` のまま」を本タスクで解消済み
+- `next typegen` 前に `pnpm typecheck` を実行すると `LayoutProps` 未解決で落ちるのは worktree 初期状態の既知事項であり、@types/node 更新とは無関係(AGENTS.md の環境節にも手順追加候補)
+
 ## 2026-11-02: E2Eカバレッジ拡大(未カバー画面・ロール・請求/締めの分岐)
 
 - Worktree: e2e-coverage

@@ -5,17 +5,25 @@ import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import {
-  approveTransactionSuggestionAction,
   confirmTransactionAction,
   createTransaction,
   deleteTransaction,
   listTransactions,
-  rejectTransactionSuggestionAction,
   updateTransaction,
 } from "@/lib/actions/transactions";
 import type { Transaction } from "@/lib/accounting/types";
-import { callApi } from "@/lib/api-client";
-import { accountLabel } from "@/lib/accounts";
+import {
+  callApi,
+  decideAiSuggestion,
+  fetchAiSuggestions,
+  runAiSuggestion,
+} from "@/lib/api-client";
+import { transactionPatchFromSuggestion } from "@/lib/ai/apply";
+import {
+  isUnresolvedSuggestion,
+  type AISuggestionJSON,
+} from "@/lib/ai/types";
+import { ACCOUNT_OPTIONS, accountLabel } from "@/lib/accounts";
 import {
   currentMonthKey,
   formatMonthKey,
@@ -39,7 +47,6 @@ import {
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
 import { AiSuggestionCard } from "@/components/ai-suggestion-card";
-import { TransactionAIPanel } from "./transaction-ai-panel";
 import { TransactionForm } from "./transaction-form";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -50,11 +57,15 @@ const TYPE_LABELS: Record<string, string> = {
 
 function TransactionRow({
   transaction: t,
+  suggestions,
   existingTransactions,
   canEdit,
   onChanged,
 }: {
   transaction: Transaction;
+  /** この取引を対象とするAI提案(新しい順) */
+  suggestions: AISuggestionJSON[];
+  /** 重複チェック等の照合対象とする同月の取引一覧 */
   existingTransactions: Transaction[];
   canEdit: boolean;
   onChanged: () => void;
@@ -102,7 +113,7 @@ function TransactionRow({
         </td>
         <td className="whitespace-nowrap">
           <StatusBadge kind="transaction" status={t.status} />
-          {t.aiSuggestion?.status === "pending" && (
+          {suggestions.some(isUnresolvedSuggestion) && (
             <span className="ml-1">
               <Badge tone="indigo">AI提案</Badge>
             </span>
@@ -121,45 +132,59 @@ function TransactionRow({
               className="flex flex-col gap-3 py-2"
               onClick={(e) => e.stopPropagation()}
             >
-              {t.aiSuggestion && (
+              {suggestions.map((s) => (
                 <AiSuggestionCard
-                  suggestion={t.aiSuggestion}
+                  key={s.id}
+                  suggestion={s}
                   busy={busy}
-                  onApprove={
-                    canEdit && mutable
+                  acceptLabel={
+                    transactionPatchFromSuggestion(s)
+                      ? "提案を採用して反映"
+                      : "提案を採用する"
+                  }
+                  onAccept={
+                    canEdit
                       ? () =>
-                          run(() =>
-                            callApi(() =>
-                              approveTransactionSuggestionAction(
-                                businessId ?? "",
-                                t.id,
-                              ),
-                            ),
-                          )
+                          run(async () => {
+                            await decideAiSuggestion(
+                              businessId ?? "",
+                              s.id,
+                              "accepted",
+                            );
+                            // 採用の反映は別ステップ: 提案値をユーザー操作で
+                            // 確定フィールドへコピーする(ADR-0005)
+                            const patch = transactionPatchFromSuggestion(s);
+                            if (patch && mutable) {
+                              await callApi(() =>
+                                updateTransaction(businessId ?? "", t.id, {
+                                  type: t.type,
+                                  date: t.date,
+                                  amount: t.amount,
+                                  account: patch.account ?? t.account,
+                                  counterparty: t.counterparty || undefined,
+                                  description:
+                                    patch.description ??
+                                    (t.description || undefined),
+                                }),
+                              );
+                            }
+                          })
                       : undefined
                   }
                   onReject={
-                    canEdit && mutable
+                    canEdit
                       ? () =>
                           run(() =>
-                            callApi(() =>
-                              rejectTransactionSuggestionAction(
-                                businessId ?? "",
-                                t.id,
-                              ),
+                            decideAiSuggestion(
+                              businessId ?? "",
+                              s.id,
+                              "rejected",
                             ),
                           )
                       : undefined
                   }
                 />
-              )}
-
-              <TransactionAIPanel
-                transaction={t}
-                existingTransactions={existingTransactions}
-                canEdit={canEdit && mutable}
-                onChanged={onChanged}
-              />
+              ))}
 
               {editing ? (
                 <TransactionForm
@@ -194,6 +219,80 @@ function TransactionRow({
                         確定する
                       </Button>
                     )}
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        run(() =>
+                          runAiSuggestion(
+                            businessId ?? "",
+                            "account_suggestion",
+                            { type: "transaction", id: t.id },
+                            {
+                              counterparty: t.counterparty,
+                              description: t.description,
+                              date: t.date,
+                              amount: t.amount,
+                              accountCandidates: ACCOUNT_OPTIONS.map(
+                                (a) => a.code,
+                              ),
+                            },
+                          ),
+                        )
+                      }
+                      disabled={busy}
+                    >
+                      科目をAI提案
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        run(() =>
+                          runAiSuggestion(
+                            businessId ?? "",
+                            "transaction_description",
+                            { type: "transaction", id: t.id },
+                            {
+                              counterparty: t.counterparty,
+                              date: t.date,
+                              type: t.type,
+                              amount: t.amount,
+                            },
+                          ),
+                        )
+                      }
+                      disabled={busy}
+                    >
+                      摘要をAI提案
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        run(() =>
+                          runAiSuggestion(
+                            businessId ?? "",
+                            "duplicate_detection",
+                            { type: "transaction", id: t.id },
+                            {
+                              transaction: {
+                                id: t.id,
+                                amount: t.amount,
+                                date: t.date,
+                              },
+                              existingTransactions: existingTransactions.map(
+                                (x) => ({
+                                  id: x.id,
+                                  amount: x.amount,
+                                  date: x.date,
+                                }),
+                              ),
+                            },
+                          ),
+                        )
+                      }
+                      disabled={busy}
+                    >
+                      重複チェック
+                    </Button>
                     <Button
                       variant="secondary"
                       onClick={() => setEditing(true)}
@@ -246,20 +345,34 @@ export function TransactionsScreen() {
   const [formBusy, setFormBusy] = useState(false);
 
   const range = useMemo(() => monthKeyDateRange(monthKey), [monthKey]);
-  const { data, initialLoading, error, reload } = useApiData(
-    () =>
+  const { data, initialLoading, error, reload } = useApiData(async () => {
+    const [transactions, suggestions] = await Promise.all([
       callApi(() =>
         listTransactions(businessId ?? "", {
           startDate: range.startDate,
           endDate: range.endDate,
         }),
       ),
-    [businessId, range.startDate, range.endDate],
-  );
+      businessId
+        ? fetchAiSuggestions(businessId, { targetType: "transaction" })
+        : Promise.resolve([]),
+    ]);
+    return { transactions, suggestions };
+  }, [businessId, range.startDate, range.endDate]);
+
+  const suggestionsByTarget = useMemo(() => {
+    const map = new Map<string, AISuggestionJSON[]>();
+    for (const s of data?.suggestions ?? []) {
+      const list = map.get(s.target.id) ?? [];
+      list.push(s);
+      map.set(s.target.id, list);
+    }
+    return map;
+  }, [data?.suggestions]);
 
   const filtered = useMemo(
     () =>
-      (data ?? []).filter(
+      (data?.transactions ?? []).filter(
         (t) =>
           (typeFilter === "" || t.type === typeFilter) &&
           (statusFilter === "" || t.status === statusFilter),
@@ -340,7 +453,7 @@ export function TransactionsScreen() {
       ) : filtered.length === 0 ? (
         <EmptyState
           title={
-            data !== undefined && data.length > 0
+            data !== undefined && data.transactions.length > 0
               ? "条件に一致する取引がありません"
               : `${formatMonthKey(monthKey)}の取引はまだありません`
           }
@@ -368,7 +481,8 @@ export function TransactionsScreen() {
                 <TransactionRow
                   key={t.id}
                   transaction={t}
-                  existingTransactions={data ?? []}
+                  suggestions={suggestionsByTarget.get(t.id) ?? []}
+                  existingTransactions={data?.transactions ?? []}
                   canEdit={canEdit}
                   onChanged={reload}
                 />

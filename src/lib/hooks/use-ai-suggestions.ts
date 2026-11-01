@@ -1,6 +1,6 @@
 "use client";
 
-import { listAISuggestions } from "@/lib/ai/client";
+import { fetchAiSuggestions } from "@/lib/api-client";
 import type { SuggestionKind, SuggestionTarget } from "@/lib/ai/types";
 import { useApiData } from "./use-api-data";
 
@@ -16,7 +16,7 @@ export function useAISuggestions(
   return useApiData(
     () =>
       businessId
-        ? listAISuggestions(businessId, {
+        ? fetchAiSuggestions(businessId, {
             targetType: target.type,
             targetId: target.id,
             kind,

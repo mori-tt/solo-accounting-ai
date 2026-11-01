@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AISuggestionDTO } from "@/lib/ai/types";
+import type { AISuggestionJSON } from "@/lib/ai/types";
 import { AISuggestionCard } from "./ai-suggestions";
 
 afterEach(cleanup);
 
-function baseSuggestion(overrides: Partial<AISuggestionDTO>): AISuggestionDTO {
+function baseSuggestion(overrides: Partial<AISuggestionJSON>): AISuggestionJSON {
   return {
     id: "sug-1",
     businessId: "biz-1",

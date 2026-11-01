@@ -3,7 +3,7 @@
 import type { Transaction } from "@/lib/accounting/types";
 import type {
   AccountSuggestionPayload,
-  AISuggestionDTO,
+  AISuggestionJSON,
   DuplicateDetectionPayload,
   MonthlyExplanationPayload,
   ReceiptExtractionPayload,
@@ -55,7 +55,7 @@ function SuggestionPayloadBody({
   suggestion,
   resolveTransaction,
 }: {
-  suggestion: AISuggestionDTO;
+  suggestion: AISuggestionJSON;
   resolveTransaction?: (transactionId: string) => Transaction | undefined;
 }) {
   const payload = suggestion.payload;
@@ -160,7 +160,7 @@ function DecideActions({
   onApply,
   onDecide,
 }: {
-  suggestion: AISuggestionDTO;
+  suggestion: AISuggestionJSON;
   busy: boolean;
   onApply?: (value: AppliedSuggestionValue) => void;
   onDecide?: (decision: "accepted" | "rejected") => void;
@@ -219,7 +219,7 @@ export function AISuggestionCard({
   onApply,
   onDecide,
 }: {
-  suggestion: AISuggestionDTO;
+  suggestion: AISuggestionJSON;
   busy?: boolean;
   /** 採否ボタンを出すか(editor権限・対象データが変更可能な場合のみtrue) */
   canDecide?: boolean;

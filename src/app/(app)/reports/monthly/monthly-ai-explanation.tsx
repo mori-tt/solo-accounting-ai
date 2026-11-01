@@ -6,8 +6,11 @@ import { useApp } from "@/components/auth-provider";
 import { Alert, Button, Card, Spinner } from "@/components/ui";
 import { getMonthlyReport } from "@/lib/actions/reports";
 import type { MonthlySummary } from "@/lib/accounting/types";
-import { decideAISuggestion, runAISuggestion } from "@/lib/ai/client";
-import { callApi } from "@/lib/api-client";
+import {
+  callApi,
+  decideAiSuggestion,
+  runAiSuggestion,
+} from "@/lib/api-client";
 import { shiftMonthKey } from "@/lib/format";
 import { useAISuggestions } from "@/lib/hooks/use-ai-suggestions";
 
@@ -60,15 +63,15 @@ export function MonthlyAIExplanation({
       const prev = await callApi(() =>
         getMonthlyReport(businessId ?? "", shiftMonthKey(monthKey, -1)),
       );
-      await runAISuggestion({
-        businessId: businessId ?? "",
-        kind: "monthly_explanation",
-        target: { type: "monthlySummary", id: monthKey },
-        input: {
+      await runAiSuggestion(
+        businessId ?? "",
+        "monthly_explanation",
+        { type: "monthlySummary", id: monthKey },
+        {
           summary: persisted,
           previousSummary: prev.persisted ?? prev.current,
         },
-      });
+      );
     });
 
   return (
@@ -116,11 +119,7 @@ export function MonthlyAIExplanation({
                 canEdit
                   ? (decision) =>
                       void run(() =>
-                        decideAISuggestion({
-                          businessId: businessId ?? "",
-                          suggestionId: s.id,
-                          decision,
-                        }),
+                        decideAiSuggestion(businessId ?? "", s.id, decision),
                       )
                   : undefined
               }

@@ -37,10 +37,10 @@ businesses/{businessId}/auditLogs/{auditLogId}
 
 ```
 receipts(証憑ファイル)
-  → aiSuggestions[type=receipt_extraction]   (OCR抽出結果・サーバー生成)
+  → aiSuggestions[kind=receipt_extraction]   (OCR抽出結果・サーバー生成)
   → ユーザーが内容を確認・修正・確定
   → expenses(確定経費)
-  → aiSuggestions[type=journal_candidate]    (仕訳候補・サーバー生成)
+  → aiSuggestions(仕訳候補・サーバー生成)     ※journalEntries向けのkindは未実装
   → ユーザーが確認・承認
   → journalEntries(status: confirmed)        (確定仕訳)
 ```
@@ -211,25 +211,6 @@ periodIdは `fy{fiscalYear}`(会計年度開始年)で決定的に採番する�
 | resolvedBy | string? | uid |
 | resolvedAt | Timestamp? | |
 
-### businesses/{businessId}/aiSuggestions/{suggestionId}
-
-AI提案。内容の生成はAdmin SDK(Cloud Functions等)のみ。
-クライアントは `status` の承認/却下と `resolvedBy` の記録のみ行える。
-
-| Field | Type | Note |
-|---|---|---|
-| type | string | `receipt_extraction` / `account_suggestion` / `journal_candidate` / `duplicate_detection` / `monthly_explanation` |
-| targetPath | string | 対象ドキュメントのパス(receipt/transaction/expense等) |
-| suggestion | map | 提案内容(科目・金額・日付・取引先など) |
-| confidence | number | 信頼度 0.0-1.0 |
-| status | string | `pending` / `accepted` / `rejected` |
-| createdAt | Timestamp | サーバー生成日時 |
-| resolvedBy | string? | 承認/却下したuid |
-| resolvedAt | Timestamp? | |
-
-※ `transactions`/`receipts` の `aiSuggestion` フィールドは廃止し、
-本コレクションへ移行した(ADR-0005)。
-
 ### businesses/{businessId}/monthlySummaries/{yyyyMM}
 
 | Field | Type | Note |
@@ -244,12 +225,15 @@ AI提案。内容の生成はAdmin SDK(Cloud Functions等)のみ。
 | Field | Type | Note |
 |---|---|---|
 | actorUid | string | |
-| action | string | `create` / `update` / `delete` / `close` / `approve_ai` / `reject_ai` / `ai_suggest` |
+| action | string | `create` / `update` / `delete` / `close` / `run_ai` / `approve_ai` / `reject_ai` |
 | targetPath | string | 対象ドキュメントのパス |
 | createdAt | Timestamp | |
 
 ※ 個人情報・証憑内容のスナップショットは保存しない。対象の識別情報のみ記録する。
 AI関連のactionは `run_ai` / `approve_ai` / `reject_ai` を使う。
+
+※ `transactions`/`receipts` の `aiSuggestion` mapフィールドは廃止済み(ADR-0005)。
+AI提案はすべて `aiSuggestions` コレクションで管理する。
 
 ### businesses/{businessId}/aiSuggestions/{suggestionId}
 

@@ -6,12 +6,19 @@ import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import {
   archiveReceiptAction,
-  decideReceiptSuggestionAction,
   linkReceipt,
   listReceipts,
 } from "@/lib/actions/receipts";
 import { listTransactions } from "@/lib/actions/transactions";
-import { callApi } from "@/lib/api-client";
+import {
+  callApi,
+  decideAiSuggestion,
+  fetchAiSuggestions,
+} from "@/lib/api-client";
+import {
+  isUnresolvedSuggestion,
+  type AISuggestionJSON,
+} from "@/lib/ai/types";
 import { accountLabel } from "@/lib/accounts";
 import { formatDateTime, formatYen } from "@/lib/format";
 import type { Receipt, ReceiptStatus, Transaction } from "@/lib/accounting/types";
@@ -57,11 +64,14 @@ function ReceiptImage({ receipt }: { receipt: Receipt }) {
 function ReceiptRow({
   receipt,
   transactions,
+  suggestions,
   canEdit,
   onChanged,
 }: {
   receipt: Receipt;
   transactions: Transaction[];
+  /** この証憑を対象とするAI提案(新しい順) */
+  suggestions: AISuggestionJSON[];
   canEdit: boolean;
   onChanged: () => void;
 }) {
@@ -111,7 +121,7 @@ function ReceiptRow({
       </td>
       <td className="align-top">
         <StatusBadge kind="receipt" status={receipt.status} />
-        {receipt.aiSuggestion?.status === "pending" && (
+        {suggestions.some(isUnresolvedSuggestion) && (
           <span className="ml-1">
             <Badge tone="indigo">AI提案</Badge>
           </span>
@@ -119,21 +129,20 @@ function ReceiptRow({
       </td>
       <td className="align-top">
         <div className="flex flex-col gap-2">
-          {receipt.aiSuggestion && (
-            <div className="max-w-md">
+          {suggestions.map((s) => (
+            <div key={s.id} className="max-w-md">
               <AiSuggestionCard
-                suggestion={receipt.aiSuggestion}
+                suggestion={s}
+                pendingLabel="領収書"
                 busy={busy}
-                onApprove={
+                onAccept={
                   canEdit && receipt.status !== "archived"
                     ? () =>
                         run(() =>
-                          callApi(() =>
-                            decideReceiptSuggestionAction(
-                              businessId ?? "",
-                              receipt.id,
-                              "approved",
-                            ),
+                          decideAiSuggestion(
+                            businessId ?? "",
+                            s.id,
+                            "accepted",
                           ),
                         )
                     : undefined
@@ -142,19 +151,17 @@ function ReceiptRow({
                   canEdit && receipt.status !== "archived"
                     ? () =>
                         run(() =>
-                          callApi(() =>
-                            decideReceiptSuggestionAction(
-                              businessId ?? "",
-                              receipt.id,
-                              "rejected",
-                            ),
+                          decideAiSuggestion(
+                            businessId ?? "",
+                            s.id,
+                            "rejected",
                           ),
                         )
                     : undefined
                 }
               />
             </div>
-          )}
+          ))}
 
           {canEdit && receipt.status === "unprocessed" && (
             <div className="flex flex-col gap-2">
@@ -253,7 +260,7 @@ export function ReceiptsScreen() {
   const [file, setFile] = useState<File | null>(null);
 
   const { data, initialLoading, error, reload } = useApiData(async () => {
-    const [receipts, transactions] = await Promise.all([
+    const [receipts, transactions, suggestions] = await Promise.all([
       callApi(() => listReceipts(businessId ?? "")),
       callApi(() =>
         listTransactions(businessId ?? "", {
@@ -261,9 +268,22 @@ export function ReceiptsScreen() {
           endDate: "9999-12-31",
         }),
       ),
+      businessId
+        ? fetchAiSuggestions(businessId, { targetType: "receipt" })
+        : Promise.resolve([]),
     ]);
-    return { receipts, transactions };
+    return { receipts, transactions, suggestions };
   }, [businessId]);
+
+  const suggestionsByTarget = useMemo(() => {
+    const map = new Map<string, AISuggestionJSON[]>();
+    for (const s of data?.suggestions ?? []) {
+      const list = map.get(s.target.id) ?? [];
+      list.push(s);
+      map.set(s.target.id, list);
+    }
+    return map;
+  }, [data?.suggestions]);
 
   const filtered = useMemo(
     () =>
@@ -396,6 +416,7 @@ export function ReceiptsScreen() {
                   key={r.id}
                   receipt={r}
                   transactions={data?.transactions ?? []}
+                  suggestions={suggestionsByTarget.get(r.id) ?? []}
                   canEdit={canEdit}
                   onChanged={reload}
                 />
