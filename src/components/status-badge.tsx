@@ -33,7 +33,7 @@ const PROJECT_STATUS: Record<string, { label: string; tone: Tone }> = {
 };
 
 const PERIOD_STATUS: Record<string, { label: string; tone: Tone }> = {
-  open: { label: "オープン", tone: "green" },
+  open: { label: "未締め", tone: "green" },
   closed: { label: "締め済み", tone: "gray" },
 };
 

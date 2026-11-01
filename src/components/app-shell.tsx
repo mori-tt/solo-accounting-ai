@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   Field,
+  formIssuesMessage,
   LoadingBlock,
   NumberInput,
   Select,
@@ -75,7 +76,7 @@ function BusinessOnboarding() {
     };
     const parsed = parseForm(businessSchema, input);
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setBusy(true);
@@ -99,7 +100,11 @@ function BusinessOnboarding() {
         <p className="mt-1 text-sm text-zinc-500">
           経理データは事業(Business)ごとに管理されます。
         </p>
-        <form onSubmit={submit} className="mt-4 flex flex-col gap-3">
+        <form
+          onSubmit={submit}
+          noValidate
+          className="mt-4 flex flex-col gap-3"
+        >
           <Field label="事業名">
             <TextInput
               value={name}
@@ -114,6 +119,7 @@ function BusinessOnboarding() {
               min={1}
               max={12}
               onChange={(e) => setStartMonth(e.target.value)}
+              required
             />
           </Field>
           <Field label="消費税の課税方式">

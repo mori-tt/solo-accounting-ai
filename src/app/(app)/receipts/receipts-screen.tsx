@@ -13,7 +13,7 @@ import {
 import { listTransactions } from "@/lib/actions/transactions";
 import { callApi } from "@/lib/api-client";
 import { accountLabel } from "@/lib/accounts";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatYen } from "@/lib/format";
 import type { Receipt, ReceiptStatus, Transaction } from "@/lib/accounting/types";
 import {
   Alert,
@@ -24,6 +24,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  FileInput,
   LoadingBlock,
   PageHeader,
   Select,
@@ -85,6 +86,9 @@ function ReceiptRow({
   };
 
   const linkable = transactions.filter((t) => t.status !== "locked");
+  const linkedTx = receipt.transactionId
+    ? transactions.find((t) => t.id === receipt.transactionId)
+    : undefined;
 
   return (
     <tr>
@@ -98,7 +102,10 @@ function ReceiptRow({
         </p>
         {receipt.status === "linked" && receipt.transactionId && (
           <p className="mt-1 text-xs text-zinc-500">
-            紐付け先: {receipt.transactionId}
+            紐付け先:{" "}
+            {linkedTx
+              ? `${linkedTx.date} / ${accountLabel(linkedTx.account)} / ${formatYen(linkedTx.amount)}`
+              : receipt.transactionId}
           </p>
         )}
       </td>
@@ -163,7 +170,7 @@ function ReceiptRow({
                       {linkable.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.date} / {accountLabel(t.account)} /{" "}
-                          {t.amount.toLocaleString("ja-JP")}円
+                          {formatYen(t.amount)}
                           {t.counterparty ? ` / ${t.counterparty}` : ""}
                         </option>
                       ))}
@@ -319,14 +326,13 @@ export function ReceiptsScreen() {
         <Card className="mb-6">
           <form
             onSubmit={upload}
+            noValidate
             className="flex flex-wrap items-end gap-3"
           >
             <Field label="領収書ファイル(JPEG/PNG/WebP/PDF・10MBまで)">
-              <input
-                type="file"
+              <FileInput
                 accept="image/jpeg,image/png,image/webp,application/pdf"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                className="text-sm"
                 required
               />
             </Field>
@@ -349,9 +355,9 @@ export function ReceiptsScreen() {
           onChange={(e) => setStatusFilter(e.target.value)}
           aria-label="状態で絞り込み"
         >
-          <option value="">すべて</option>
+          <option value="">すべての状態</option>
           <option value="unprocessed">未処理のみ</option>
-          <option value="linked">紐付け済み</option>
+          <option value="linked">紐付済み</option>
           <option value="archived">アーカイブ済み</option>
         </Select>
       </div>
@@ -363,8 +369,8 @@ export function ReceiptsScreen() {
       ) : filtered.length === 0 ? (
         <EmptyState
           title={
-            statusFilter === "unprocessed"
-              ? "未処理の領収書はありません"
+            (data?.receipts.length ?? 0) > 0
+              ? "条件に一致する領収書がありません"
               : "領収書がまだありません"
           }
           description={

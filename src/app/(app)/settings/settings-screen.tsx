@@ -28,6 +28,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  formIssuesMessage,
   LoadingBlock,
   NumberInput,
   PageHeader,
@@ -72,7 +73,7 @@ function BusinessSettingsCard() {
       taxMode,
     });
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setBusy(true);
@@ -95,12 +96,13 @@ function BusinessSettingsCard() {
     <Card>
       <h2 className="mb-3 text-sm font-semibold">事業情報</h2>
       {isOwner ? (
-        <form onSubmit={submit} className="flex flex-col gap-3">
+        <form onSubmit={submit} noValidate className="flex flex-col gap-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="事業名">
               <TextInput
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                required
               />
             </Field>
             <Field label="会計年度の開始月">
@@ -110,6 +112,7 @@ function BusinessSettingsCard() {
                 max={12}
                 step={1}
                 onChange={(e) => setStartMonth(e.target.value)}
+                required
               />
             </Field>
             <Field label="消費税の課税方式">
@@ -174,7 +177,7 @@ function MembersCard() {
     e.preventDefault();
     const parsed = parseForm(memberInviteSchema, { email, role });
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setBusy(true);
@@ -218,7 +221,7 @@ function MembersCard() {
       ) : initialLoading ? (
         <LoadingBlock />
       ) : !data || data.length === 0 ? (
-        <EmptyState title="メンバーがいません" />
+        <EmptyState title="メンバーがまだいません" />
       ) : (
         <table className={tableClass}>
           <thead>
@@ -274,34 +277,44 @@ function MembersCard() {
         </table>
       )}
 
+      {error && (
+        <Alert tone="error" className="mt-3">
+          {error}
+        </Alert>
+      )}
+
       {isOwner && (
         <form
           onSubmit={invite}
-          className="mt-4 flex flex-wrap items-end gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-800"
+          noValidate
+          className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800"
         >
-          <Field label="メンバー招待(メールアドレス)">
-            <TextInput
-              type="email"
-              className="w-64"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="user@example.com"
-              required
-            />
-          </Field>
-          <Field label="ロール">
-            <Select
-              value={role}
-              onChange={(e) => setRole(e.target.value as "editor" | "viewer")}
-            >
-              <option value="editor">編集者</option>
-              <option value="viewer">閲覧者</option>
-            </Select>
-          </Field>
-          <Button type="submit" loading={busy}>
-            招待する
-          </Button>
-          {error && <Alert tone="error">{error}</Alert>}
+          <div className="flex flex-wrap items-end gap-2">
+            <Field label="メンバー招待(メールアドレス)">
+              <TextInput
+                type="email"
+                className="w-64"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+                required
+              />
+            </Field>
+            <Field label="ロール">
+              <Select
+                value={role}
+                onChange={(e) =>
+                  setRole(e.target.value as "editor" | "viewer")
+                }
+              >
+                <option value="editor">編集者</option>
+                <option value="viewer">閲覧者</option>
+              </Select>
+            </Field>
+            <Button type="submit" loading={busy}>
+              招待する
+            </Button>
+          </div>
         </form>
       )}
 
@@ -337,7 +350,7 @@ function NewBusinessCard() {
       taxMode,
     });
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setBusy(true);
@@ -361,13 +374,14 @@ function NewBusinessCard() {
   return (
     <Card>
       <h2 className="mb-3 text-sm font-semibold">新しい事業を作成</h2>
-      <form onSubmit={submit} className="flex flex-col gap-3">
+      <form onSubmit={submit} noValidate className="flex flex-col gap-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="事業名">
             <TextInput
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例: 山田太郎商店"
+              required
             />
           </Field>
           <Field label="会計年度の開始月">
@@ -377,6 +391,7 @@ function NewBusinessCard() {
               max={12}
               step={1}
               onChange={(e) => setStartMonth(e.target.value)}
+              required
             />
           </Field>
           <Field label="消費税の課税方式">

@@ -14,6 +14,7 @@ import {
   Button,
   Card,
   Field,
+  formIssuesMessage,
   TextInput,
 } from "@/components/ui";
 import { loginSchema, parseForm } from "@/lib/validation/schemas";
@@ -57,7 +58,7 @@ export function LoginScreen() {
     e.preventDefault();
     const parsed = parseForm(loginSchema, { email, password });
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setBusy(true);
@@ -124,7 +125,11 @@ export function LoginScreen() {
           ))}
         </div>
 
-        <form onSubmit={submit} className="mt-4 flex flex-col gap-3">
+        <form
+          onSubmit={submit}
+          noValidate
+          className="mt-4 flex flex-col gap-3"
+        >
           <Field label="メールアドレス">
             <TextInput
               type="email"

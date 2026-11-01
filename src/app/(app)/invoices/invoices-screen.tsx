@@ -14,7 +14,7 @@ import {
   type InvoiceRow,
 } from "@/lib/actions/sales";
 import { callApi } from "@/lib/api-client";
-import { todayDateString } from "@/lib/format";
+import { formatYen, todayDateString } from "@/lib/format";
 import {
   invoiceSchema,
   parseForm,
@@ -28,6 +28,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  formIssuesMessage,
   LoadingBlock,
   NumberInput,
   PageHeader,
@@ -92,7 +93,7 @@ function InvoiceForm({
     };
     const parsed = parseForm(invoiceSchema, input);
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setError(undefined);
@@ -111,7 +112,7 @@ function InvoiceForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form onSubmit={submit} noValidate className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="顧客">
           <Select
@@ -120,6 +121,7 @@ function InvoiceForm({
               setCustomerId(e.target.value);
               setProjectId("");
             }}
+            required
           >
             <option value="">選択してください</option>
             {customers.map((c) => (
@@ -170,6 +172,7 @@ function InvoiceForm({
               placeholder="例: デザイン制作費"
               value={item.description}
               onChange={(e) => setItem(idx, { description: e.target.value })}
+              required
             />
             <NumberInput
               className="w-24"
@@ -178,6 +181,7 @@ function InvoiceForm({
               step={1}
               value={item.quantity}
               onChange={(e) => setItem(idx, { quantity: e.target.value })}
+              required
             />
             <NumberInput
               className="w-32"
@@ -186,6 +190,7 @@ function InvoiceForm({
               step={1}
               value={item.unitPrice}
               onChange={(e) => setItem(idx, { unitPrice: e.target.value })}
+              required
             />
             <Button
               type="button"
@@ -251,12 +256,12 @@ function PaymentForm({
     };
     const parsed = parseForm(paymentSchema, input);
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     if (parsed.data.amount > row.remaining) {
       setError(
-        `入金額が残額(${row.remaining.toLocaleString("ja-JP")}円)を超えています`,
+        `入金額が残額(${formatYen(row.remaining)})を超えています`,
       );
       return;
     }
@@ -278,27 +283,29 @@ function PaymentForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
-      <Field label="入金日">
-        <TextInput
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          required
-        />
-      </Field>
-      <Field label={`入金額(円) / 残額 ${row.remaining.toLocaleString("ja-JP")}円`}>
-        <NumberInput
-          value={amount}
-          min={1}
-          step={1}
-          onChange={(e) => setAmount(e.target.value)}
-          required
-        />
-      </Field>
-      <Button type="submit" loading={busy}>
-        入金を記録
-      </Button>
+    <form onSubmit={submit} noValidate className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="入金日">
+          <TextInput
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label={`入金額(円) / 残額 ${formatYen(row.remaining)}`}>
+          <NumberInput
+            value={amount}
+            min={1}
+            step={1}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+        </Field>
+        <Button type="submit" loading={busy}>
+          入金を記録
+        </Button>
+      </div>
       {error && <Alert tone="error">{error}</Alert>}
     </form>
   );
@@ -312,6 +319,7 @@ export function InvoicesScreen() {
   const [showForm, setShowForm] = useState(false);
   const [payTarget, setPayTarget] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [actionError, setActionError] = useState<string>();
 
   const { data, initialLoading, error, reload } = useApiData(async () => {
     const [rows, customers, projects] = await Promise.all([
@@ -337,9 +345,14 @@ export function InvoicesScreen() {
 
   const issue = async (invoiceId: string) => {
     setBusyIds((s) => new Set(s).add(invoiceId));
+    setActionError(undefined);
     try {
       await callApi(() => issueInvoiceAction(businessId ?? "", invoiceId));
       reload();
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? e.message : "発行に失敗しました",
+      );
     } finally {
       setBusyIds((s) => {
         const n = new Set(s);
@@ -376,6 +389,12 @@ export function InvoicesScreen() {
             onCancel={() => setShowForm(false)}
           />
         </Card>
+      )}
+
+      {actionError && (
+        <Alert tone="error" className="mb-4">
+          {actionError}
+        </Alert>
       )}
 
       {error ? (

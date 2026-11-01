@@ -23,6 +23,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  formIssuesMessage,
   LoadingBlock,
   NumberInput,
   PageHeader,
@@ -56,6 +57,8 @@ export function ExpensesScreen() {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [doneMessage, setDoneMessage] = useState<string>();
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string>();
 
   const { data, initialLoading, error: loadError, reload } = useApiData(
     () => callApi(() => listExpenseRows(businessId ?? "")),
@@ -76,7 +79,7 @@ export function ExpensesScreen() {
     };
     const parsed = parseForm(expenseSchema, input);
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setBusy(true);
@@ -106,14 +109,19 @@ export function ExpensesScreen() {
   };
 
   const markPaid = async (expenseId: string) => {
-    setError(undefined);
+    setPayingId(expenseId);
+    setActionError(undefined);
     try {
       await callApi(() =>
         markExpensePaidAction(businessId ?? "", expenseId, todayDateString()),
       );
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "更新に失敗しました");
+      setActionError(
+        err instanceof Error ? err.message : "更新に失敗しました",
+      );
+    } finally {
+      setPayingId(null);
     }
   };
 
@@ -126,7 +134,7 @@ export function ExpensesScreen() {
 
       {canEdit ? (
         <Card className="mb-6">
-          <form onSubmit={submit} className="flex flex-col gap-3">
+          <form onSubmit={submit} noValidate className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Field label="日付">
                 <TextInput
@@ -225,6 +233,11 @@ export function ExpensesScreen() {
       )}
 
       <h2 className="mb-3 text-sm font-semibold">登録済みの経費</h2>
+      {actionError && (
+        <Alert tone="error" className="mb-3">
+          {actionError}
+        </Alert>
+      )}
       {loadError ? (
         <ErrorState message={loadError} onRetry={reload} />
       ) : initialLoading ? (
@@ -281,9 +294,14 @@ export function ExpensesScreen() {
                     {expense.paidAt ? (
                       <Badge tone="green">支払済 {expense.paidAt}</Badge>
                     ) : (
-                      <Badge tone="amber">
-                        未払{expense.paymentDueDate ? ` ${expense.paymentDueDate}まで` : ""}
-                      </Badge>
+                      <>
+                        <Badge tone="amber">未払</Badge>
+                        {expense.paymentDueDate && (
+                          <span className="ml-1 text-xs text-zinc-400">
+                            期日 {expense.paymentDueDate}
+                          </span>
+                        )}
+                      </>
                     )}
                   </td>
                   <td>
@@ -299,6 +317,7 @@ export function ExpensesScreen() {
                       {!expense.paidAt && transaction?.status !== "locked" && (
                         <Button
                           variant="secondary"
+                          loading={payingId === expense.id}
                           onClick={() => void markPaid(expense.id)}
                         >
                           支払済にする

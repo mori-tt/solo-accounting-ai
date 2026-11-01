@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Transaction } from "@/lib/accounting/types";
-import { accountOptionsFor } from "@/lib/accounts";
+import { accountLabel, accountOptionsFor } from "@/lib/accounts";
 import {
   parseForm,
   transactionSchema,
@@ -13,6 +13,7 @@ import {
   Alert,
   Button,
   Field,
+  formIssuesMessage,
   NumberInput,
   Select,
   TextInput,
@@ -67,7 +68,7 @@ export function TransactionForm({
     };
     const parsed = parseForm(transactionSchema, input);
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setError(undefined);
@@ -79,7 +80,7 @@ export function TransactionForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form onSubmit={submit} noValidate className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="種別">
           <Select
@@ -128,7 +129,7 @@ export function TransactionForm({
             ))}
             {account &&
               !accounts.some((a) => a.code === account) && (
-                <option value={account}>{account}</option>
+                <option value={account}>{accountLabel(account)}</option>
               )}
           </Select>
         </Field>
