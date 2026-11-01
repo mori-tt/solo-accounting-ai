@@ -16,6 +16,47 @@
 
 ## Log
 
+## 2026-11-02: 全データJSONバックアップ/復元(Issue #47)
+- Worktree: backup-restore
+依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
+
+### 実装内容
+- `src/lib/backup.ts`(新規): businessスコープの全データを1つのJSON(`version:1`付き)にエクスポート/復元するロジック。クライアント側でもzodスキーマを使うため firebase-admin の値importは持たない(`import type`のみ)
+  - `BACKUP_COLLECTIONS`: firestore.rulesの実在14コレクション(members/customers/projects/transactions/expenses/receipts/invoices/payments/journalEntries/fiscalPeriods/closingChecks/aiSuggestions/monthlySummaries/auditLogs)。`idempotencyKeys`は内部機構、`users`はbusinessIdスコープ外のため対象外
+  - `backupFileSchema`(zod): version=1固定・businessId必須・各docは`id`必須のlooseObject。businessはname/fiscalYearStartMonth/taxModeのみpartial受理(ownerUid等はstripで落とす)。未知コレクションは受理して前方互換
+  - `exportBusinessBackup(db,businessId)`: businessドキュメント+全コレクションを取得しJSON化(Timestamp→ISO文字列、docデータ内idよりdoc.idを正とする)
+  - `planRestore`(純粋関数): ID衝突解決の書き込み計画。衝突時は新規採番し参照フィールド(transactionId/receiptId/customerId/projectId/invoiceId/receiptIds/fiscalPeriodId/sourceId/target.id)を張替。docデータ内の`businessId`/`targetPath`も復元先へ書き換え
+  - `restoreBusinessBackup(db,...)`: 既存IDを`listDocuments()`で収集→planRestore→400件ずつbatch commit。businessドキュメントは許可フィールドのみmerge
+- `src/app/api/backup/route.ts`(新規):
+  - `GET ?businessId=` → `requireEditor`(owner/editor)でJSONをattachmentダウンロード
+  - `POST {businessId,backup}` → `requireOwner`で復元。content-length上限64MB・zod再検証・auditLogsへ`update`記録
+- `src/app/(app)/backup/page.tsx` + `backup-screen.tsx`(新規): エクスポートボタン(blob→ダウンロード)・JSON選択→クライアント側zod検証→コレクション別件数プレビュー→ConfirmDialog経由で復元実行。復元はownerのみUI表示
+- `src/lib/api-client.ts`: `restoreBackup`追加
+- `src/components/app-shell.tsx`: ナビに「バックアップ」1行追加
+- `src/lib/backup.test.ts`(新規): 12件。スキーマ受理/拒否、summarize、planRestore(新規採番・参照張替・固定ID skip・protectedUids・パス書換・ファイル内重複ID・未知コレクション)
+
+### 設計上の判断
+- **復元はowner限定**(エクスポートはowner/editor): members復元による権限昇格・auditLogs偽装・締め済みデータ改変を防ぐため
+- **固定IDコレクション**(members=uid/fiscalPeriods=fy{year}/monthlySummaries=yyyyMM)は新規採番すると意味が壊れるため、衝突時は既存維持でskip。それ以外の衝突は新規採番
+- **protectedUids**: 復元実行者・business.ownerUidのmemberドキュメントは常にskipし、自己降格・ロックアウトを防止
+- **復元はマージ型**: 既存データの削除・上書きは行わない(set先は必ず未使用ID)
+- **`*At`フィールドの日時復元**: 時刻部(T)を持つISO文字列のみDate化→Timestamp。`paidAt`等のYYYY-MM-DD文字列は文字列のまま維持(toStoreの無条件`*At`変換と異なり型を壊さない)
+- 証憑のstoragePathはファイル実体の場所を指すため復元時も書き換えない(ファイル本体のコピーは範囲外)
+
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm lint` — 合格(既存warning 1件のみ: receiptsの`<img>`)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 実行後)
+- `pnpm test` — 合格(30ファイル377件、skip 10)
+- `pnpm build` — 合格(`/api/backup`が動的ルート、`/backup`が静的ページとして登録)
+- Firebase Emulator tests — 該当なし(backup.tsは純粋関数を単体テスト。Rules変更なし)
+
+### 未解決事項・次の担当者への注意事項
+- 復元の書き込みはバッチ400件単位の逐次commitで全件アトミックではない。大量データの復元途中失敗は部分適用になりうる(監査ログは成功時のみ記録)
+- 証憑ファイル本体(Storageオブジェクト)はバックアップ対象外。別businessIdへの復元時、storagePathは元businessのパスのまま(アクセス可否は元事業のmembership依存)
+- 復元にレート制限は未設定(ownerのみの低頻度操作想定)。必要ならrate-limit.tsへ追加
+- エミュレータ・実DBでの往復検証は未実施。Emulator環境でのexport→restoreの実動作確認が望ましい
+
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
 ### 実装内容

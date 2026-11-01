@@ -33,6 +33,7 @@ const NAV_ITEMS = [
   { href: "/reports/trial-balance", label: "試算表" },
   { href: "/closing", label: "決算チェック" },
   { href: "/settings", label: "設定" },
+  { href: "/backup", label: "バックアップ" },
 ] as const;
 
 function NavLinks() {
