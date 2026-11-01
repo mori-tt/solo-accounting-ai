@@ -8,6 +8,7 @@ import type {
   SuggestionTargetType,
 } from "@/lib/ai/types";
 import type { ActionResult } from "@/lib/api/result";
+import type { RestoreSummary } from "@/lib/backup";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
 /**
@@ -168,5 +169,23 @@ export async function runReceiptOcr(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ businessId, receiptId }),
+  });
+}
+
+// ---------- バックアップ API(/api/backup) ----------
+
+/**
+ * バックアップJSONを事業へ復元する(ownerのみ)。
+ * backup はクライアント側で backupFileSchema 検証済みのオブジェクト。
+ * 既存データは残り、ID衝突時はサーバー側で新規採番される。
+ */
+export async function restoreBackup(
+  businessId: string,
+  backup: unknown,
+): Promise<RestoreSummary> {
+  return requestJson<RestoreSummary>("/api/backup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ businessId, backup }),
   });
 }
