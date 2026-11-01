@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DomainError, type DomainErrorCode } from "./errors";
 import {
   assertTaxAmountConsistent,
+  computeConsumptionTaxFiling,
   computeConsumptionTaxPayable,
   computeNetAmount,
+  computeTaxableBase,
   computeTaxAmount,
   isTaxableCategory,
   maxPossibleTaxAmount,
@@ -298,6 +300,242 @@ describe("computeConsumptionTaxPayable", () => {
     );
     expectDomainError(
       () => computeConsumptionTaxPayable("none" as never, { outputTax: 0 }),
+      "VALIDATION_FAILED",
+    );
+  });
+});
+
+describe("computeTaxableBase", () => {
+  it("税込対価×100/110を千円未満切捨てする(標準税率)", () => {
+    expect(computeTaxableBase(11_000)).toBe(10_000);
+    expect(computeTaxableBase(1_105_500)).toBe(1_005_000);
+    // 1,234,567 × 10/11 = 1,122,333 → 1,122,000
+    expect(computeTaxableBase(1_234_567)).toBe(1_122_000);
+  });
+
+  it("税込対価×100/108を千円未満切捨てする(軽減税率)", () => {
+    expect(computeTaxableBase(1_080, "reduced")).toBe(1_000);
+    // 1,234,567 × 25/27 = 1,143,117 → 1,143,000
+    expect(computeTaxableBase(1_234_567, "reduced")).toBe(1_143_000);
+  });
+
+  it("税抜換算が千円未満なら課税標準額は0", () => {
+    expect(computeTaxableBase(1_099)).toBe(0);
+    expect(computeTaxableBase(1_099, "reduced")).toBe(1_000);
+    expect(computeTaxableBase(0)).toBe(0);
+  });
+
+  it("負額・小数・不正なrateを拒否する", () => {
+    expectDomainError(() => computeTaxableBase(-1), "INVALID_AMOUNT");
+    expectDomainError(() => computeTaxableBase(1.5), "INVALID_AMOUNT");
+    expectDomainError(
+      () => computeTaxableBase(1_000, "old" as never),
+      "VALIDATION_FAILED",
+    );
+  });
+});
+
+describe("computeConsumptionTaxFiling", () => {
+  it("本則課税・単一税率: 課税標準額→国税7.8%→仕入控除→地方税22/78", () => {
+    // 売上1,100万円(税込)→標準額1,000万→消費税78万
+    // 仕入550万円(税込)→仕入税額39万、差引39万
+    const filing = computeConsumptionTaxFiling("standard", [
+      { rate: "standard", salesYen: 11_000_000, purchasesYen: 5_500_000 },
+    ]);
+    expect(filing).toEqual({
+      mode: "standard",
+      breakdown: [
+        {
+          rate: "standard",
+          taxableBase: 10_000_000,
+          nationalTax: 780_000,
+          deductibleInputTax: 390_000,
+        },
+      ],
+      totalTaxableBase: 10_000_000,
+      nationalTax: 780_000,
+      deductibleInputTax: 390_000,
+      balance: 390_000,
+      nationalTaxPayable: 390_000,
+      localTaxPayable: 110_000,
+      totalPayable: 500_000,
+      nationalTaxRefundable: 0,
+      localTaxRefundable: 0,
+    });
+  });
+
+  it("軽減税率と標準税率を区分して内訳を出す", () => {
+    const filing = computeConsumptionTaxFiling("standard", [
+      { rate: "reduced", salesYen: 555_555 },
+      { rate: "standard", salesYen: 1_111_111, purchasesYen: 2_222_222 },
+    ]);
+    expect(filing.breakdown).toEqual([
+      {
+        rate: "standard",
+        taxableBase: 1_010_000,
+        nationalTax: 78_780,
+        deductibleInputTax: 157_575,
+      },
+      {
+        rate: "reduced",
+        taxableBase: 514_000,
+        nationalTax: 32_073,
+        deductibleInputTax: 0,
+      },
+    ]);
+    expect(filing.totalTaxableBase).toBe(1_524_000);
+    expect(filing.nationalTax).toBe(110_853);
+    expect(filing.deductibleInputTax).toBe(157_575);
+  });
+
+  it("同一税率の項目は合算してから課税標準額を出す", () => {
+    const filing = computeConsumptionTaxFiling("standard", [
+      { rate: "standard", salesYen: 600_000 },
+      { rate: "standard", salesYen: 511_111 },
+    ]);
+    // 合算1,111,111 → net 1,010,100 → base 1,010,000(個別だと別の千円台になる)
+    expect(filing.breakdown[0].taxableBase).toBe(1_010_000);
+  });
+
+  it("控除超過は還付(国税・地方税とも1円精度、百円切捨てなし)", () => {
+    const filing = computeConsumptionTaxFiling("standard", [
+      { rate: "standard", salesYen: 1_111_111, purchasesYen: 2_222_222 },
+      { rate: "reduced", salesYen: 555_555 },
+    ]);
+    // 消費税110,853 - 仕入157,575 = -46,722
+    expect(filing.balance).toBe(-46_722);
+    expect(filing.nationalTaxPayable).toBe(0);
+    expect(filing.localTaxPayable).toBe(0);
+    expect(filing.totalPayable).toBe(0);
+    expect(filing.nationalTaxRefundable).toBe(46_722);
+    // 46,722 × 22/78 = 13,178(割り切れる)
+    expect(filing.localTaxRefundable).toBe(13_178);
+  });
+
+  it("納付額は百円未満切捨て、地方消費税は切捨て前の差引税額が課税標準", () => {
+    // 売上1,105,500(税込)→標準額1,005,000→消費税78,390→差引78,390
+    const filing = computeConsumptionTaxFiling("standard", [
+      { rate: "standard", salesYen: 1_105_500 },
+    ]);
+    expect(filing.balance).toBe(78_390);
+    // 国税は百円未満切捨て
+    expect(filing.nationalTaxPayable).toBe(78_300);
+    // 地方消費税: 78,390(切捨て前)×22/78=22,110→百円切捨て22,100
+    // 切捨て後の78,300を課税標準にすると22,084→22,000になり誤り
+    expect(filing.localTaxPayable).toBe(22_100);
+    expect(filing.totalPayable).toBe(100_400);
+  });
+
+  it("簡易課税はみなし仕入率を消費税額合計に適用する", () => {
+    // 第5種=50%: 消費税156万→控除78万→差引78万
+    const filing = computeConsumptionTaxFiling(
+      "simple",
+      [
+        { rate: "standard", salesYen: 22_000_000 },
+        { rate: "reduced", salesYen: 1_080_000, purchasesYen: 9_999_999 },
+      ],
+      { businessClass: 5 },
+    );
+    expect(filing.nationalTax).toBe(1_560_000 + 62_400);
+    expect(filing.deductibleInputTax).toBe(811_200);
+    // 簡易課税は税率別の仕入税額を算出しない(purchasesYenは使わない)
+    expect(
+      filing.breakdown.every((row) => row.deductibleInputTax === 0),
+    ).toBe(true);
+    expect(filing.balance).toBe(811_200);
+    expect(filing.nationalTaxPayable).toBe(811_200);
+    // 811,200 × 22/78 = 228,800
+    expect(filing.localTaxPayable).toBe(228_800);
+    expect(filing.totalPayable).toBe(1_040_000);
+  });
+
+  it("免税事業者は全額0・内訳なし", () => {
+    const filing = computeConsumptionTaxFiling("exempt", [
+      { rate: "standard", salesYen: 11_000_000, purchasesYen: 5_500_000 },
+    ]);
+    expect(filing).toEqual({
+      mode: "exempt",
+      breakdown: [],
+      totalTaxableBase: 0,
+      nationalTax: 0,
+      deductibleInputTax: 0,
+      balance: 0,
+      nationalTaxPayable: 0,
+      localTaxPayable: 0,
+      totalPayable: 0,
+      nationalTaxRefundable: 0,
+      localTaxRefundable: 0,
+    });
+  });
+
+  it("差引0なら納付・還付とも0", () => {
+    const filing = computeConsumptionTaxFiling("standard", [
+      { rate: "standard", salesYen: 1_100_000, purchasesYen: 1_100_000 },
+    ]);
+    expect(filing.balance).toBe(0);
+    expect(filing.totalPayable).toBe(0);
+    expect(filing.nationalTaxRefundable).toBe(0);
+    expect(filing.localTaxRefundable).toBe(0);
+  });
+
+  it("空の入力は全額0", () => {
+    const filing = computeConsumptionTaxFiling("standard", []);
+    expect(filing.breakdown).toEqual([]);
+    expect(filing.totalPayable).toBe(0);
+  });
+
+  it("簡易課税はbusinessClass必須、他方式では指定不可", () => {
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("simple", [
+          { rate: "standard", salesYen: 1_100_000 },
+        ]),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling(
+          "simple",
+          [{ rate: "standard", salesYen: 1_100_000 }],
+          { businessClass: 7 as never },
+        ),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling(
+          "standard",
+          [{ rate: "standard", salesYen: 1_100_000 }],
+          { businessClass: 5 },
+        ),
+      "VALIDATION_FAILED",
+    );
+  });
+
+  it("負額・小数・不正なrate/modeを拒否する", () => {
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("standard", [
+          { rate: "standard", salesYen: -1 },
+        ]),
+      "INVALID_AMOUNT",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("standard", [
+          { rate: "standard", salesYen: 1_000, purchasesYen: 0.5 },
+        ]),
+      "INVALID_AMOUNT",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("standard", [
+          { rate: "old" as never, salesYen: 1_000 },
+        ]),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () => computeConsumptionTaxFiling("none" as never, []),
       "VALIDATION_FAILED",
     );
   });
