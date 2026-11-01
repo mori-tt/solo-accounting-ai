@@ -16,6 +16,36 @@
 
 ## Log
 
+## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
+- Worktree: custom-accounts
+### 実装内容
+事業ごとに最大50件のカスタム勘定科目・補助科目を定義できる機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `CustomAccount { code, label, kind: income|expense, parentCode?, disabled? }` と `Business.customAccounts?` を追加(businessドキュメント内格納・rules変更なし)
+- `src/lib/accounts.ts`: `ACCOUNT_OPTIONS` は不変のまま、`getAccountOptions(business)`(標準+カスタムをマージ。標準コード衝突・カスタム内重複は無視/先勝ち)、`accountLabelIn(options,code)`、`accountOptionsFor(kind, options)`(無効科目を除外して種別絞り)を追加
+- `src/lib/hooks/use-accounts.ts`(新規): `useApp().business` からマージ済みoptionsと `label`/`optionsFor` を返す共通hook
+- `src/lib/validation/schemas.ts`: `accountCode`(英数+`_`)、`customAccountItemSchema`、`customAccountsSchema`(上限50件・code一意)を追加
+- `src/lib/actions/accounts.ts`(新規): `saveCustomAccounts`(owner限定。zod検証・code一意・標準科目衝突拒否・上限50件をサーバーでも強制、`update_business_settings`監査)と `listUsedAccountCodes`(取引で使用中の科目コード集合を返す)
+- `src/lib/actions/businesses.ts`: `MyBusiness`/`listMyBusinesses`に `customAccounts` を通し、クライアント側hookが追加fetchなしで解決できるようにした
+- `/accounts` 管理ページ新設(`page.tsx`+`accounts-screen.tsx`): 一覧(標準科目+カスタム、親科目名・使用状態・有効/無効)・追加・編集・無効化/有効化・削除。使用中科目は削除ボタンを出さず無効化のみ可能(viewerは閲覧のみ)
+- `app-shell.tsx`: ナビに「勘定科目」を1行追加
+- `src/lib/csv.ts`: `parseTransactionsCsv`/`buildTransactionsCsv`/`transactionToCsvRow` が任意の `options` を受け、科目コード照合・科目名解決をbusiness-awareに。無効科目は取込時エラー、コードはそのまま保持
+- 参照差し替えのみ: 取引フォーム・一覧・CSV取込・経費登録・レシート・ダッシュボード・締め・月次/仕訳帳/総勘定元帳/試算表・AI提案カード/一覧が `useAccounts()`/`useBookAccountLabel()` 経由でカスタム科目を解決。AI `accountCandidates` には有効科目一覧を渡す
+- `src/lib/accounts.test.ts`(新規): マージ・衝突/重複無視・無効科目のlabel解決と絞り込み除外。`src/lib/csv.test.ts`: カスタム科目の受理/無効科目拒否・科目名出力
+- `docs/FIRESTORE_SCHEMA.md`: businessesの `customAccounts` フィールド追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功(/accountsのroute型生成)
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(30ファイル377件、skip 10)
+- `pnpm build` — 合格(`/accounts` が静的ルートとして登録)
+- Emulator系は未実施(rules変更なしのため既存rulesテストで担保)
+### 未解決事項・次の担当者への注意事項
+- code許容文字は `A-Za-z0-9_`(Issueは「英数」だが既存コードに合わせ `_` も許可)。UIのエラーメッセージも同文言
+- `parentCode` は表示用メタデータのみ(集計ロジックには未接続)。科目の親子集計を帳票へ出す場合は別途設計が必要
+- 保存は全体置換(編集競合は後勝ち)。同時編集が問題になる規模なら `updatedAt` 楽観ロックを検討
+- 無効科目は新規選択肢とCSV取込から外れるが、既存取引の表示ラベルとしては解決される(履歴保護のため意図的)
+
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
 ### 実装内容

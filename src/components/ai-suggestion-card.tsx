@@ -5,7 +5,7 @@ import type {
   SuggestionPayload,
 } from "@/lib/ai/types";
 import { isUnresolvedSuggestion } from "@/lib/ai/types";
-import { accountLabel } from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import { formatYen } from "@/lib/format";
 import { Alert, Badge, Button } from "./ui";
 
@@ -24,6 +24,7 @@ const KIND_LABELS: Record<AISuggestionJSON["kind"], string> = {
 };
 
 function PayloadFields({ suggestion }: { suggestion: AISuggestionJSON }) {
+  const { label } = useAccounts();
   const payload = suggestion.payload;
   if (!payload) {
     return (
@@ -60,7 +61,7 @@ function PayloadFields({ suggestion }: { suggestion: AISuggestionJSON }) {
         <ul className="mt-2 flex flex-col gap-1 text-sm">
           {candidates.map((c, i) => (
             <li key={`${c.account}-${i}`}>
-              <span className="font-medium">{accountLabel(c.account)}</span>
+              <span className="font-medium">{label(c.account)}</span>
               <span className="ml-2 text-xs text-zinc-500">
                 {Math.round(c.confidence * 100)}%
               </span>

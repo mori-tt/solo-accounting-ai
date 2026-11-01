@@ -5,7 +5,7 @@ import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getTrialBalanceReport } from "../actions";
-import { bookAccountLabel } from "../account-label";
+import { useBookAccountLabel } from "../account-label";
 import { callApi } from "@/lib/api-client";
 import { currentMonthKey, formatMonthKey } from "@/lib/format";
 import {
@@ -24,6 +24,7 @@ import {
 export function TrialBalanceScreen() {
   useBrowserOnly();
   const { businessId } = useApp();
+  const label = useBookAccountLabel();
 
   const [monthKey, setMonthKey] = useState(currentMonthKey());
 
@@ -83,7 +84,7 @@ export function TrialBalanceScreen() {
             <tbody>
               {data.rows.map((row) => (
                 <tr key={row.account}>
-                  <td>{bookAccountLabel(row.account)}</td>
+                  <td>{label(row.account)}</td>
                   <td className="text-right">
                     <Amount value={row.debitTotal} />
                   </td>

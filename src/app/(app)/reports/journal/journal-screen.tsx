@@ -5,7 +5,7 @@ import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getJournalReport } from "../actions";
-import { bookAccountLabel } from "../account-label";
+import { useBookAccountLabel } from "../account-label";
 import { callApi } from "@/lib/api-client";
 import {
   currentMonthKey,
@@ -26,6 +26,7 @@ import {
 export function JournalScreen() {
   useBrowserOnly();
   const { businessId } = useApp();
+  const label = useBookAccountLabel();
 
   const [monthKey, setMonthKey] = useState(currentMonthKey());
 
@@ -77,11 +78,11 @@ export function JournalScreen() {
                     <td className="whitespace-nowrap">
                       {formatDateJP(e.date)}
                     </td>
-                    <td>{bookAccountLabel(debit.account)}</td>
+                    <td>{label(debit.account)}</td>
                     <td className="text-right">
                       <Amount value={debit.debit} />
                     </td>
-                    <td>{bookAccountLabel(credit.account)}</td>
+                    <td>{label(credit.account)}</td>
                     <td className="text-right">
                       <Amount value={credit.credit} />
                     </td>

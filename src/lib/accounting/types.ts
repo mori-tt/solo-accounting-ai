@@ -27,12 +27,25 @@ export type FiscalPeriodStatus = "open" | "closed";
 
 export type AuditAction = "create" | "update" | "delete" | "close";
 
+/** 事業ごとのカスタム勘定科目・補助科目(businessドキュメント内・最大50件) */
+export interface CustomAccount {
+  /** 科目コード。事業内一意・英数字 */
+  code: string;
+  label: string;
+  kind: "income" | "expense";
+  /** 補助科目の場合の親科目コード(標準科目または他のカスタム科目) */
+  parentCode?: string;
+  /** 無効化すると新規選択肢・照合から外れる(既存取引の表示は維持) */
+  disabled?: boolean;
+}
+
 export interface Business {
   id: string;
   name: string;
   ownerUid: string;
   fiscalYearStartMonth: number;
   taxMode: TaxMode;
+  customAccounts?: CustomAccount[];
   createdAt: string;
   updatedAt: string;
 }

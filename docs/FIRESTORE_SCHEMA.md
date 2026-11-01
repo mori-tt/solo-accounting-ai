@@ -67,6 +67,7 @@ receipts(証憑ファイル)
 | ownerUid | string | 作成者 |
 | fiscalYearStartMonth | number | 会計年度開始月(1-12) |
 | taxMode | string | `exempt` / `simple` / `standard` 消費税課税方式 |
+| customAccounts | object[] | 任意・最大50件。`{ code, label, kind: income\|expense, parentCode?, disabled? }` カスタム勘定科目・補助科目 |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
 

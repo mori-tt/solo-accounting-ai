@@ -23,7 +23,7 @@ import {
   isUnresolvedSuggestion,
   type AISuggestionJSON,
 } from "@/lib/ai/types";
-import { ACCOUNT_OPTIONS, accountLabel } from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import {
   currentMonthKey,
   formatMonthKey,
@@ -73,6 +73,7 @@ function TransactionRow({
   onChanged: () => void;
 }) {
   const { businessId } = useApp();
+  const { label, activeCodes } = useAccounts();
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -103,7 +104,7 @@ function TransactionRow({
       >
         <td className="whitespace-nowrap">{t.date}</td>
         <td>{TYPE_LABELS[t.type] ?? t.type}</td>
-        <td>{accountLabel(t.account)}</td>
+        <td>{label(t.account)}</td>
         <td className="max-w-40 truncate">
           {t.counterparty}
           {t.description && (
@@ -234,9 +235,7 @@ function TransactionRow({
                               description: t.description,
                               date: t.date,
                               amount: t.amount,
-                              accountCandidates: ACCOUNT_OPTIONS.map(
-                                (a) => a.code,
-                              ),
+                              accountCandidates: activeCodes,
                             },
                           ),
                         )
@@ -320,7 +319,7 @@ function TransactionRow({
       <ConfirmDialog
         open={confirmDelete}
         title="取引の削除"
-        message={`${t.date} / ${accountLabel(t.account)} / ${formatYen(t.amount)} を削除します。この操作は取り消せません。`}
+        message={`${t.date} / ${label(t.account)} / ${formatYen(t.amount)} を削除します。この操作は取り消せません。`}
         confirmLabel="削除する"
         loading={busy}
         onCancel={() => setConfirmDelete(false)}
@@ -338,6 +337,7 @@ function TransactionRow({
 export function TransactionsScreen() {
   useBrowserOnly();
   const { businessId, business } = useApp();
+  const { options } = useAccounts();
   const canEdit = business?.role !== "viewer";
 
   const [monthKey, setMonthKey] = useState(currentMonthKey());
@@ -397,7 +397,10 @@ export function TransactionsScreen() {
                 const blob = new Blob(
                   [
                     CSV_UTF8_BOM +
-                      buildTransactionsCsv(data?.transactions ?? []),
+                      buildTransactionsCsv(
+                        data?.transactions ?? [],
+                        options,
+                      ),
                   ],
                   { type: "text/csv;charset=utf-8" },
                 );

@@ -5,7 +5,7 @@ import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getAccountLedgerReport } from "../actions";
-import { bookAccountLabel } from "../account-label";
+import { useBookAccountLabel } from "../account-label";
 import { callApi } from "@/lib/api-client";
 import {
   currentMonthKey,
@@ -29,6 +29,7 @@ import {
 export function LedgerScreen() {
   useBrowserOnly();
   const { businessId } = useApp();
+  const label = useBookAccountLabel();
 
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [account, setAccount] = useState<string>();
@@ -63,7 +64,7 @@ export function LedgerScreen() {
             {data?.accounts.length === 0 && <option value="">-</option>}
             {data?.accounts.map((code) => (
               <option key={code} value={code}>
-                {bookAccountLabel(code)}
+                {label(code)}
               </option>
             ))}
           </Select>
@@ -85,7 +86,7 @@ export function LedgerScreen() {
         <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">
-              {bookAccountLabel(ledger.account)}
+              {label(ledger.account)}
             </h2>
             <div className="flex items-center gap-3 text-xs text-zinc-400">
               <Badge tone="gray">
