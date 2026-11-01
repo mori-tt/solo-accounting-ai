@@ -16,6 +16,39 @@
 
 ## Log
 
+## 2026-11-02: 領収書OCR基盤(Issue #21)
+
+- Worktree: receipt-ocr
+
+### 実装内容
+
+receipt_extraction の `input.ocrText` をサーバーサイドで生成する基盤。依存追加なし(既存 openai@7.43.0 を利用)。
+
+- `src/lib/ai/receipt-ocr.ts` 新規:
+  - `ReceiptOcr`(証憑ファイル→テキスト抽出の抽象化)と `OcrCaller`(1回のOCR呼び出し。llm-provider.tsの `LLMCaller` と同じ注入パターン)
+  - `OpenAIReceiptOcr`: MIMEに応じて画像(JPEG/PNG/WebP/GIF)→`input_image`、PDF→`input_file` のdata URLで Responses API へ送信。HEIC/HEIFはOpenAI非対応のため `provider_error`(画像変換は依存追加になるため対象外)
+  - `createOpenAIOcrCaller`: `store: false` 固定・`assertServerSide`・出力は `{"ocrText": "..."}` の構造化JSON(json_schema strict)に限定してパース・返却。非JSON/欠落は `invalid_response` に正規化
+  - `createReceiptOcr(env)`: `AI_OCR_PROVIDER=openai` + `OPENAI_API_KEY` 時のみ有効。モデルは `OPENAI_OCR_MODEL` → `OPENAI_MODEL` → DEFAULT。未設定/unknown/鍵欠落は null(OCR無効)でフォールバックし本体機能を妨げない
+  - `ReceiptOcrResolver`: AIProviderのデコレータ。receipt_extraction のみ介入し、(1)クライアント指定の ocrText があればそのまま(Emulator/開発用)、(2)未指定なら対象 receipt の `storagePath` からダウンロード→OCR→`input.ocrText` へ注入して inner へ委譲。storagePath は登録済みレコード由来のため任意パス参照は起きない。OCR失敗は service 層で needs_review+retriable として記録される経路
+- `src/lib/api/ai.ts`: `getAISuggestionService()` の provider を `ReceiptOcrResolver(inner=createAIProvider(), ocr=createReceiptOcr(), getReceipt=getStore().getReceipt, downloadFile=Admin SDK)` で構成
+- `.env.example`: AI関連の環境変数(AI_LLM_PROVIDER/AI_OCR_PROVIDER/OPENAI_API_KEY/OPENAI_MODEL/OPENAI_OCR_MODEL)を追記
+- `src/lib/ai/receipt-ocr.test.ts` 新規(@vitest-environment node): ファクトリ分岐、MIME→input種別マッピング、SDKエラーの正規化(証憑内容を含まないこと)、callerの `store:false`・content shape、resolver の委譲/短絡/サイズ上限/404、AISuggestionService 統合(OCR→heuristic→pending提案)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格(要 `pnpm exec next typegen`: LayoutProps は Next 16 生成型で worktree 直後は .next/types が未生成)
+- `pnpm test` — 合格(23ファイル292件、skip 10)
+- `pnpm build` — 合格
+- `pnpm test:rules` — 合格(62件)
+- `pnpm test:emulators` — 合格(7件)
+
+### 未解決事項・次の担当者への注意事項
+
+- worktree 作成直後は `pnpm install` だけでなく `pnpm exec next typegen` も必要(typecheck が LayoutProps で落ちる)。AGENTS.md の Environment 節に追記検討
+- AI_OCR_PROVIDER 未設定の既定動作: クライアント指定 ocrText 必須のまま(未指定は needs_review)。UI からの OCR 実行導線・新旧2系統の統合は Issue #20/#22 側
+- HEIC/HEIF アップロードは現状 OCR 不可(provider_error→needs_review)。対応する場合はアップロード時変換か別OCR系が必要
+- `input_file`/`input_image` のモデル対応は gpt-5系前提。OPENAI_OCR_MODEL で変えられるが非対応モデルはAPIエラーになる
 ## 2026-11-02: 申告レベル消費税計算(Issue #24)
 
 - Worktree: tax-filing-precision
