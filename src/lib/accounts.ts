@@ -37,6 +37,7 @@ export const ACCOUNT_OPTIONS: readonly AccountOption[] = [
   { code: "taxes", label: "租税公課", kind: "expense" },
   { code: "dues", label: "諸会費", kind: "expense" },
   { code: "misc_expense", label: "雑費", kind: "expense" },
+  { code: "depreciation", label: "減価償却費", kind: "expense" },
   { code: "transfer", label: "振替・口座間移動", kind: "any" },
   { code: "other", label: "その他", kind: "any" },
 ] as const;

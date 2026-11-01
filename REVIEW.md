@@ -16,6 +16,39 @@
 
 ## Log
 
+## 2026-11-02: 減価償却(固定資産台帳)(Issue #58)
+- Worktree: depreciation
+### 実装内容
+固定資産の登録・編集・除却と、当年分償却費の経費計上(取引生成)機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `FixedAsset`(name/acquiredDate/acquisitionCost/usefulLifeYears/method/businessRatio/status/disposedDate/lastBookedFiscalYear)、`DepreciationMethod`、`FixedAssetStatus` を追加
+- `src/lib/accounting/domain/depreciation.ts`(新規): 償却計算ドメイン
+  - `fiscalYearEndDepreciation`: 指定会計年度末の償却状態(保有月数・当年償却費・累計償却・帳簿価額)。円・整数、取得・除却は月割り按分、備忘価額1円まで償却(`MEMO_BOOK_VALUE`)
+  - `monthsHeldInFiscalYear`: 会計年度内の保有月数(取得月・除却月を含む。fiscalYearStartMonth 対応)
+  - 定額法: `floor(取得価額×月数/(耐用年数×12))`、定率法: 200%定率法 `floor(期首帳簿価額×2/耐用年数×月数/12)` + 残存耐用月数での均等割が上回る年から定額へ切替(改定償却率・保証率の近似。耐用年数内に帳簿価額1円まで償却が終わる)
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"fixedAssets"`、`AccountingReader` に `getFixedAsset`/`listFixedAssets(businessId, status?)`。`store/firestore.ts`・`store/memory.ts` に実装(status指定時は status+acquiredDate 複合indexで取得日昇順)
+- `src/lib/accounting/services/fixedAssets.ts`(新規): `registerFixedAsset`(active登録・冪等キー)、`updateFixedAsset`、`disposeFixedAsset`(再実行冪等・除却日<取得日は拒否)、`bookCurrentYearDepreciation`(todayが属する会計年度の償却費を資産ごとに `depreciation-{assetId}-{fiscalYear}` 決定的IDの取引として生成。type=expense・科目=`depreciation`・status=draft・日付=年度末日・金額=年間償却費×businessRatioの切り捨て。`assertDateInOpenPeriod` で締め済み期間への計上を拒否、`lastBookedFiscalYear` で冪等)
+- `src/lib/accounts.ts`: 標準科目に `depreciation`(減価償却費・expense)を追加(生成取引の科目)
+- `src/lib/validation/schemas.ts`: `depreciationMethodSchema`/`fixedAssetSchema`/`disposeFixedAssetSchema` 追加
+- `src/lib/actions/fixedAssets.ts`(新規): `listFixedAssetRows`(資産+当年末償却状態+計上済みフラグ)、`createFixedAsset`/`updateFixedAssetAction`/`disposeFixedAssetAction`(requireEditor+zod再検証)、`bookDepreciationForCurrentYear`
+- `firestore.rules`: `fixedAssets` match 追加(members role既存パターン: member読取/canEdit作成更新削除/createdBy一致/createdBy・createdAt不変/`validFixedAsset` フィールド検証)。`firestore.indexes.json`: status ASC+acquiredDate ASC の複合index追加
+- `tests/rules/helpers.ts` に `fixedAsset()`、`tests/rules/firestore.rules.test.ts` に `fixedAssets` describe(読取/作成/他人名義拒否/不正データ拒否/更新・除却/不変フィールド/viewer拒否/削除)
+- `/fixed-assets` ページ新設(`page.tsx`+`fixed-assets-screen.tsx`): 一覧(取得日・取得価額・方法・耐用年数・事業割合・当年償却費[按分後計上額併記]・累計償却・帳簿価額・状態)・登録・編集・除却フォーム・「当年分を経費計上」ボタン(確認ダイアログ→件数通知)。`app-shell.tsx` ナビに「固定資産」1行追加(期首残高の次)
+- `docs/FIRESTORE_SCHEMA.md`: fixedAssets コレクションのフィールド表と計上仕様を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功・依存追加なし
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(/fixed-assets のroute型生成)
+- `pnpm test` — 合格(39ファイル511件、skip 10。`domain/depreciation.test.ts` 15件 + `services/fixedAssets.test.ts` 13件 新規)
+- `pnpm build` — 合格(/fixed-assets が静的路由として生成)
+- `pnpm test:rules` — 合格(2ファイル79件。fixedAssets 7件を含む)
+### 判断事項・次の担当者への注意事項
+- 定率法の改定償却率・保証率は国税庁の償却率表そのものではなく「残存耐用月数での均等割との max」による近似。総償却額・償却完了時期は表と一致するが、年度ごとの額は±1円程度ずれ得る(コードコメントに明記)
+- 償却済み累計・帳簿価額はドキュメントに保存せず毎回再計算するため、計上後に資産情報(取得価額・方法等)を編集すると翌年以降は新パラメータで再計算される(生成済み取引は残る)
+- 除却後の残存帳簿価額(除却損・廃棄処理)や売却益の取引生成は対象外。償却費の計上のみ
+- 帳簿価額・累計償却は「当年末時点の見込み」で表示(画面descriptionに明記)。期首残高連携(資産科目の残高)は未実装
+- 事業割合0%や按分後0円の場合は取引を生成せず lastBookedFiscalYear のみ進める(必要経費に計上できないため)
+- listFixedAssets の status フィルタ(status+acquiredDate index使用)は現状サービスから未使用(全件取得してコード内フィルタ)。active資産のみの照会が必要になった場合に使用する
+- Emulator利用: `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home` export 後 `pnpm test:rules` のみ実行(next dev 未使用)
 ## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
 - Worktree: custom-accounts
 ### 実装内容

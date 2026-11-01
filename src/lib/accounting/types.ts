@@ -203,6 +203,38 @@ export interface FiscalPeriod {
   closedBy?: string;
 }
 
+/** 減価償却方法。straightLine=定額法、decliningBalance=定率法(200%) */
+export type DepreciationMethod = "straightLine" | "decliningBalance";
+
+export type FixedAssetStatus = "active" | "disposed";
+
+/**
+ * 固定資産(減価償却資産)台帳。年度ごとの償却費は
+ * domain/depreciation.ts が取得価額・耐用年数・取得日から再計算する。
+ * 経費計上済み年度は lastBookedFiscalYear で管理し二重計上を防ぐ。
+ */
+export interface FixedAsset {
+  id: string;
+  name: string;
+  /** 取得日 YYYY-MM-DD */
+  acquiredDate: DateString;
+  /** 取得価額(円・整数・正数) */
+  acquisitionCost: number;
+  /** 耐用年数(年・整数) */
+  usefulLifeYears: number;
+  method: DepreciationMethod;
+  /** 事業使用割合(%・0-100整数)。償却費の経費計上額に適用する家事按分 */
+  businessRatio: number;
+  status: FixedAssetStatus;
+  /** 除却日 YYYY-MM-DD。status=disposed のとき設定 */
+  disposedDate?: DateString;
+  /** 最後に償却費を経費計上した会計年度(開始年)。未計上は未設定 */
+  lastBookedFiscalYear?: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AuditLogEntry {
   id: string;
   actorUid: string;

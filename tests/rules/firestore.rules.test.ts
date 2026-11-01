@@ -11,6 +11,7 @@ import {
   closingCheck,
   expense,
   fiscalPeriod,
+  fixedAsset,
   journalEntry,
   OTHER_BIZ,
   OUTSIDER,
@@ -709,6 +710,124 @@ describe("recurringTemplates", () => {
   it("editorは削除できる", async () => {
     await seed(testEnv, { [rPath(BIZ, "r1")]: recurringTemplate() });
     await assertSucceeds(asUser(testEnv, EDITOR).doc(rPath(BIZ, "r1")).delete());
+  });
+});
+
+describe("fixedAssets", () => {
+  const fPath = (biz: string, id: string) =>
+    `businesses/${biz}/fixedAssets/${id}`;
+
+  it("memberは読み取れる", async () => {
+    await seed(testEnv, { [fPath(BIZ, "a1")]: fixedAsset() });
+    await assertSucceeds(asUser(testEnv, VIEWER).doc(fPath(BIZ, "a1")).get());
+    await assertSucceeds(
+      asUser(testEnv, VIEWER)
+        .collection(`businesses/${BIZ}/fixedAssets`)
+        .get(),
+    );
+    await assertFails(asUser(testEnv, OUTSIDER).doc(fPath(BIZ, "a1")).get());
+  });
+
+  it("editorは作成できる、viewerは作成できない", async () => {
+    await assertSucceeds(
+      asUser(testEnv, EDITOR)
+        .doc(fPath(BIZ, "a1"))
+        .set({ ...fixedAsset(), createdBy: EDITOR }),
+    );
+    await assertFails(
+      asUser(testEnv, VIEWER)
+        .doc(fPath(BIZ, "a2"))
+        .set({ ...fixedAsset(), createdBy: VIEWER }),
+    );
+  });
+
+  it("他人名義(createdBy不一致)では作成できない", async () => {
+    await assertFails(
+      asUser(testEnv, EDITOR)
+        .doc(fPath(BIZ, "a1"))
+        .set({ ...fixedAsset(), createdBy: OWNER }),
+    );
+  });
+
+  it("不正なデータでは作成できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a1"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, method: "other" }),
+    );
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a2"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, usefulLifeYears: 0 }),
+    );
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a3"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, businessRatio: 101 }),
+    );
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a4"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, businessRatio: -1 }),
+    );
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a5"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, acquisitionCost: "300000" }),
+    );
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a6"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, acquiredDate: "2026-1-1" }),
+    );
+    await assertFails(
+      editor
+        .doc(fPath(BIZ, "a7"))
+        .set({ ...fixedAsset(), createdBy: EDITOR, status: "gone" }),
+    );
+  });
+
+  it("editorは更新・除却できる", async () => {
+    await seed(testEnv, { [fPath(BIZ, "a1")]: fixedAsset() });
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor.doc(fPath(BIZ, "a1")).update({ businessRatio: 50 }),
+    );
+    await assertSucceeds(
+      editor
+        .doc(fPath(BIZ, "a1"))
+        .update({ status: "disposed", disposedDate: "2026-08-20" }),
+    );
+    // 計上済み管理フィールドの更新(lastBookedFiscalYear)
+    await assertSucceeds(
+      editor.doc(fPath(BIZ, "a1")).update({ lastBookedFiscalYear: 2026 }),
+    );
+  });
+
+  it("createdBy/createdAtは更新で変更できない", async () => {
+    await seed(testEnv, { [fPath(BIZ, "a1")]: fixedAsset() });
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor.doc(fPath(BIZ, "a1")).update({ createdBy: EDITOR }),
+    );
+    await assertFails(
+      editor.doc(fPath(BIZ, "a1")).update({ createdAt: "x" }),
+    );
+  });
+
+  it("viewerは更新・削除できない", async () => {
+    await seed(testEnv, { [fPath(BIZ, "a1")]: fixedAsset() });
+    const viewer = asUser(testEnv, VIEWER);
+    await assertFails(
+      viewer.doc(fPath(BIZ, "a1")).update({ status: "disposed" }),
+    );
+    await assertFails(viewer.doc(fPath(BIZ, "a1")).delete());
+  });
+
+  it("editorは削除できる", async () => {
+    await seed(testEnv, { [fPath(BIZ, "a1")]: fixedAsset() });
+    await assertSucceeds(asUser(testEnv, EDITOR).doc(fPath(BIZ, "a1")).delete());
   });
 });
 

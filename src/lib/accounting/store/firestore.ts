@@ -16,6 +16,8 @@ import type {
   Customer,
   Expense,
   FiscalPeriod,
+  FixedAsset,
+  FixedAssetStatus,
   Invoice,
   MonthlySummary,
   Payment,
@@ -240,6 +242,26 @@ class FirestoreAccountingReader implements AccountingReader {
     );
   }
 
+  getFixedAsset(
+    businessId: string,
+    id: string,
+  ): Promise<FixedAsset | undefined> {
+    return this.readDoc(businessId, "fixedAssets", id);
+  }
+
+  listFixedAssets(
+    businessId: string,
+    status?: FixedAssetStatus,
+  ): Promise<FixedAsset[]> {
+    const base = this.col(businessId, "fixedAssets");
+    // status指定時は取得日昇順の複合indexを使ってソート済みで取る
+    return this.readQuery<FixedAsset>(
+      status === undefined
+        ? base
+        : base.where("status", "==", status).orderBy("acquiredDate", "asc"),
+    );
+  }
+
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,
@@ -336,6 +358,12 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listRecurringTemplates(businessId: string) {
     return this.reader.listRecurringTemplates(businessId);
+  }
+  getFixedAsset(businessId: string, id: string) {
+    return this.reader.getFixedAsset(businessId, id);
+  }
+  listFixedAssets(businessId: string, status?: FixedAssetStatus) {
+    return this.reader.listFixedAssets(businessId, status);
   }
   listPaymentsForInvoice(businessId: string, invoiceId: string) {
     return this.reader.listPaymentsForInvoice(businessId, invoiceId);

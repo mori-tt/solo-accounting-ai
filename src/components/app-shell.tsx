@@ -38,6 +38,7 @@ const NAV_ITEMS = [
   { href: "/accounts", label: "勘定科目" },
   { href: "/allocations", label: "家事按分" },
   { href: "/opening-balances", label: "期首残高" },
+  { href: "/fixed-assets", label: "固定資産" },
   { href: "/audit-log", label: "監査ログ" },
   { href: "/settings", label: "設定" },
   { href: "/backup", label: "バックアップ" },

@@ -4,6 +4,8 @@ import type {
   Customer,
   Expense,
   FiscalPeriod,
+  FixedAsset,
+  FixedAssetStatus,
   Invoice,
   MonthlySummary,
   Payment,
@@ -183,6 +185,32 @@ export class MemoryStore implements AccountingStore {
       "recurringTemplates",
       () => true,
     );
+  }
+
+  getFixedAsset(
+    businessId: string,
+    id: string,
+  ): Promise<FixedAsset | undefined> {
+    return this.get<FixedAsset>(businessId, "fixedAssets", id);
+  }
+
+  async listFixedAssets(
+    businessId: string,
+    status?: FixedAssetStatus,
+  ): Promise<FixedAsset[]> {
+    const all = await this.list<FixedAsset>(
+      businessId,
+      "fixedAssets",
+      (a) => status === undefined || a.status === status,
+    );
+    if (status !== undefined) {
+      all.sort(
+        (a, b) =>
+          a.acquiredDate.localeCompare(b.acquiredDate) ||
+          a.id.localeCompare(b.id),
+      );
+    }
+    return all;
   }
 
   listPaymentsForInvoice(

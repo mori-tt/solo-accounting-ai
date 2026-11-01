@@ -27,6 +27,7 @@ businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/payments/{paymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
 businesses/{businessId}/recurringTemplates/{templateId}
+businesses/{businessId}/fixedAssets/{assetId}
 businesses/{businessId}/fiscalPeriods/{periodId}
 businesses/{businessId}/closingChecks/{checkId}
 businesses/{businessId}/aiSuggestions/{suggestionId}
@@ -202,6 +203,29 @@ receipts(証憑ファイル)
 | dayOfMonth | number | 毎月の生成日(1-31)。その月に存在しない日は末日へ調整 |
 | active | boolean | 無効化は削除ではなく `false` |
 | lastGeneratedMonth | string? | 最後に生成した月(yyyyMM) |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/fixedAssets/{assetId}
+
+固定資産台帳(減価償却資産)。年間償却費・累計償却・帳簿価額は
+`domain/depreciation.ts` が取得情報から再計算する(保存しない)。
+「当年分を経費計上」で年度末日付の取引(`type=expense`・`account=depreciation`・
+`amount=年間償却費×businessRatio`・`id=depreciation-{assetId}-{fiscalYear}`)を
+draft で生成し、`lastBookedFiscalYear` で二重計上を防ぐ。
+
+| Field | Type | Note |
+|---|---|---|
+| name | string | 資産名 |
+| acquiredDate | string | 取得日 YYYY-MM-DD |
+| acquisitionCost | number | 取得価額(円・整数) |
+| usefulLifeYears | number | 耐用年数(年・整数) |
+| method | string | `straightLine`(定額法) / `decliningBalance`(定率法200%) |
+| businessRatio | number | 事業割合(%・0-100整数)。償却費の経費計上額に適用 |
+| status | string | `active` / `disposed` |
+| disposedDate | string? | 除却日 YYYY-MM-DD(status=disposed時) |
+| lastBookedFiscalYear | number? | 最後に償却費を計上した会計年度(開始年) |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
