@@ -1,0 +1,5 @@
+worktree:
+  sharedDirectories:
+    - node_modules
+    - .next
+    - .firebase
