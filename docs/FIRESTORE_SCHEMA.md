@@ -183,8 +183,11 @@ receipts(証憑ファイル)
 
 ### businesses/{businessId}/fiscalPeriods/{periodId}
 
+periodIdは `fy{fiscalYear}`(会計年度開始年)で決定的に採番する。
+
 | Field | Type | Note |
 |---|---|---|
+| fiscalYear | number | 会計年度の開始年 |
 | startDate | string | YYYY-MM-DD |
 | endDate | string | YYYY-MM-DD |
 | status | string | `open` / `closed` |
@@ -240,11 +243,22 @@ AI提案。内容の生成はAdmin SDK(Cloud Functions等)のみ。
 | Field | Type | Note |
 |---|---|---|
 | actorUid | string | |
-| action | string | `create` / `update` / `delete` / `close` / `approve_ai` |
+| action | string | `create` / `update` / `delete` / `close` / `approve_ai` / `reject_ai` / `ai_suggest` |
 | targetPath | string | 対象ドキュメントのパス |
 | createdAt | Timestamp | |
 
 ※ 個人情報・証憑内容のスナップショットは保存しない。対象の識別情報のみ記録する。
+
+### businesses/{businessId}/idempotencyKeys/{hashedKey}
+
+冪等性管理用の内部コレクション。コマンドの冪等キーをSHA-256でハッシュ化したIDで保存し、
+リプレイ時に同じ結果を返す。クライアントから直接操作しない。
+
+| Field | Type | Note |
+|---|---|---|
+| key | string | コマンドの冪等キー |
+| value | map | 初回実行時のコマンド結果 |
+| createdAt | Timestamp | |
 
 ## Storage
 

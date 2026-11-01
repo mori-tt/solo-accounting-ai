@@ -12,29 +12,29 @@
 
 ## Phase 1: Core Accounting
 
-- [ ] Business
-- [ ] Members
-- [ ] Transactions
-- [ ] Expenses
-- [ ] Receipts
-- [ ] Monthly summaries
+- [x] Business
+- [x] Members
+- [x] Transactions
+- [x] Expenses
+- [x] Receipts
+- [x] Monthly summaries
 
 ## Phase 2: Sales and Billing
 
-- [ ] Customers
-- [ ] Projects
-- [ ] Invoices
-- [ ] Payments
-- [ ] Unpaid detection
+- [x] Customers
+- [x] Projects
+- [x] Invoices
+- [x] Payments
+- [x] Unpaid detection
 
 ## Phase 3: Closing
 
-- [ ] Closing checklist
-- [ ] Missing receipt check
-- [ ] Unpaid expense check
-- [ ] Unpaid sales check
-- [ ] Fiscal period closing
-- [ ] Audit logs
+- [x] Closing checklist
+- [x] Missing receipt check
+- [x] Unpaid expense check
+- [x] Unpaid sales check
+- [x] Fiscal period closing
+- [x] Audit logs
 
 ## Phase 4: AI
 
@@ -42,3 +42,17 @@
 - [ ] Account suggestion
 - [ ] Duplicate detection
 - [ ] Monthly explanation
+
+## Phase 5: Web UI
+
+- [x] ログイン画面
+- [x] ダッシュボード
+- [x] 取引一覧
+- [x] 経費登録
+- [x] 領収書確認
+- [x] 顧客一覧
+- [x] 案件一覧
+- [x] 請求・入金
+- [x] 月次レポート
+- [x] 決算チェック
+- [x] 設定
