@@ -71,6 +71,17 @@ export const businessSchema = z.object({
     .min(1, "1〜12で入力してください")
     .max(12, "1〜12で入力してください"),
   taxMode: z.enum(["exempt", "simple", "standard"]),
+  /** 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い */
+  allocationRatios: z
+    .record(
+      z.string(),
+      z
+        .number({ error: "事業割合は数値で入力してください" })
+        .int("事業割合は整数で入力してください")
+        .min(0, "事業割合は0〜100で入力してください")
+        .max(100, "事業割合は0〜100で入力してください"),
+    )
+    .optional(),
 });
 export type BusinessInput = z.infer<typeof businessSchema>;
 
@@ -189,6 +200,28 @@ export const paymentSchema = z.object({
   amount: yenAmount,
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
+
+export const recurringTemplateSchema = z.object({
+  name: z.string().min(1, "テンプレート名を入力してください").max(200),
+  type: z.enum(["income", "expense", "transfer"]),
+  account: z.string().min(1, "勘定科目を選択してください"),
+  counterparty: optionalText,
+  description: optionalText,
+  amount: yenAmount,
+  dayOfMonth: z
+    .number({ error: "毎月の日付は数値で入力してください" })
+    .int("1〜31の整数で入力してください")
+    .min(1, "1〜31で入力してください")
+    .max(31, "1〜31で入力してください"),
+});
+export type RecurringTemplateInput = z.infer<typeof recurringTemplateSchema>;
+
+export const recurringTemplateUpdateSchema = recurringTemplateSchema.extend({
+  active: z.boolean(),
+});
+export type RecurringTemplateUpdateInput = z.infer<
+  typeof recurringTemplateUpdateSchema
+>;
 
 // ---------- AI提案 API(api/ai/suggestions) ----------
 

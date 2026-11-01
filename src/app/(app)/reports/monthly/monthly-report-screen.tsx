@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
@@ -10,6 +11,7 @@ import {
 } from "@/lib/actions/reports";
 import { callApi } from "@/lib/api-client";
 import { accountLabel } from "@/lib/accounts";
+import { applyAllocation } from "@/lib/accounting/domain/allocation";
 import {
   currentMonthKey,
   formatDateTime,
@@ -60,10 +62,12 @@ export function MonthlyReportScreen() {
     }
   };
 
+  const ratios = business?.allocationRatios;
+  const hasRatios = ratios !== undefined && Object.keys(ratios).length > 0;
   const rows = data
-    ? Object.entries(data.current.accountBreakdown).sort(([a], [b]) =>
-        a.localeCompare(b),
-      )
+    ? Object.entries(
+        applyAllocation(data.current.accountBreakdown, ratios),
+      ).sort(([a], [b]) => a.localeCompare(b))
     : [];
   const profit = data
     ? data.current.totalIncome - data.current.totalExpense
@@ -131,6 +135,15 @@ export function MonthlyReportScreen() {
                   : "この月の集計はまだ保存されていません(表示は現在値)"}
               </p>
             </div>
+            {hasRatios && (
+              <p className="mb-3 text-xs text-zinc-400">
+                按分率・按分後支出は
+                <Link href="/allocations" className="text-indigo-600 hover:underline dark:text-indigo-400">
+                  家事按分
+                </Link>
+                で設定した事業割合を適用しています(円未満切り捨て)
+              </p>
+            )}
             {rows.length === 0 ? (
               <EmptyState
                 title={`${formatMonthKey(monthKey)}の確定済み取引がありません`}
@@ -143,7 +156,15 @@ export function MonthlyReportScreen() {
                     <th>勘定科目</th>
                     <th className="text-right">収入</th>
                     <th className="text-right">支出</th>
-                    <th className="text-right">差引</th>
+                    {hasRatios && (
+                      <>
+                        <th className="text-right">按分率</th>
+                        <th className="text-right">按分後支出</th>
+                      </>
+                    )}
+                    <th className="text-right">
+                      差引{hasRatios ? "(按分後)" : ""}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -156,8 +177,27 @@ export function MonthlyReportScreen() {
                       <td className="text-right">
                         {v.expense > 0 ? <Amount value={v.expense} /> : "-"}
                       </td>
+                      {hasRatios && (
+                        <>
+                          <td className="text-right">
+                            {v.expense > 0 ? `${v.ratio}%` : "-"}
+                          </td>
+                          <td className="text-right">
+                            {v.expense > 0 ? (
+                              <Amount value={v.allocatedExpense} />
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                        </>
+                      )}
                       <td className="text-right">
-                        <Amount value={v.income - v.expense} colored />
+                        <Amount
+                          value={
+                            v.income - (hasRatios ? v.allocatedExpense : v.expense)
+                          }
+                          colored
+                        />
                       </td>
                     </tr>
                   ))}

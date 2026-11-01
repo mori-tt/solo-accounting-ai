@@ -43,6 +43,8 @@ export interface Business {
   ownerUid: string;
   fiscalYearStartMonth: number;
   taxMode: TaxMode;
+  /** 家事按分の事業割合(%)。科目コード→0-100の整数。未設定科目は100%扱い */
+  allocationRatios?: Record<string, number>;
   /** 年度ごとの期首残高(資産系科目+任意コード)。未設定は空扱い */
   openingBalances?: OpeningBalance[];
   createdAt: string;
@@ -156,6 +158,26 @@ export interface MonthlySummary {
   /** 科目コードごとの収支 */
   accountBreakdown: Record<string, { income: number; expense: number }>;
   computedAt: string;
+}
+
+export interface RecurringTemplate {
+  id: string;
+  name: string;
+  type: TransactionType;
+  /** 勘定科目コード */
+  account: string;
+  counterparty: string;
+  description: string;
+  /** 円・整数・正数 */
+  amount: number;
+  /** 毎月の生成日(1-31)。その月に存在しない日は末日へ調整される */
+  dayOfMonth: number;
+  active: boolean;
+  /** 最後に取引を生成した月(yyyyMM)。未生成は未設定 */
+  lastGeneratedMonth?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface FiscalPeriod {
