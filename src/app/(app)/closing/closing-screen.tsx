@@ -149,54 +149,58 @@ function ChecklistBody({
         count={data.draftTransactions.length}
         tone="red"
       >
-        <table className={tableClass}>
-          <tbody>
-            {data.draftTransactions.map((t) => (
-              <tr key={t.id}>
-                <td className="whitespace-nowrap">{t.date}</td>
-                <td>{accountLabel(t.account)}</td>
-                <td className="text-right">
-                  <Amount value={t.amount} />
-                </td>
-                <td>
-                  <Link
-                    href="/transactions"
-                    className="text-indigo-600 hover:underline dark:text-indigo-400"
-                  >
-                    取引一覧で確定する
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className={tableClass}>
+            <tbody>
+              {data.draftTransactions.map((t) => (
+                <tr key={t.id}>
+                  <td className="whitespace-nowrap">{t.date}</td>
+                  <td>{accountLabel(t.account)}</td>
+                  <td className="text-right">
+                    <Amount value={t.amount} />
+                  </td>
+                  <td>
+                    <Link
+                      href="/transactions"
+                      className="text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      取引一覧で確定する
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section
         title="領収書未添付の確定済み経費"
         count={data.missingReceiptTransactions.length}
       >
-        <table className={tableClass}>
-          <tbody>
-            {data.missingReceiptTransactions.map((t) => (
-              <tr key={t.id}>
-                <td className="whitespace-nowrap">{t.date}</td>
-                <td>{accountLabel(t.account)}</td>
-                <td className="text-right">
-                  <Amount value={t.amount} />
-                </td>
-                <td>
-                  <Link
-                    href="/receipts"
-                    className="text-indigo-600 hover:underline dark:text-indigo-400"
-                  >
-                    領収書を紐付ける
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className={tableClass}>
+            <tbody>
+              {data.missingReceiptTransactions.map((t) => (
+                <tr key={t.id}>
+                  <td className="whitespace-nowrap">{t.date}</td>
+                  <td>{accountLabel(t.account)}</td>
+                  <td className="text-right">
+                    <Amount value={t.amount} />
+                  </td>
+                  <td>
+                    <Link
+                      href="/receipts"
+                      className="text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      領収書を紐付ける
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section
@@ -220,29 +224,31 @@ function ChecklistBody({
         count={data.unpaidExpenses.length}
         tone="red"
       >
-        <table className={tableClass}>
-          <tbody>
-            {data.unpaidExpenses.map((u) => (
-              <tr key={u.expense.id}>
-                <td className="whitespace-nowrap">
-                  {u.transaction?.date ?? "-"}
-                </td>
-                <td>{accountLabel(u.transaction?.account ?? "")}</td>
-                <td>{u.expense.paymentDueDate ?? "期日未設定"}</td>
-                <td className="text-right">
-                  {u.transaction && <Amount value={u.transaction.amount} />}
-                </td>
-                <td>
-                  {u.overdue ? (
-                    <Badge tone="red">期限超過</Badge>
-                  ) : (
-                    <Badge tone="amber">未払</Badge>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className={tableClass}>
+            <tbody>
+              {data.unpaidExpenses.map((u) => (
+                <tr key={u.expense.id}>
+                  <td className="whitespace-nowrap">
+                    {u.transaction?.date ?? "-"}
+                  </td>
+                  <td>{accountLabel(u.transaction?.account ?? "")}</td>
+                  <td>{u.expense.paymentDueDate ?? "期日未設定"}</td>
+                  <td className="text-right">
+                    {u.transaction && <Amount value={u.transaction.amount} />}
+                  </td>
+                  <td>
+                    {u.overdue ? (
+                      <Badge tone="red">期限超過</Badge>
+                    ) : (
+                      <Badge tone="amber">未払</Badge>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section
@@ -250,34 +256,36 @@ function ChecklistBody({
         count={data.unpaidInvoices.length}
         tone="red"
       >
-        <table className={tableClass}>
-          <tbody>
-            {data.unpaidInvoices.map((u) => (
-              <tr key={u.invoice.id}>
-                <td className="whitespace-nowrap">{u.invoice.id}</td>
-                <td>{u.invoice.dueDate}</td>
-                <td className="text-right">
-                  <Amount value={u.remaining} />
-                </td>
-                <td>
-                  {u.overdue ? (
-                    <Badge tone="red">期限超過</Badge>
-                  ) : (
-                    <Badge tone="amber">未入金</Badge>
-                  )}
-                </td>
-                <td>
-                  <Link
-                    href="/invoices"
-                    className="text-indigo-600 hover:underline dark:text-indigo-400"
-                  >
-                    入金を記録する
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className={tableClass}>
+            <tbody>
+              {data.unpaidInvoices.map((u) => (
+                <tr key={u.invoice.id}>
+                  <td className="whitespace-nowrap">{u.invoice.id}</td>
+                  <td>{u.invoice.dueDate}</td>
+                  <td className="text-right">
+                    <Amount value={u.remaining} />
+                  </td>
+                  <td>
+                    {u.overdue ? (
+                      <Badge tone="red">期限超過</Badge>
+                    ) : (
+                      <Badge tone="amber">未入金</Badge>
+                    )}
+                  </td>
+                  <td>
+                    <Link
+                      href="/invoices"
+                      className="text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      入金を記録する
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       {actionError && <Alert tone="error">{actionError}</Alert>}
