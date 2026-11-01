@@ -42,6 +42,8 @@ export interface MyBusiness {
   fiscalYearStartMonth: number;
   taxMode: string;
   customAccounts?: CustomAccount[];
+  /** 家事按分の事業割合(科目コード→0-100)。未設定科目は100%扱い */
+  allocationRatios?: Record<string, number>;
 }
 
 /** ログインユーザーが所属する事業一覧 */
@@ -72,6 +74,7 @@ export async function listMyBusinesses(): Promise<
         fiscalYearStartMonth: business.fiscalYearStartMonth,
         taxMode: business.taxMode,
         customAccounts: business.customAccounts,
+        allocationRatios: business.allocationRatios,
       });
     }
     return result;
@@ -134,6 +137,10 @@ export async function updateBusinessSettings(
         taxMode: parsed.data.taxMode,
         updatedAt: new Date().toISOString(),
       };
+      // 按分タブからの保存時のみ上書き。未指定(従来の設定画面)は現値を維持する
+      if (parsed.data.allocationRatios !== undefined) {
+        next.allocationRatios = parsed.data.allocationRatios;
+      }
       return {
         batch: {
           puts: [{ collection: "businesses" as const, id: businessId, data: next }],

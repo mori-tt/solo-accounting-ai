@@ -22,6 +22,7 @@ import { businessSchema, parseForm } from "@/lib/validation/schemas";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "ダッシュボード" },
   { href: "/transactions", label: "取引一覧" },
+  { href: "/recurring", label: "定期取引" },
   { href: "/expenses/new", label: "経費登録" },
   { href: "/receipts", label: "領収書" },
   { href: "/customers", label: "顧客" },
@@ -33,6 +34,7 @@ const NAV_ITEMS = [
   { href: "/reports/trial-balance", label: "試算表" },
   { href: "/closing", label: "決算チェック" },
   { href: "/accounts", label: "勘定科目" },
+  { href: "/allocations", label: "家事按分" },
   { href: "/opening-balances", label: "期首残高" },
   { href: "/audit-log", label: "監査ログ" },
   { href: "/settings", label: "設定" },

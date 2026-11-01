@@ -10,6 +10,7 @@ import type {
   Project,
   Receipt,
   ReceiptStatus,
+  RecurringTemplate,
   Transaction,
 } from "../types";
 import type {
@@ -165,6 +166,23 @@ export class MemoryStore implements AccountingStore {
 
   listInvoices(businessId: string): Promise<Invoice[]> {
     return this.list<Invoice>(businessId, "invoices", () => true);
+  }
+
+  getRecurringTemplate(
+    businessId: string,
+    id: string,
+  ): Promise<RecurringTemplate | undefined> {
+    return this.get<RecurringTemplate>(businessId, "recurringTemplates", id);
+  }
+
+  listRecurringTemplates(
+    businessId: string,
+  ): Promise<RecurringTemplate[]> {
+    return this.list<RecurringTemplate>(
+      businessId,
+      "recurringTemplates",
+      () => true,
+    );
   }
 
   listPaymentsForInvoice(
