@@ -2,7 +2,8 @@ import {
   assertSuggestionTarget,
   getAISuggestionService,
 } from "@/lib/api/ai";
-import { ApiError, toActionError } from "@/lib/api/result";
+import { aiApiRateLimiter, aiRunRateLimiter } from "@/lib/api/rate-limit";
+import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import {
   listSuggestionQuerySchema,
@@ -13,19 +14,6 @@ import {
 // AIへ渡すinput(JSON)の上限。証憑OCRテキスト(12,000文字)+既存取引一覧程度を
 // 想定し、過大なペイロードでプロバイダ呼び出しが暴走しないよう制限する。
 const MAX_INPUT_JSON_CHARS = 128_000;
-
-function errorResponse(e: unknown): Response {
-  const err = toActionError(e);
-  const status =
-    err.code === "UNAUTHORIZED"
-      ? 401
-      : err.code === "FORBIDDEN"
-        ? 403
-        : err.code === "NOT_FOUND"
-          ? 404
-          : 400;
-  return Response.json({ ok: false, error: err }, { status });
-}
 
 /**
  * 提案一覧の取得。
@@ -41,6 +29,7 @@ export async function GET(request: Request) {
     }
     const q = parsed.data;
     await requireViewer(q.businessId);
+    aiApiRateLimiter.consume(q.businessId);
     const suggestions = await getAISuggestionService().list(q.businessId, {
       targetType: q.targetType,
       targetId: q.targetId,
@@ -50,7 +39,7 @@ export async function GET(request: Request) {
     });
     return Response.json({ ok: true, data: suggestions });
   } catch (e) {
-    return errorResponse(e);
+    return toErrorResponse(e);
   }
 }
 
@@ -72,6 +61,8 @@ export async function POST(request: Request) {
     }
     const { businessId, kind, target, input = {} } = parsed.data;
     const actor = await requireEditor(businessId);
+    // businessId単位の簡易レート制限(最良努力。rate-limit.ts参照)
+    aiRunRateLimiter.consume(businessId);
     await assertSuggestionTarget(businessId, kind, target);
     if (JSON.stringify(input).length > MAX_INPUT_JSON_CHARS) {
       throw new ApiError("INVALID_INPUT", "AIへの入力データが大きすぎます");
@@ -85,6 +76,6 @@ export async function POST(request: Request) {
     });
     return Response.json({ ok: true, data: suggestion });
   } catch (e) {
-    return errorResponse(e);
+    return toErrorResponse(e);
   }
 }

@@ -16,6 +16,46 @@
 
 ## Log
 
+## 2026-11-02: 本番ハードニング(Issue #34)
+
+- Worktree: prod-hardening
+
+### 実装内容
+
+- `src/lib/env.ts`(新規): 起動時env検証。必須 `NEXT_PUBLIC_FIREBASE_*` が
+  空なら `EnvValidationError`(不足キー名を列挙した明確なメッセージ)。
+  本番(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR!=true`)で Emulator host 環境変数が
+  残っていたら console.warn で警告(起動は継続)。
+  `src/lib/firebase/client.ts` の `getFirebaseApp()` から
+  `assertFirebaseClientEnvOnce()` として呼ぶ(検証は1回のみ・失敗時はメモ化しない)
+- エラー境界: `src/app/error.tsx` / `src/app/not-found.tsx` /
+  `src/app/global-error.tsx` を新設(日本語メッセージ・再試行導線)。
+  既存 `src/app/(app)/error.tsx` を拡張(console.error による診断ログ・
+  本番サーバーエラーの digest 表示・ダッシュボードへの復帰導線)
+- `/api/ai/*` への簡易レート制限: `src/lib/api/rate-limit.ts`(新規)。
+  インメモリ Map の固定ウィンドウ方式・businessId単位
+  (サーバーレスではインスタンス単位の最良努力とコメント明記)。
+  提案生成 POST=60回/時、一覧 GET・承認/却下 PATCH=240回/時。
+  超過時は `RateLimitError`→HTTP 429 + `{ok:false,error:{code:"RATE_LIMITED"}}` + Retry-After ヘッダ
+- APIエラーレスポンス統一: `toErrorResponse()` を `src/lib/api/result.ts` に追加し、
+  全 Route Handler(api/ai/*・api/receipts/*・api/session)で共用する形に整理。
+  `/api/session` は `error` が文字列だった非準拠レスポンスを `{code,message}` 形式に修正。
+  あわせて INTERNAL を 400→500 に修正、receipts POST で NOT_FOUND→404 が抜けていたのを統一
+- `ApiError.code` に `RATE_LIMITED` を追加
+- README: 前提(Node 26+/pnpm/JDK 21+)/環境変数・Emulator セットアップ/
+  コマンド一覧(test:rules・test:emulators 追記)/本番 Firebase 切替手順/
+  デプロイ指針を整備。.env.example の変数一覧と整合
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` — 成功
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(26ファイル314件、skip 10。env.test.ts 11件・rate-limit.test.ts 5件を新規追加)
+- `pnpm build` — 成功
+- Emulator・`next dev` は制約により未起動(Rules/E2E テストは未実施)
+
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 
 - Worktree: ai-ui-integration
