@@ -56,6 +56,33 @@
 - 旧税率(3/4/6.3%)適用取引がある課税期間は付表が異なり地方税計算も別式。対象外とした
 - 本関数への入力(税率別・税込対価合計の集計)は Transaction/Expense 側に税率区分フィールドを持ち回る必要があり、集計側の実装は別タスク
 - `domain/`(旧世代)と`services/`(新世代)の2系統併存・TaxCategory表記不統一は従前どおり別タスク
+## 2026-11-02: @types/node を ^20 → ^26 へ更新(Issue #23)
+
+- Worktree: types-node-update
+
+### 実装内容
+
+- `package.json` の devDependencies `@types/node` を `^20` → `^26` へ変更し `pnpm install` で lockfile 更新(解決結果: 26.6.6)。実行環境は `.node-version` = 26(実機 v26.13.0)で型定義とランタイムが一致した
+- 型差分による typecheck/test の失敗・コード修正はゼロだった(Node 20→26 の型差分が本コードベースの使用APIに非該当)
+
+### 変更ファイル
+
+- `package.json`: `@types/node` の specifier のみ
+- `pnpm-lock.yaml`: `@types/node@20.19.43` → `@types/node@26.6.6`(直接依存 + peer 解決先の next/@vitejs/plugin-react/firebase-tools の参照更新)
+
+### 実行したテスト
+
+- `pnpm install` — 合格
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(先に `pnpm exec next typegen` が必要。worktree 初回は `.next/types` 未生成で `LayoutProps` 未解決になる既知の手順)
+- `pnpm test` — 合格(22ファイル272件、skip 10)
+- `pnpm build` — 合格(全ルート生成)
+- Firebase Emulator tests — 未実施(型定義依存の更新のみで rules・サーバーロジックに変更なし)
+
+### 未解決事項・次の担当者への注意事項
+
+- ci-node-version タスク時点の未解決事項「`@types/node` が `^20` のまま」を本タスクで解消済み
+- `next typegen` 前に `pnpm typecheck` を実行すると `LayoutProps` 未解決で落ちるのは worktree 初期状態の既知事項であり、@types/node 更新とは無関係(AGENTS.md の環境節にも手順追加候補)
 
 ## 2026-11-02: E2Eカバレッジ拡大(未カバー画面・ロール・請求/締めの分岐)
 
