@@ -9,6 +9,12 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
+    actionTimeout: 15_000,
+    navigationTimeout: 45_000,
+  },
+  expect: {
+    // dev server の初回コンパイルと Server Action 往復を考慮して長めに
+    timeout: 20_000,
   },
   projects: [
     {
