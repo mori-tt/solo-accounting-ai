@@ -156,6 +156,26 @@ export interface MonthlySummary {
   computedAt: string;
 }
 
+export interface RecurringTemplate {
+  id: string;
+  name: string;
+  type: TransactionType;
+  /** 勘定科目コード */
+  account: string;
+  counterparty: string;
+  description: string;
+  /** 円・整数・正数 */
+  amount: number;
+  /** 毎月の生成日(1-31)。その月に存在しない日は末日へ調整される */
+  dayOfMonth: number;
+  active: boolean;
+  /** 最後に取引を生成した月(yyyyMM)。未生成は未設定 */
+  lastGeneratedMonth?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FiscalPeriod {
   id: string;
   fiscalYear: number;

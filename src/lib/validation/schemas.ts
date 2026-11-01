@@ -183,6 +183,28 @@ export const paymentSchema = z.object({
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
 
+export const recurringTemplateSchema = z.object({
+  name: z.string().min(1, "テンプレート名を入力してください").max(200),
+  type: z.enum(["income", "expense", "transfer"]),
+  account: z.string().min(1, "勘定科目を選択してください"),
+  counterparty: optionalText,
+  description: optionalText,
+  amount: yenAmount,
+  dayOfMonth: z
+    .number({ error: "毎月の日付は数値で入力してください" })
+    .int("1〜31の整数で入力してください")
+    .min(1, "1〜31で入力してください")
+    .max(31, "1〜31で入力してください"),
+});
+export type RecurringTemplateInput = z.infer<typeof recurringTemplateSchema>;
+
+export const recurringTemplateUpdateSchema = recurringTemplateSchema.extend({
+  active: z.boolean(),
+});
+export type RecurringTemplateUpdateInput = z.infer<
+  typeof recurringTemplateUpdateSchema
+>;
+
 // ---------- AI提案 API(api/ai/suggestions) ----------
 
 export const aiTargetTypeSchema = z.enum([

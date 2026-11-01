@@ -46,6 +46,34 @@
 - 按分は表示専用で `monthlySummaries` 等の保存データには反映していない(Issueの「表示列追加レベル」指定どおり)。確定申告出力・決算書で按分額が必要になったら同じ `domain/allocation.ts` を再利用する
 - 割合編集はownerのみ(`updateBusinessSettings` 流用のため)。editorにも開放する場合はaction側の認可変更が必要
 - 按分ページは事業名等の既存値を `useApp().business` から同時送信する。別タブで事業設定を直後に変更した場合に古い値で上書きする可能性がある(設定画面と同じ既知の性質)
+## 2026-11-02: 定期取引テンプレート(Issue #45)
+- Worktree: recurring-tx
+毎月繰り返し発生する取引のテンプレート(recurringTemplates)管理と、「今月分を生成」による取引一括作成。依存追加なし。
+- `src/lib/accounting/types.ts`: `RecurringTemplate` 型追加(name/type/account/counterparty/description/amount/dayOfMonth/active/lastGeneratedMonth?/createdBy/createdAt/updatedAt)
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"recurringTemplates"` 追加。`AccountingReader` に `getRecurringTemplate` / `listRecurringTemplates` 追加。`store/memory.ts`・`store/firestore.ts` に実装
+- `src/lib/accounting/services/recurring.ts`(新規):
+  - `registerRecurringTemplate` — active=true で登録(idempotencyKey対応)
+  - `updateRecurringTemplate` — 全項目更新(createdBy/createdAt維持)
+  - `setRecurringTemplateActive` — 有効/無効切替(同一状態への再実行は冪等)
+  - `generateRecurringTransactions` — 指定月(yyyyMM)に `active && lastGeneratedMonth !== monthKey` のテンプレートから draft 取引を1transactで一括生成。dayOfMonthが月末超過時は末日へ調整(`lastDayOfMonth`)。取引IDは `recurring-{templateId}-{yyyyMM}` で決定的(二重実行・再生成の安全網)。既存取引がある場合は上書きせず lastGeneratedMonth のみ進める。`assertDateInOpenPeriod` で締め済み期間への生成を拒否
+- `src/lib/validation/schemas.ts`: `recurringTemplateSchema`(name/type/account/counterparty?/description?/amount/dayOfMonth)と `recurringTemplateUpdateSchema`(+active)を追加
+- `src/lib/actions/recurring.ts`(新規・Server Actions): `listRecurringTemplates`(requireViewer、createdAt昇順)、`createRecurringTemplate` / `updateRecurringTemplateAction` / `setRecurringTemplateActiveAction` / `generateRecurringForMonth`(すべてrequireEditor)。生成は `{ created }` 件数を返す
+- `firestore.rules`: `recurringTemplates` match追加。get/list=isMember、create=canEdit+`validRecurringTemplate`+createdBy一致、update=canEdit+valid+`unaffected(['createdBy','createdAt'])`、delete=canEdit。`validRecurringTemplate` は name/type/account/amount(int)/dayOfMonth(int 1-31)/active(bool)を検証し、counterparty/description/lastGeneratedMonthは存在時のみstring検証
+- `firestore.indexes.json`: 一覧は全件取得+メモリソートのため複合インデックス不要(変更なし)
+- `src/app/(app)/recurring/`(新規): `page.tsx` + `recurring-screen.tsx`。一覧表(名前/種別/科目/金額/毎月の日/状態/最終生成月)・登録/編集フォーム・無効化/有効化ボタン・「今月分を生成」ボタン(ConfirmDialog→`generateRecurringForMonth`、結果件数をAlert表示)。viewerはボタン類を全て非表示(canEdit=business.role!=="viewer")
+- `src/components/app-shell.tsx`: ナビに「定期取引」1行追加(取引一覧の直下)
+- `docs/FIRESTORE_SCHEMA.md`: recurringTemplatesのコレクション定義を追記
+- `tests/rules/helpers.ts` + `tests/rules/firestore.rules.test.ts`: `recurringTemplate` fixtureと describe ブロック追加(読み取り権限・作成/更新/削除・createdBy不一致・dayOfMonth 0/32・type/amount/active不正・createdBy/createdAt不変性)
+- `src/lib/accounting/services/recurring.test.ts`(新規): 13件。登録・更新・無効化、月末調整(31日→2/28)、同月再実行の冪等性、翌月再生成、無効テンプレート除外、closed期間拒否、不正monthKey拒否
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(30ファイル378件、skip 10)
+- `pnpm build` — 合格(`/recurring` が静的ルートとして登録)
+- `pnpm test:rules` — 合格(2ファイル71件。JAVA_HOME=openjdk@21でEmulator実行)
+- 生成される取引は常に `status="draft"`。「AIだけで仕訳を確定しない」方針に従い、確定は取引一覧側のユーザー操作に委ねる
+- 「今月分を生成」の transact には全体idempotencyKeyを付けていない(月キーで固定すると当月追加されたテンプレートが生成されなくなるため)。代わりに lastGeneratedMonth の読み書き不可分 + 決定的取引ID(`recurring-{templateId}-{yyyyMM}`)で冪等性を担保。Firestore transactionの競合リトライでも重複しない設計
+- テンプレート編集で金額・日付を変更しても、生成済み(lastGeneratedMonth)の月には遡って再生成しない。当月分をやり直したい場合は生成済み取引を削除したうえで lastGeneratedMonth をリセットする運用が必要(画面からは不可・Adminのみ)
+- rules の delete は canEdit 許容(customers/projects と同水準)。要件の操作は無効化(active=false)で実現しており、画面からの削除導線は用意していない
+- E2E(`tests/e2e`)未実施。`/recurring` のE2Eカバレッジは既存画面と同じく別Issue扱い
 ## 2026-11-02: 期首残高/繰越設定(Issue #49)
 - Worktree: opening-balance
 年度ごとの期首残高を business ドキュメントに登録し、総勘定元帳の繰越行・試算表へ反映する機能。依存追加なし。
