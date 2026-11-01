@@ -120,6 +120,7 @@ export const invoiceItemSchema = z.object({
     .int("数量は整数で入力してください")
     .positive("数量は1以上で入力してください"),
   unitPrice: nonNegativeYen,
+  taxRate: z.enum(["standard", "reduced"]).optional(),
 });
 export type InvoiceItemInput = z.infer<typeof invoiceItemSchema>;
 

@@ -48,6 +48,119 @@ describe("registerInvoice", () => {
     expect(invoice.status).toBe("draft");
   });
 
+  it("税率省略の明細は標準税率で税額を算出して保存する", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    const { invoice } = await registerInvoice(store, businessId, actor, {
+      idempotencyKey: "inv-tax",
+      customerId: "c",
+      issueDate: "2025-06-01",
+      dueDate: "2025-06-30",
+      items,
+    });
+    // 200,000円(10%) → 18,181 / 30,000円(10%) → 2,727
+    expect(invoice.taxAmount).toBe(20_908);
+    expect(invoice.items[0].taxRate).toBe("standard");
+    expect(invoice.items[0].taxAmount).toBe(18_181);
+    expect(invoice.items[1].taxAmount).toBe(2_727);
+    const saved = await store.getInvoice(businessId, invoice.id);
+    expect(saved?.taxAmount).toBe(20_908);
+  });
+
+  it("軽減税率8%の明細を混在できる", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    const { invoice } = await registerInvoice(store, businessId, actor, {
+      idempotencyKey: "inv-tax-reduced",
+      customerId: "c",
+      issueDate: "2025-06-01",
+      dueDate: "2025-06-30",
+      items: [
+        {
+          description: "開発費",
+          quantity: 2,
+          unitPrice: 100_000,
+          amount: 200_000,
+          taxRate: "standard",
+        },
+        {
+          description: "食料品",
+          quantity: 1,
+          unitPrice: 30_000,
+          amount: 30_000,
+          taxRate: "reduced",
+        },
+      ],
+    });
+    // 30,000円(8%) → floor(30,000×2/27) = 2,222
+    expect(invoice.items[1].taxAmount).toBe(2_222);
+    expect(invoice.taxAmount).toBe(18_181 + 2_222);
+  });
+
+  it("不正な税率区分を拒否する", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    await expect(
+      registerInvoice(store, businessId, actor, {
+        idempotencyKey: "inv-tax-invalid",
+        customerId: "c",
+        issueDate: "2025-06-01",
+        dueDate: "2025-06-30",
+        items: [
+          {
+            description: "x",
+            quantity: 1,
+            unitPrice: 1_000,
+            amount: 1_000,
+            taxRate: "exempt" as never,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
+  it("明細の taxAmount 指定が再計算値と一致しなければ拒否する", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    await expect(
+      registerInvoice(store, businessId, actor, {
+        idempotencyKey: "inv-item-tax",
+        customerId: "c",
+        issueDate: "2025-06-01",
+        dueDate: "2025-06-30",
+        items: [
+          {
+            description: "x",
+            quantity: 1,
+            unitPrice: 11_000,
+            amount: 11_000,
+            taxAmount: 1_100,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "AMOUNT_MISMATCH" });
+  });
+
+  it("taxAmount 指定が再計算値と一致しなければ拒否する", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    await expect(
+      registerInvoice(store, businessId, actor, {
+        idempotencyKey: "inv-tax-mismatch",
+        customerId: "c",
+        issueDate: "2025-06-01",
+        dueDate: "2025-06-30",
+        items,
+        taxAmount: 999,
+      }),
+    ).rejects.toMatchObject({ code: "AMOUNT_MISMATCH" });
+  });
+
   it("totalAmount 指定が再計算値と一致しなければ拒否する", async () => {
     const env = await setupStore();
     const { store, businessId, actor } = env;
