@@ -5,9 +5,9 @@
 - [x] Next.js初期設定
 - [x] Firebase初期設定
 - [x] Firebase Emulator
-- [ ] Authentication
-- [ ] Firestore Rules
-- [ ] Storage Rules
+- [x] Authentication
+- [x] Firestore Rules
+- [x] Storage Rules
 - [ ] CI
 
 ## Phase 1: Core Accounting

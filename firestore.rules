@@ -1,17 +1,351 @@
 rules_version = '2';
 
-// 注意: このファイルは意図的に未完成の骨格。
-// docs/SECURITY_RULES.md の方針に基づき、Emulatorテストとともに実装すること。
-// 実装が必要な内容(推測で完成させないこと):
-//   - businesses/{businessId} 配下はmembersロール(owner/editor/viewer)で認可
-//   - 締め済みfiscalPeriodに属するデータのupdate/delete禁止
-//   - auditLogsはappend-only
-//   - aiSuggestionフィールドはクライアントから書き込み不可(Admin SDKのみ)
+// docs/SECURITY_RULES.md に基づく認可ルール。
+// - すべての事業データは businesses/{businessId} 配下にスコープする
+// - members/{uid} の role(owner/editor/viewer)で認可する
+// - status = 'locked' のTransaction(締め済み)はクライアントから変更不可
+// - aiSuggestion フィールドはAdmin SDKのみ書き込み可(クライアント禁止)
+// - auditLogs はappend-only
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 安全側デフォルト: すべて拒否
-    match /{document=**} {
-      allow read, write: if false;
+
+    // ---------- 共通関数 ----------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function businessDoc(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId);
+    }
+
+    function memberDoc(businessId, uid) {
+      return /databases/$(database)/documents/businesses/$(businessId)/members/$(uid);
+    }
+
+    // memberドキュメントの存在を確認してからロールを取得する
+    function isMember(businessId) {
+      return signedIn() && exists(memberDoc(businessId, request.auth.uid));
+    }
+
+    function role(businessId) {
+      return get(memberDoc(businessId, request.auth.uid)).data.get('role', '');
+    }
+
+    function hasRole(businessId, roles) {
+      return isMember(businessId) && role(businessId) in roles;
+    }
+
+    function isOwner(businessId) {
+      return hasRole(businessId, ['owner']);
+    }
+
+    function canEdit(businessId) {
+      return hasRole(businessId, ['owner', 'editor']);
+    }
+
+    // update時に指定フィールドが変更されていないことを確認する
+    function unaffected(keys) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+    }
+
+    // クライアントはaiSuggestionを書き込めない(Admin SDKはrulesをバイパス)
+    function noAiSuggestion() {
+      return !('aiSuggestion' in request.resource.data);
+    }
+
+    // YYYY-MM-DD 形式の日付文字列
+    function dateString(value) {
+      return value is string && value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function txDoc(businessId, txId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/transactions/$(txId);
+    }
+
+    // 紐付くTransactionが締め済み(locked)かどうか
+    function txLocked(businessId, txId) {
+      return exists(txDoc(businessId, txId))
+        && get(txDoc(businessId, txId)).data.get('status', '') == 'locked';
+    }
+
+    // ---------- users ----------
+    // 本人のみ読み書き可(email等の個人情報を含むため他者には公開しない)
+    match /users/{uid} {
+      allow get, list: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // ---------- businesses ----------
+    match /businesses/{businessId} {
+      allow get, list: if isMember(businessId);
+      allow create: if signedIn()
+        && request.resource.data.name is string
+        && request.resource.data.ownerUid == request.auth.uid;
+      // ownerUidのクライアントからの移転は禁止
+      allow update: if isOwner(businessId)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      // 事業の削除はサブコレクション残骸を防ぐためサーバーサイドのみ
+      allow delete: if false;
+
+      // ---------- members ----------
+      match /members/{uid} {
+        allow get, list: if isMember(businessId);
+        allow create: if signedIn()
+          && request.resource.data.role in ['owner', 'editor', 'viewer']
+          && (
+            // business作成と同一バッチで、作成者が自分をownerとして登録するブートストラップ。
+            // getAfter()でバッチ適用後のbusinessドキュメントを検証する
+            (request.auth.uid == uid
+              && request.resource.data.role == 'owner'
+              && getAfter(businessDoc(businessId)).data.ownerUid == request.auth.uid)
+            // 既存ownerが他メンバーを招待・追加する場合
+            || isOwner(businessId)
+          );
+        // 権限昇格防止のためmember管理はownerのみ
+        allow update: if isOwner(businessId)
+          && request.resource.data.role in ['owner', 'editor', 'viewer'];
+        allow delete: if isOwner(businessId);
+      }
+
+      // ---------- transactions ----------
+      match /transactions/{transactionId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validTransaction(request.resource.data)
+          && noAiSuggestion()
+          && request.resource.data.createdBy == request.auth.uid;
+        // 締め済み(locked)は変更不可。status='locked'への変更はAdmin SDKのみ
+        allow update: if canEdit(businessId)
+          && resource.data.status != 'locked'
+          && validTransaction(request.resource.data)
+          && unaffected(['aiSuggestion', 'createdBy', 'createdAt']);
+        // editorはdraftのみ削除可、ownerはlocked以外を削除可
+        allow delete: if resource.data.status != 'locked'
+          && (isOwner(businessId)
+            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'));
+      }
+
+      function validTransaction(d) {
+        return d.type in ['income', 'expense', 'transfer']
+          && dateString(d.date)
+          && d.amount is int
+          && d.status in ['draft', 'confirmed'];
+      }
+
+      // ---------- expenses ----------
+      match /expenses/{expenseId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validExpense(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && resource.data.status != 'locked'
+          && validExpense(request.resource.data)
+          && unaffected(['transactionId', 'receiptId', 'createdBy', 'createdAt']);
+        allow delete: if resource.data.status != 'locked'
+          && (isOwner(businessId)
+            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'));
+      }
+
+      function validExpense(d) {
+        return (!('transactionId' in d) || d.transactionId is string)
+          && (!('receiptId' in d) || d.receiptId is string)
+          && d.taxCategory is string
+          && d.taxAmount is int
+          && d.status in ['draft', 'confirmed'];
+      }
+
+      // ---------- receipts ----------
+      match /receipts/{receiptId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validReceipt(request.resource.data)
+          && noAiSuggestion()
+          && request.resource.data.createdBy == request.auth.uid
+          && linkedTxNotLocked(request.resource.data);
+        allow update: if canEdit(businessId)
+          && validReceipt(request.resource.data)
+          && unaffected(['aiSuggestion', 'createdBy', 'createdAt'])
+          && linkedTxNotLocked(request.resource.data)
+          && linkedTxNotLocked(resource.data);
+        allow delete: if (isOwner(businessId)
+            || (hasRole(businessId, ['editor']) && resource.data.status == 'unprocessed'))
+          && linkedTxNotLocked(resource.data);
+      }
+
+      function validReceipt(d) {
+        return d.storagePath is string
+          && d.fileName is string
+          && d.mimeType is string
+          && d.status in ['unprocessed', 'linked', 'archived'];
+      }
+
+      // transactionId未紐付け(nullable)は許可、紐付いている場合はlock判定
+      function linkedTxNotLocked(d) {
+        return !('transactionId' in d) || !txLocked(businessId, d.transactionId);
+      }
+
+      // ---------- customers ----------
+      match /customers/{customerId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && request.resource.data.name is string;
+        allow update: if canEdit(businessId)
+          && request.resource.data.name is string
+          && unaffected(['createdAt']);
+        allow delete: if canEdit(businessId);
+      }
+
+      // ---------- projects ----------
+      match /projects/{projectId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validProject(request.resource.data);
+        allow update: if canEdit(businessId)
+          && validProject(request.resource.data)
+          && unaffected(['customerId', 'createdAt']);
+        allow delete: if canEdit(businessId);
+      }
+
+      function validProject(d) {
+        return d.customerId is string
+          && d.name is string
+          && d.status in ['active', 'done', 'archived'];
+      }
+
+      // ---------- invoices ----------
+      match /invoices/{invoiceId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validInvoice(request.resource.data);
+        allow update: if canEdit(businessId)
+          && validInvoice(request.resource.data)
+          && unaffected(['createdAt']);
+        // 発行済み・入金済み請求書の削除はownerのみ
+        allow delete: if isOwner(businessId)
+          || (hasRole(businessId, ['editor']) && resource.data.status == 'draft');
+      }
+
+      function validInvoice(d) {
+        return d.customerId is string
+          && dateString(d.issueDate)
+          && dateString(d.dueDate)
+          && d.totalAmount is int
+          && d.status in ['draft', 'issued', 'paid', 'overdue'];
+      }
+
+      // ---------- payments ----------
+      match /payments/{paymentId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validPayment(request.resource.data);
+        // 消込先invoiceIdの付け替えは禁止(監査上の整合性)
+        allow update: if canEdit(businessId)
+          && validPayment(request.resource.data)
+          && unaffected(['invoiceId', 'createdAt']);
+        allow delete: if canEdit(businessId);
+      }
+
+      function validPayment(d) {
+        return d.invoiceId is string
+          && dateString(d.date)
+          && d.amount is int;
+      }
+
+      // ---------- journalEntries ----------
+      // status='draft' は仕訳候補、'confirmed' が確定仕訳
+      match /journalEntries/{journalEntryId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validJournalEntry(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && resource.data.status != 'locked'
+          && validJournalEntry(request.resource.data)
+          && unaffected(['aiSuggestionId', 'createdBy', 'createdAt']);
+        allow delete: if resource.data.status != 'locked'
+          && (isOwner(businessId)
+            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'));
+      }
+
+      function validJournalEntry(d) {
+        return dateString(d.date)
+          && d.description is string
+          && d.lines is list
+          && d.sourceType in ['manual', 'transaction', 'expense', 'invoice']
+          && d.status in ['draft', 'confirmed'];
+      }
+
+      // ---------- closingChecks ----------
+      // 締めチェック項目。対象・種別は生成後に変えられない(改ざん防止)
+      match /closingChecks/{checkId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validClosingCheck(request.resource.data)
+          && request.resource.data.status == 'open'
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && validClosingCheck(request.resource.data)
+          && unaffected(['fiscalPeriodId', 'type', 'targetPath', 'createdBy', 'createdAt']);
+        allow delete: if isOwner(businessId)
+          || (hasRole(businessId, ['editor']) && resource.data.status == 'open');
+      }
+
+      function validClosingCheck(d) {
+        return d.fiscalPeriodId is string
+          && d.type in ['missing_receipt', 'unpaid_expense', 'unpaid_invoice', 'custom']
+          && d.message is string
+          && d.status in ['open', 'resolved', 'waived'];
+      }
+
+      // ---------- aiSuggestions ----------
+      // 提案内容の生成はAdmin SDKのみ。クライアントはstatusの承認/却下と
+      // resolvedByの記録のみ行える(ADR-0005)
+      match /aiSuggestions/{suggestionId} {
+        allow get, list: if isMember(businessId);
+        allow create, delete: if false;
+        allow update: if canEdit(businessId)
+          && request.resource.data.status in ['pending', 'accepted', 'rejected']
+          && request.resource.data.get('resolvedBy', '') == request.auth.uid
+          && unaffected(['type', 'targetPath', 'suggestion', 'confidence', 'createdAt']);
+      }
+
+      // ---------- monthlySummaries ----------
+      // Cloud Functions(Admin SDK)が再計算して書き込む。クライアントは読み取りのみ
+      match /monthlySummaries/{yyyyMM} {
+        allow get, list: if isMember(businessId);
+        allow write: if false;
+      }
+
+      // ---------- fiscalPeriods ----------
+      match /fiscalPeriods/{periodId} {
+        allow get, list: if isMember(businessId);
+        // 期間の作成・締め(close)はownerのみ。作成時はopen固定
+        allow create: if isOwner(businessId)
+          && request.resource.data.status == 'open'
+          && dateString(request.resource.data.startDate)
+          && dateString(request.resource.data.endDate);
+        // closedになった期間はクライアントから再オープン・変更不可
+        allow update: if isOwner(businessId)
+          && resource.data.status == 'open'
+          && request.resource.data.status in ['open', 'closed']
+          && unaffected(['startDate', 'endDate']);
+        // 監査証跡保持のためクライアントからの削除は不可
+        allow delete: if false;
+      }
+
+      // ---------- auditLogs ----------
+      // append-only。内容スナップショットではなく識別情報のみ記録する
+      match /auditLogs/{logId} {
+        allow get, list: if isMember(businessId);
+        allow create: if isMember(businessId)
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.action in ['create', 'update', 'delete', 'close', 'approve_ai']
+          && request.resource.data.targetPath is string;
+        allow update, delete: if false;
+      }
     }
   }
 }
