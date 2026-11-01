@@ -34,11 +34,11 @@ test("領収書をアップロードして取引に紐付ける", async ({ page 
     .getByRole("button", { name: "紐付ける", exact: true })
     .click();
 
-  // 既定の「未処理のみ」フィルタからは消え、紐付け済みで表示される
+  // 既定の「未処理のみ」フィルタからは消え、紐付済みで表示される
   await expect(row).not.toBeVisible();
   await page
     .getByRole("combobox", { name: "状態で絞り込み" })
-    .selectOption({ label: "紐付け済み" });
+    .selectOption({ label: "紐付済み" });
   await expect(
     page.getByRole("row", { name: /receipt\.png/ }),
   ).toContainText("紐付済み");
