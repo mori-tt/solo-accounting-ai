@@ -5,7 +5,7 @@ import {
   fallbackReason,
   normalizeAIResponse,
 } from "./schemas";
-import type { AISuggestionStore } from "./store";
+import type { AISuggestionStore, SuggestionListFilter } from "./store";
 import type {
   AISuggestion,
   NewAISuggestion,
@@ -83,6 +83,19 @@ export class AISuggestionService {
 
     const id = await this.store.create(params.businessId, base);
     return this.execute(params.businessId, id, params);
+  }
+
+  /** 単一提案の取得(存在しなければnull) */
+  async get(businessId: string, id: string): Promise<AISuggestion | null> {
+    return this.store.get(businessId, id);
+  }
+
+  /** 提案一覧(createdAt降順)。条件はfilterで絞り込む */
+  async list(
+    businessId: string,
+    filter: SuggestionListFilter = {},
+  ): Promise<AISuggestion[]> {
+    return this.store.list(businessId, filter);
   }
 
   /** 失敗・判断不能の提案を再実行する。accepted/rejectedは再実行不可 */

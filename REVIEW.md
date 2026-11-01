@@ -16,6 +16,43 @@
 
 ## Log
 
+## 2026-11-02: AI提案パイプラインのAPI配線
+
+- Worktree: ai-api-wiring
+- Issue: #11
+
+### 実装内容
+
+- `src/lib/ai`(provider/service/store/schema)を Route Handler 経由でアプリに接続。前タスク(ai-llm-provider)が残した「接続は別タスク」の対応
+- `src/app/api/ai/suggestions/route.ts` 新規:
+  - `GET` 提案一覧。`targetType`/`targetId`/`kind`/`status`/`limit` で絞込、createdAt降順、viewer以上
+  - `POST` 提案実行。`{businessId, kind, target:{type,id}, input?}` を受理、editor以上。kind↔targetType対応と対象のbusinessId内存在を検証してから `AISuggestionService.run` へ。`input` は128KB上限
+- `src/app/api/ai/suggestions/[suggestionId]/route.ts` 新規: `PATCH` で `{businessId, decision: accepted|rejected, rejectReason?}` を受理し `service.accept/reject` を呼ぶ。確定データへの反映は行わない(AI_POLICY準拠)。存在しない提案は404、処理済みは400
+- `src/lib/api/ai.ts` 新規: `getAISuggestionService()`(FirestoreSuggestionStore + createAIProvider、llm-provider.ts記載の想定構成)と `assertSuggestionTarget()`(kind↔targetType対応+対象ドキュメント存在でbusinessId境界を担保)
+- `src/lib/ai/store.ts`: `SuggestionListFilter` 型・`DEFAULT_LIST_LIMIT(50)`/`MAX_LIST_LIMIT(100)`・`list` をインターフェースと InMemory に追加
+- `src/lib/ai/firestore-store.ts`: `list` 実装。複合インデックスを増やさないため単一フィールド等価 `where`(targetId→`target.id`、なければstatus)のみ使い、残りの絞込とcreatedAt降順ソートはメモリ。走査は200件打ち切り
+- `src/lib/ai/service.ts`: `get`/`list` パススルー追加(Route Handlerがサービス経由で完結するよう)
+- `src/lib/ai/types.ts`: `KIND_TARGET_TYPE` 対応表を追加(receipt_extraction→receipt等)
+- `src/lib/validation/schemas.ts`: `runSuggestionSchema`/`decideSuggestionSchema`/`listSuggestionQuerySchema` を追加(zod)
+- 監査は `AISuggestionService` の `appendAudit`(run_ai/approve_ai/reject_ai)が担保。提案・監査ともにサーバーサイド(Admin SDK)のみで、鍵は非NEXT_PUBLIC環境変数
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件は既存 receipts-screen の `<img>`)
+- `pnpm typecheck` — 合格(先に `next typegen` 実行)
+- `pnpm test` — 合格(21ファイル258件、skip 10。新規 `src/lib/ai/store.test.ts` 4件を含む)
+- `pnpm build` — 合格(`/api/ai/suggestions`, `/api/ai/suggestions/[suggestionId]` が dynamic ルートとして認識)
+- `pnpm test:emulators` — 合格(2ファイル7件。JDK21 `JAVA_HOME=/opt/homebrew/opt/openjdk@21/...` 設定で実行。新規 `tests/emulator/aiSuggestionStore.test.ts` でFirestore往復・list・businessId境界を検証)
+
+### 未解決事項・次の担当者への注意事項
+
+- `pnpm test:rules` は未実施。実行時点で別worktreeのEmulator(8080/9099/9199/4400)が起動中で、AGENTS.mdの「Emulatorは全worktree通して1系統」制約に従い見送り(rulesに変更なし。過去例では起動中Emulatorへの直接接続で代替可能)
+- `retry`(needs_review提案の再実行)はサービス層に実装済みだがAPI未公開(Issueの列挙に無いため)。UI配線時に必要ならPATCHか専用ルートで公開
+- rules の aiSuggestions update経路(`resolvedBy`等)は旧フィールド名(`type`/`targetPath`/`suggestion`)前提で、新shape(`kind`/`target`/`payload`/`decidedBy`)ドキュメントには実質機能しない。現状すべての状態解決はPATCH経由(Admin SDK)なので実害なし
+- `firestore.indexes.json` の aiSuggestions索引2件は旧shape向け。新実装のlistはorderBy不使用で参照されない(残置で無害)
+- `createAiSuggestion`(`src/lib/firebase/server.ts`)は旧shapeで未使用のまま。旧 `src/lib/accounting/services/aiSuggestions.ts` 系(ドキュメント内 `aiSuggestion` フィールド)との統合整理は別タスク
+- UI(領収書画面等)からの接続は未着手。本タスクはAPI公開まで
+- 提案実行の `input` はクライアント指定。receipt_extraction には `ocrText` が必要(OCR基盤は別タスク)
 ## 2026-11-02: 死コード削除 `src/lib/firebase/auth.ts`(Issue #13)
 
 - Worktree: dead-code-cleanup
