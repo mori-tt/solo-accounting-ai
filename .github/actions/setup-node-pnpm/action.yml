@@ -1,6 +1,6 @@
 name: Setup Node.js and pnpm
 description: >-
-  Node.js 20 + pnpm(package.json の packageManager バージョン)をセットアップし、
+  Node.js(.node-version) + pnpm(package.json の packageManager バージョン)をセットアップし、
   pnpm store をキャッシュして依存関係をインストールする。
 
 runs:
@@ -15,7 +15,8 @@ runs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20
+        # vitest@5(>=22.12)・firebase-admin@14(>=22)が Node 20 非対応のため .node-version で単一ソース化
+        node-version-file: .node-version
         # pnpm store ディレクトリをキャッシュ(pnpm-lock.yaml をキーに使用)
         cache: pnpm
 
