@@ -175,6 +175,21 @@ export function receipt(status = "unprocessed") {
   };
 }
 
+export function recurringTemplate(extra: Record<string, unknown> = {}) {
+  return {
+    name: "事務所家賃",
+    type: "expense",
+    account: "rent",
+    counterparty: "大家",
+    description: "毎月の家賃",
+    amount: 100000,
+    dayOfMonth: 25,
+    active: true,
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
 export function fiscalPeriod(status: "open" | "closed" = "open") {
   const closed = status === "closed";
   return {

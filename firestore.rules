@@ -278,6 +278,33 @@ service cloud.firestore {
           && d.status in ['draft', 'confirmed'];
       }
 
+      // ---------- recurringTemplates ----------
+      // 定期取引テンプレート。生成された取引は通常のtransactionsに記録される
+      match /recurringTemplates/{templateId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validRecurringTemplate(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && validRecurringTemplate(request.resource.data)
+          && unaffected(['createdBy', 'createdAt']);
+        allow delete: if canEdit(businessId);
+      }
+
+      function validRecurringTemplate(d) {
+        return d.name is string
+          && d.type in ['income', 'expense', 'transfer']
+          && d.account is string
+          && (!('counterparty' in d) || d.counterparty is string)
+          && (!('description' in d) || d.description is string)
+          && d.amount is int
+          && d.dayOfMonth is int
+          && d.dayOfMonth >= 1
+          && d.dayOfMonth <= 31
+          && d.active is bool
+          && (!('lastGeneratedMonth' in d) || d.lastGeneratedMonth is string);
+      }
+
       // ---------- closingChecks ----------
       // 締めチェック項目。対象・種別は生成後に変えられない(改ざん防止)
       match /closingChecks/{checkId} {

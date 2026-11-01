@@ -22,6 +22,7 @@ import type {
   Project,
   Receipt,
   ReceiptStatus,
+  RecurringTemplate,
   Transaction,
 } from "../types";
 import type {
@@ -224,6 +225,21 @@ class FirestoreAccountingReader implements AccountingReader {
     return this.readQuery<Invoice>(this.col(businessId, "invoices"));
   }
 
+  getRecurringTemplate(
+    businessId: string,
+    id: string,
+  ): Promise<RecurringTemplate | undefined> {
+    return this.readDoc(businessId, "recurringTemplates", id);
+  }
+
+  listRecurringTemplates(
+    businessId: string,
+  ): Promise<RecurringTemplate[]> {
+    return this.readQuery<RecurringTemplate>(
+      this.col(businessId, "recurringTemplates"),
+    );
+  }
+
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,
@@ -314,6 +330,12 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listInvoices(businessId: string) {
     return this.reader.listInvoices(businessId);
+  }
+  getRecurringTemplate(businessId: string, id: string) {
+    return this.reader.getRecurringTemplate(businessId, id);
+  }
+  listRecurringTemplates(businessId: string) {
+    return this.reader.listRecurringTemplates(businessId);
   }
   listPaymentsForInvoice(businessId: string, invoiceId: string) {
     return this.reader.listPaymentsForInvoice(businessId, invoiceId);

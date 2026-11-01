@@ -26,6 +26,7 @@ businesses/{businessId}/receipts/{receiptId}
 businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/payments/{paymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
+businesses/{businessId}/recurringTemplates/{templateId}
 businesses/{businessId}/fiscalPeriods/{periodId}
 businesses/{businessId}/closingChecks/{checkId}
 businesses/{businessId}/aiSuggestions/{suggestionId}
@@ -179,6 +180,26 @@ receipts(証憑ファイル)
 | sourceId | string? | 生成元ドキュメントID |
 | aiSuggestionId | string? | 採用したAI提案のID(追跡用・作成時のみ設定) |
 | status | string | `draft` / `confirmed` / `locked`(締め済み) |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/recurringTemplates/{templateId}
+
+定期取引テンプレート。「今月分を生成」操作で指定月の取引(draft)を一括作成する。
+生成済み管理は `lastGeneratedMonth` で行い、同じ月の再生成はしない。
+
+| Field | Type | Note |
+|---|---|---|
+| name | string | テンプレート名 |
+| type | string | `income` / `expense` / `transfer` |
+| account | string | 勘定科目コード |
+| counterparty | string | 取引先名 |
+| description | string | 摘要 |
+| amount | number | 円・整数 |
+| dayOfMonth | number | 毎月の生成日(1-31)。その月に存在しない日は末日へ調整 |
+| active | boolean | 無効化は削除ではなく `false` |
+| lastGeneratedMonth | string? | 最後に生成した月(yyyyMM) |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
