@@ -16,6 +16,28 @@
 
 ## Log
 
+## 2026-11-02: 死コード削除 `src/lib/firebase/auth.ts`(Issue #13)
+
+- Worktree: dead-code-cleanup
+
+### 実装内容
+
+- `src/lib/firebase/auth.ts`(`signInWithGoogle`/`signInWithEmail`/`signUpWithEmail`/`signOut`/`ensureUserDocument`)を削除。ui-polish で `src/lib/firebase/auth-provider.tsx`・`src/app/auth-status.tsx` が削除された結果、参照ゼロになっていた
+- 参照確認: `firebase/auth`・`@/lib/firebase/auth`・`./auth` 相対import・各export関数名を grep。import は npmパッケージ `firebase/auth` へのもののみ(`login-screen.tsx`/`components/auth-provider.tsx`/`client.ts`)、`signOut()` 呼出しは `useApp()` 経由で local 実装を `firebaseSignOut` 直呼びしており、本ファイルへの参照はゼロと確認
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 合格
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(先に `pnpm exec next typegen` が必要。worktree 初回のみ)
+- `pnpm test` — 合格(20ファイル254件、skip 7)
+- `pnpm build` — 合格(全ルート prerender)
+- Firebase Emulator tests — 未実施(クライアント側死コード削除のみ。Rules・サーバーロジックに変更なし)
+
+### 未解決事項・次の担当者への注意事項
+
+- Googleサインイン(`signInWithPopup`/`GoogleAuthProvider`)や初回 `users/{uid}` 作成(`ensureUserDocument`)は現状どの画面からも呼ばれていない。将来 Google ログインを実装する場合は同等処理の再実装が必要
+- REVIEW.md の記法は新しいエントリを `## Log` 直下へ前置する形式のため、末尾ではなく先頭に追記した
 ## 2026-11-02: CI の Node バージョン修正(20 → 26)
 
 - Worktree: ci-node-version
