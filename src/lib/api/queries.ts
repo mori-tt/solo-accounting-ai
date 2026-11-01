@@ -201,6 +201,32 @@ export async function listPaymentsRaw(businessId: string) {
   return snap.docs.map((d) => toPlain({ id: d.id, ...d.data() }));
 }
 
+export interface AuditLogDoc {
+  /** ドキュメントID(.add()経由のログはidフィールドを持たないためdoc.idを使う) */
+  id: string;
+  actorUid?: string;
+  action?: string;
+  targetPath?: string;
+  /** ISO 8601 */
+  createdAt?: string;
+}
+
+/**
+ * auditLogs 一覧。ドメインのlistAuditLogsと違いドキュメントIDを補完する
+ * (.add()で書かれたログはidフィールドを持たない)。
+ * 並び替え・絞り込みは呼び出し側で行う。
+ */
+export async function listAuditLogsRaw(
+  businessId: string,
+): Promise<AuditLogDoc[]> {
+  const snap = await businessDoc(getAdminDb(), businessId)
+    .collection("auditLogs")
+    .get();
+  return snap.docs.map(
+    (d) => toPlain({ ...d.data(), id: d.id }) as AuditLogDoc,
+  );
+}
+
 export async function deleteTransactionDoc(
   businessId: string,
   transactionId: string,
