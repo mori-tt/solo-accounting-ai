@@ -16,6 +16,27 @@
 
 ## Log
 
+## 2026-11-02: 帳簿の印刷出力(仕訳帳・元帳・試算表)(Issue #59)
+- Worktree: ledger-print
+### 実装内容
+`reports/journal`・`reports/ledger`・`reports/trial-balance` の3画面に `window.print()` 印刷対応。依存追加なし。
+- `src/app/globals.css`: `@media print` ブロックを新設(filing-screen の局所 `<style>` と同型のルールをグローバル化+拡張)。`aside`/`header`/`.no-print` を非表示、`main` のpadding除去、`.print-sheet`(カード装飾リセット)、`.print-only`(画面 hidden の印刷専用要素)、`.print-header`(帳票ヘッダ下線)、`.print-table`(罫線濃色化・`thead`/`tfoot` の各ページ繰返し・`tr` 改ページ回避・合計行 `tfoot` の太線強調)を追加。dark mode でも白地黒字で出るよう `body` の色を固定
+- `src/app/(app)/reports/print-header.tsx`(新規): 印刷時だけ出る帳票ヘッダ(帳票名・対象期間・事業名・印刷日)。`hidden`+`.print-only` で画面非表示/印刷表示を両立
+- 3画面とも `PageHeader`+フィルタ(MonthNav/科目Select)・ローディング/エラー/空状態を `.no-print` で囲み、`PageHeader.actions` に「印刷する」ボタン(データなし/0件では disabled)を追加。帳票部は `PrintHeader` + `Card.print-sheet` + `table.print-table`。ledger の対象期間は「月 / 科目名」
+- `src/app/(app)/reports/print-header.test.tsx`(新規): 帳票名・期間・事業名・印刷日の出力と `hidden`/`print-only`/`print-header` クラスを検証
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功。依存追加なし
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(38ファイル485件、skip 10。print-header.test.tsx 2件追加)
+- `pnpm build` — 合格(3ルートとも静的生成)
+- Emulator系は未実施(タスク指定により起動禁止。rules 未変更)
+### 未解決事項・次の担当者への注意事項
+- `@media print` がグローバル化されたため、**全ページ**の印刷で aside/header が非表示になる(元々帳票以外の印刷は想定されていなかったため影響は軽微)。filing-screen の局所 `<style>` は重複するが残置き(変更範囲外)
+- monthly/filing の確認: filing は Issue #42 で印刷対応済み(window.print+no-print+print-sheet)。monthly は印刷ボタン/no-print 指定なしで未対応だが、今回の変更範囲外のため確認のみ(グローバル化によりナビ類は消えるが画面UIはそのまま出る)。対応する場合は別タスクで
+- 印刷日は `todayDateString()` のレンダー時点値(印刷実行時刻とは厳密には異なる)
+- 帳票の @page(用紙サイズ/余白)指定は未追加。ブラウザ既定のまま
+
 ## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
 - Worktree: custom-accounts
 ### 実装内容
