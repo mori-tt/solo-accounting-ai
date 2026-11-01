@@ -16,6 +16,47 @@
 
 ## Log
 
+## 2026-11-02: コアフローのE2Eテスト整備
+
+- Worktree: e2e-core-flows
+
+### 実装内容
+
+- `package.json`: `test:e2e` を `firebase emulators:exec --only auth,firestore,storage --project demo-solo-accounting-ai 'playwright test'` に変更。REVIEW_TEST.md T3 対応 — 従来は Emulator 非起動のまま E2E を実行しており、認証・Server Action 経路が未検証だった。Emulator は実行ごとにメモリ上で初期化されるためテストデータは各実行でクリーン
+- `playwright.config.ts`: `expect.timeout` を 20s、`actionTimeout` 15s、`navigationTimeout` 45s に設定(dev server の初回 Turbopack コンパイルと Server Action 往復を考慮)
+- `e2e/helpers.ts`: E2E共通ヘルパー。`signUp`/`signIn`/`createFirstBusiness`/`signUpAndCreateBusiness`/`signOut`/`createTransactionDraft`/`uniqueEmail`/`datePlusDays`。テスト間の干渉を避けるため、各テストが一意のメールアドレスで新規ユーザーを作成し、専用の事業を作る設計(businessId で自然に分離される)
+- `e2e/fixtures/receipt.png`: 領収書アップロード用の 1x1 PNG
+- 新規 spec(既存 `home.spec.ts` は維持):
+  - `auth.spec.ts`: 新規登録→事業作成→ログアウト→再ログイン(事業引継ぎ)、誤パスワードのエラー表示、未ログイン時の /login リダイレクト
+  - `transactions.spec.ts`: 下書き登録→行展開→確定、状態フィルタ、編集(金額変更)、削除(ConfirmDialog)
+  - `expenses.spec.ts`: 経費登録→一覧表示(未払/下書き)→取引一覧で確定→経費側へ反映、未払→支払済
+  - `sales.spec.ts`: 顧客→案件→請求書作成(下書き)→発行→入金消込→入金済み、顧客未登録時の導線表示
+  - `receipts.spec.ts`: PNG アップロード→未処理→取引へ紐付け→紐付済み、アーカイブ→確認ダイアログ→アーカイブ済み
+  - `closing.spec.ts`: 期間作成→下書きで締め不可→確定→締め実行→取引 locked 化(編集/削除ボタン消失)、月次レポートの科目別内訳と集計保存
+
+### セレクタ上の注意(次の担当者向け)
+
+- `<select>` は `getByLabel` ではなく `getByRole("combobox", { name })` で取ること。`Field` は `<label>` で control を包む構造のため、label テキストに option 群が混入し `exact` 一致が失敗する
+- 金額表示は `formatYen`(ja-JP currency)で全角 `￥`(U+FFE5)になる。アサーションは `￥12,000` のように全角円記号で書く
+- 取引一覧で行展開すると、編集フォーム内 input の value が展開行のアクセシブル名に混入し `getByRole("row", {name})` が複数解決になる。値でなくテキストで絞る場合は `locator("tbody tr", {hasText})` を使う
+- オンボーディングが表示された時点でセッションCookieは設定済み(`/api/session` POST 完了後に signed_in になる)ため、直後に Server Action を呼んでも安全
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(18ファイル213件、skip 7)
+- `pnpm build` — 合格
+- `pnpm test:e2e` — 合格(chromium 15件、約9秒。`JAVA_HOME=/opt/homebrew/opt/openjdk@21` で実行)
+- `pnpm test:rules` — 合格(2ファイル62件)
+
+### 未解決事項・次の担当者への注意事項
+
+- E2E は chromium のみ。firefox/webkit 追加時は projects へ追記 + `playwright install`
+- Emulator 起動には JDK 21+ が必要(PATH が JDK17 なら `JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm test:e2e`)
+- 各テストは毎回 signup→事業作成を UI 経由で行うため多少のオーバーヘッドがある(15件で約9秒)。遅くなったら Emulator REST API 経由のユーザー作成に切替え可能だが、現状は実フローで検証できる利点を優先した
+- カバーしていない領域: 設定画面(メンバー招待・事業設定)、AI提案カードの操作、事業切替(複数事業)、viewer ロールの読み取り専用 UI
+
 ## 2026-11-02: `.next` symlink 除去と main のビルド破壊修復
 
 - Worktree: fix-next-symlink
