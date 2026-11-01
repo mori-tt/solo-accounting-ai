@@ -1,7 +1,10 @@
 "use client";
 
 import {
+  cloneElement,
+  isValidElement,
   useEffect,
+  useId,
   useSyncExternalStore,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -188,10 +191,13 @@ export function Button({
   children,
   ...rest
 }: ButtonProps) {
+  const isDisabled = disabled || loading;
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${buttonVariants[variant]} ${className}`}
-      disabled={disabled || loading}
+      className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 ${buttonVariants[variant]} ${className}`}
+      disabled={isDisabled}
+      aria-disabled={isDisabled || undefined}
+      aria-busy={loading || undefined}
       {...rest}
     >
       {loading && <Spinner className="h-4 w-4 text-current" />}
@@ -201,8 +207,13 @@ export function Button({
 }
 
 export const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
+  "w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 placeholder-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-red-500 aria-invalid:focus:border-red-500 aria-invalid:focus:ring-red-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
 
+/**
+ * ラベル+入力+エラー/ヒントのスロット。
+ * 子要素(単一の入力コントロール)へ id / aria-invalid / aria-describedby を
+ * 注入し、label htmlFor で明示的に関連付ける。
+ */
 export function Field({
   label,
   error,
@@ -214,21 +225,52 @@ export function Field({
   hint?: string;
   children: ReactNode;
 }) {
+  const generatedId = useId();
+  const errorId = `${generatedId}-error`;
+  const hintId = `${generatedId}-hint`;
+  const describedBy = error ? errorId : hint ? hintId : undefined;
+
+  let controlId = generatedId;
+  let control = children;
+  if (isValidElement<Record<string, unknown>>(children)) {
+    const childProps = children.props;
+    if (typeof childProps.id === "string") controlId = childProps.id;
+    const injected: Record<string, unknown> = { id: controlId };
+    if (error) injected["aria-invalid"] = true;
+    if (describedBy) {
+      injected["aria-describedby"] = [
+        childProps["aria-describedby"],
+        describedBy,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
+    control = cloneElement(children, injected);
+  }
+
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+    <div>
+      <label
+        htmlFor={controlId}
+        className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400"
+      >
         {label}
-      </span>
-      {children}
+      </label>
+      {control}
       {hint && !error && (
-        <span className="mt-1 block text-xs text-zinc-400">{hint}</span>
+        <span id={hintId} className="mt-1 block text-xs text-zinc-400">
+          {hint}
+        </span>
       )}
       {error && (
-        <span className="mt-1 block text-xs text-red-600 dark:text-red-400">
+        <span
+          id={errorId}
+          className="mt-1 block text-xs text-red-600 dark:text-red-400"
+        >
           {error}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -264,7 +306,7 @@ export function FileInput(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       type="file"
-      className={`block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-700 hover:file:bg-zinc-50 dark:text-zinc-300 dark:file:border-zinc-700 dark:file:bg-zinc-800 dark:file:text-zinc-200 dark:hover:file:bg-zinc-700 ${className}`}
+      className={`block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-700 hover:file:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-300 dark:file:border-zinc-700 dark:file:bg-zinc-800 dark:file:text-zinc-200 dark:hover:file:bg-zinc-700 ${className}`}
       {...rest}
     />
   );
@@ -330,6 +372,24 @@ export function formIssuesMessage(issues: string[]): string {
       return issue;
     })
     .join(" / ");
+}
+
+/**
+ * parseForm の issues("path: message" 形式)を
+ * フィールドパス→メッセージのマップに変換する。
+ * パスを持たない issue は "_form" キーにまとめる。
+ */
+export function issuesByField(
+  issues: readonly string[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const issue of issues) {
+    const sep = issue.indexOf(": ");
+    const key = sep > 0 ? issue.slice(0, sep) : "_form";
+    const message = sep > 0 ? issue.slice(sep + 2) : issue;
+    out[key] = out[key] ? `${out[key]} / ${message}` : message;
+  }
+  return out;
 }
 
 /** 月送りナビ(一覧・レポート画面で共用) */
@@ -411,6 +471,7 @@ export function ConfirmDialog({
     () => true,
     () => false,
   );
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -427,19 +488,26 @@ export function ConfirmDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={title}
+      aria-labelledby={titleId}
       onClick={onCancel}
     >
       <div
         className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold">{title}</h2>
+        <h2 id={titleId} className="text-base font-semibold">
+          {title}
+        </h2>
         <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
           {message}
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onCancel} disabled={loading}>
+          <Button
+            variant="secondary"
+            onClick={onCancel}
+            disabled={loading}
+            autoFocus
+          >
             キャンセル
           </Button>
           <Button
@@ -456,6 +524,6 @@ export function ConfirmDialog({
   );
 }
 
-/** 一覧テーブルの共通クラス */
+/** 一覧テーブルの共通クラス。モバイルでは overflow-x-auto のコンテナ内で使う */
 export const tableClass =
-  "w-full border-collapse text-sm [&_th]:border-b [&_th]:border-zinc-200 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-xs [&_th]:font-medium [&_th]:text-zinc-500 dark:[&_th]:border-zinc-800 [&_td]:border-b [&_td]:border-zinc-100 [&_td]:px-3 [&_td]:py-2 dark:[&_td]:border-zinc-800";
+  "w-full border-collapse text-sm [&_th]:border-b [&_th]:border-zinc-200 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-xs [&_th]:font-medium [&_th]:whitespace-nowrap [&_th]:text-zinc-500 dark:[&_th]:border-zinc-800 [&_td]:border-b [&_td]:border-zinc-100 [&_td]:px-3 [&_td]:py-2 dark:[&_td]:border-zinc-800";

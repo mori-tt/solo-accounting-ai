@@ -17,13 +17,9 @@
 ## Log
 
 ## 2026-11-02: 取引のCSVエクスポート/インポート(Issue #31)
-
 - Worktree: csv-io
-
 ### 実装内容
-
 取引一覧画面へのCSV出力・CSV取込機能。依存追加なしの自前CSV実装。
-
 - `src/lib/csv.ts`(新規): 汎用CSV部と取引マッピング部
   - `serializeCsv`: RFC 4180 系(`,` `"` 改行をクォート、`"`→`""`、行末CRLF)
   - `parseCsv`: クォート内改行・`""`・CRLF/LF/CR受理、先頭BOM除去、末尾改行で空行を作らない
@@ -33,23 +29,76 @@
 - `src/app/(app)/transactions/transaction-csv-import.tsx`(新規): ファイル選択→パース→プレビュー表(行番号・解釈値・行別エラー)→「N件を登録」で行ごとに `createTransaction` を逐次呼ぶ取込パネル。エラー行は登録対象から自動除外。行ごとに `crypto.randomUUID()` の冪等キーを確定時点で採番し、失敗行の再登録・通信断での重複を防ぐ。登録済み行は対象外なので部分失敗後の再実行が安全。Shift_JIS等で読んだ場合はファイル名にエンコーディングを表示
 - `transactions-screen.tsx`: PageHeaderに「CSV出力」(全ロール、表示中の月範囲をBOM付UTF-8で `transactions-YYYYMM.csv` ダウンロード)と「CSV取込」ボタン(canEdit=viewer以外のみ)を追加。0件月はヘッダーのみ出力=取込テンプレートとしても使える
 - `src/lib/csv.test.ts`(新規): 26件。生成/パース/ラウンドトリップ、BOM・UTF-16・Shift_JIS検出、エクスポート列・ラベル、ヘッダー名マッピング、行別バリデーションエラー、空行/列不足/必須列欠如
-
 ### 実行したテスト
-
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm exec next typegen` — 成功
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(25ファイル324件、skip 10)
 - `pnpm build` — 合格
-
 ### 未解決事項・次の担当者への注意事項
-
 - インポート登録はクライアントから行ごとに `createTransaction` を逐次呼ぶ方式(既存経路踏襲)。締め期間違反等のサーバー側エラーは行単位で「失敗」として残り、再登録ボタンでリトライ可能(冪等キーは行ごとに固定済み)。全行を1トランザクションにするバルクAPIは要件外のため未実装
 - 取込は常に draft 作成のため CSV の「状態」列は読まない。「科目名」列も参照せず科目コードが正(科目名と不一致でも警告は出さない)
 - Shift_JIS判定は「UTF-8厳格デコード失敗→Shift_JIS」のヒューリスティック。SJISとしても不正なバイト列は U+FFFD になる(行エラーとして可視化される)
 - エクスポートは画面の種別/状態フィルタに関わらず表示月範囲の全取引を出力する(「月範囲の取引」の解釈)
 - `pnpm test:rules` / `pnpm test:emulators` / E2E は未実施(firestore.rules・storage.rules への変更なし、UI新規要素のE2E未カバーは既存画面と同じ扱い)
+## 2026-11-02: UX/アクセシビリティ仕上げ(Issue #35)
+- Worktree: ux-a11y
+- 変更内容: ui.tsx プリミティブのアクセシビリティ強化と、対象画面のフォームエラー inline 化・モバイル用テーブル overflow 対応
+- 変更ファイル:
+  - `src/components/ui.tsx`
+    - `Button`: focus-visible アウトライン、disabled 時の `aria-disabled` + `disabled:opacity-60` で視覚統一、loading 時 `aria-busy`
+    - `Field`: `<label>` 包み込みから `<label htmlFor>` + 子コントロールへの `useId` ベース id 注入へ変更。error 時 `aria-invalid`、error/hint を `aria-describedby` で参照(子が既に id/aria-describedby を持つ場合は尊重・連結)
+    - `inputClass` 系(TextInput/NumberInput/Select/Textarea): disabled 視覚 + `aria-invalid:` 時の赤枠/赤リング。`FileInput` に focus-visible アウトライン + disabled 視覚
+    - `issuesByField` 新設: `parseForm` の issues("path: message")をフィールドマップへ変換(パス無しは `_form`)
+    - `ConfirmDialog`: `aria-label` → `aria-labelledby`(見出し参照)に変更、開時にキャンセルボタンへ autoFocus
+    - `tableClass`: `th` を whitespace-nowrap に
+  - `src/app/login/login-screen.tsx`: email/password をフィールド下エラー化(認証エラーは Alert 維持)、モード切替に `aria-pressed` + focus-visible
+  - `src/app/(app)/settings/settings-screen.tsx`: 事業情報/新規事業/メンバー招待フォームをフィールド下エラー化、members テーブルに overflow-x-auto、ロール変更 Select に aria-label
+  - `src/app/(app)/customers/customers-screen.tsx`、`projects/projects-screen.tsx`、`expenses/new/expenses-screen.tsx`: 各登録/編集フォームをフィールド下エラー化(projects 編集時の手動チェックも fieldErrors に統一)
+  - `src/app/(app)/dashboard/dashboard-screen.tsx`: 最近の取引テーブルを overflow-x-auto 化、要対応リンクに focus-visible アウトライン
+  - `src/app/(app)/closing/closing-screen.tsx`: チェックリスト5テーブルを overflow-x-auto 化
+  - `src/components/ui.test.tsx` 新規: Field の htmlFor 関連付け/aria-invalid/aria-describedby/hint/既存 id 尊重 + issuesByField を6件検証
+- Checks:
+  - `pnpm install --frozen-lockfile` — 成功
+  - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存・対象外ファイル)
+  - `pnpm exec next typegen` / `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(25ファイル304件、skip 10)
+  - `pnpm build` — 合格
+- 備考:
+  - 破壊的操作の ConfirmDialog は対象画面では既に徹底済み(settings メンバー削除、closing 期間締め)のため変更不要。expenses の「支払済にする」はデータ喪失を伴わない状態更新のため確認ダイアログ対象外と判断
+  - `Field` の子は全箇所で単一コントロールのため cloneElement 注入で問題なし。app-shell/transactions 等の対象外ファイルからも同じ Field を利用しており、そちらにも htmlFor 関連付けが波及(ファイル自体は未変更)
+  - `formIssuesMessage` は対象外ファイル(app-shell/transaction-form/invoices-screen)が現役利用のため export を維持
+  - `aria-disabled` はネイティブ `disabled` と併記(冗長だが issue 要件・一貫性のため)。loading 中は disabled と併せて付与
+  - Emulator 系チェック(test:rules/test:emulators)は本タスクの指定チェック範囲外のため未実施
+## 2026-11-02: 本番ハードニング(Issue #34)
+- Worktree: prod-hardening
+- `src/lib/env.ts`(新規): 起動時env検証。必須 `NEXT_PUBLIC_FIREBASE_*` が
+  空なら `EnvValidationError`(不足キー名を列挙した明確なメッセージ)。
+  本番(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR!=true`)で Emulator host 環境変数が
+  残っていたら console.warn で警告(起動は継続)。
+  `src/lib/firebase/client.ts` の `getFirebaseApp()` から
+  `assertFirebaseClientEnvOnce()` として呼ぶ(検証は1回のみ・失敗時はメモ化しない)
+- エラー境界: `src/app/error.tsx` / `src/app/not-found.tsx` /
+  `src/app/global-error.tsx` を新設(日本語メッセージ・再試行導線)。
+  既存 `src/app/(app)/error.tsx` を拡張(console.error による診断ログ・
+  本番サーバーエラーの digest 表示・ダッシュボードへの復帰導線)
+- `/api/ai/*` への簡易レート制限: `src/lib/api/rate-limit.ts`(新規)。
+  インメモリ Map の固定ウィンドウ方式・businessId単位
+  (サーバーレスではインスタンス単位の最良努力とコメント明記)。
+  提案生成 POST=60回/時、一覧 GET・承認/却下 PATCH=240回/時。
+  超過時は `RateLimitError`→HTTP 429 + `{ok:false,error:{code:"RATE_LIMITED"}}` + Retry-After ヘッダ
+- APIエラーレスポンス統一: `toErrorResponse()` を `src/lib/api/result.ts` に追加し、
+  全 Route Handler(api/ai/*・api/receipts/*・api/session)で共用する形に整理。
+  `/api/session` は `error` が文字列だった非準拠レスポンスを `{code,message}` 形式に修正。
+  あわせて INTERNAL を 400→500 に修正、receipts POST で NOT_FOUND→404 が抜けていたのを統一
+- `ApiError.code` に `RATE_LIMITED` を追加
+- README: 前提(Node 26+/pnpm/JDK 21+)/環境変数・Emulator セットアップ/
+  コマンド一覧(test:rules・test:emulators 追記)/本番 Firebase 切替手順/
+  デプロイ指針を整備。.env.example の変数一覧と整合
+- `pnpm test` — 合格(26ファイル314件、skip 10。env.test.ts 11件・rate-limit.test.ts 5件を新規追加)
+- `pnpm build` — 成功
+- Emulator・`next dev` は制約により未起動(Rules/E2E テストは未実施)
 
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 

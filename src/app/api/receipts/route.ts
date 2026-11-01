@@ -1,5 +1,5 @@
 import { registerReceipt } from "@/lib/accounting/services/receipts";
-import { ApiError, toActionError } from "@/lib/api/result";
+import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireEditor } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
 import { getAdminBucket } from "@/lib/firebase/admin";
@@ -68,9 +68,6 @@ export async function POST(request: Request) {
     });
     return Response.json({ ok: true, data: receipt });
   } catch (e) {
-    const err = toActionError(e);
-    const status =
-      err.code === "UNAUTHORIZED" ? 401 : err.code === "FORBIDDEN" ? 403 : 400;
-    return Response.json({ ok: false, error: err }, { status });
+    return toErrorResponse(e);
   }
 }

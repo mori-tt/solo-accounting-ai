@@ -20,7 +20,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
-  formIssuesMessage,
+  issuesByField,
   LoadingBlock,
   PageHeader,
   Select,
@@ -59,16 +59,18 @@ function ProjectForm({
   const [status, setStatus] = useState<ProjectStatus>(
     initial?.status ?? "active",
   );
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (initial) {
       if (!name.trim()) {
-        setError("案件名を入力してください");
+        setFieldErrors({ name: "案件名を入力してください" });
         return;
       }
       setError(undefined);
+      setFieldErrors({});
       try {
         await onSubmit({ customerId, name, status });
       } catch (err) {
@@ -78,10 +80,11 @@ function ProjectForm({
     }
     const parsed = parseForm(projectSchema, { customerId, name });
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setError(undefined);
+    setFieldErrors({});
     try {
       await onSubmit(parsed.data);
     } catch (err) {
@@ -92,7 +95,7 @@ function ProjectForm({
   return (
     <form onSubmit={submit} noValidate className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field label="顧客">
+        <Field label="顧客" error={fieldErrors.customerId}>
           <Select
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
@@ -107,7 +110,7 @@ function ProjectForm({
             ))}
           </Select>
         </Field>
-        <Field label="案件名">
+        <Field label="案件名" error={fieldErrors.name}>
           <TextInput
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -130,6 +133,9 @@ function ProjectForm({
           </Field>
         )}
       </div>
+      {fieldErrors._form && (
+        <Alert tone="error">{fieldErrors._form}</Alert>
+      )}
       {error && <Alert tone="error">{error}</Alert>}
       <div className="flex gap-2">
         <Button type="submit" loading={busy}>
