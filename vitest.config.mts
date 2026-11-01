@@ -9,6 +9,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
-    exclude: ["e2e/**", "node_modules/**"],
+    // tests/rules はEmulator必須のため `pnpm test:rules` で別途実行する
+    exclude: ["e2e/**", "node_modules/**", "tests/rules/**"],
   },
 });

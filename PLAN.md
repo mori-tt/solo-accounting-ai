@@ -6,8 +6,8 @@
 - [x] Firebase初期設定
 - [x] Firebase Emulator
 - [x] Authentication
-- [ ] Firestore Rules
-- [ ] Storage Rules
+- [x] Firestore Rules
+- [x] Storage Rules
 - [ ] CI
 
 ## Phase 1: Core Accounting

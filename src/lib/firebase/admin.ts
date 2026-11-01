@@ -1,7 +1,7 @@
 import { getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { getStorage, type Storage } from "firebase-admin/storage";
+import { getStorage } from "firebase-admin/storage";
 
 // サーバーサイド専用。Route Handler / Server Action から使うこと。
 // FIRESTORE_EMULATOR_HOST 等が設定された開発環境では
@@ -14,6 +14,7 @@ export function getAdminApp(): App {
       process.env.GOOGLE_CLOUD_PROJECT ??
       process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ??
       "demo-solo-accounting-ai",
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   });
 }
 
@@ -25,12 +26,6 @@ export function getAdminAuth(): Auth {
   return getAuth(getAdminApp());
 }
 
-export function getAdminStorage(): Storage {
-  return getStorage(getAdminApp());
-}
-
-/** サーバーサイドで使うStorageバケット。証憑は receipts/{businessId}/... に保存する。 */
-export function getReceiptsBucket() {
-  const name = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
-  return getAdminStorage().bucket(name || undefined);
+export function getAdminBucket() {
+  return getStorage(getAdminApp()).bucket();
 }

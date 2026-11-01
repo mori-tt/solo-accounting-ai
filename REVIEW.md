@@ -16,137 +16,81 @@
 
 ## Log
 
-## 2026-10-31: Next.js画面(UI)の実装
+## 2026-11-01: Firestore設計の確定(AI提案コレクション化)
 
-- Worktree: web-ui(ブランチ `mori-tt/web-ui`)
-
-### 実装内容
-
-要求された11画面 + その周辺基盤を実装。画面はすべて `(app)` ルートグループ配下で、
-`AppShell`(認証ゲート + サイドナビ + 事業切替)内に描画される。
-
-- **ログイン** `/login`: メール+パスワードのログイン/新規登録。Firebase client SDKで認証し、
-  `onIdTokenChanged` → `/api/session`(POST)でIDトークンを httpOnly Cookie(`__session`)に同期
-- **ダッシュボード** `/dashboard`: 当月の売上/経費/損益カード、要対応項目(下書き・AI提案待ち・
-  未処理領収書・未払経費・未入金請求)、最近の取引
-- **取引一覧** `/transactions`: 月ナビ・種別/状態フィルタ・行展開(編集/確定/削除/AI提案カード)。
-  登録は常に下書き、確定は別ボタン(AI提案採用では確定しない設計のまま)
-- **経費登録** `/expenses/new`: 登録フォーム(消費税区分・税額・支払期日)+ 経費一覧(支払状況・支払済化)
-- **領収書確認** `/receipts`: アップロード(multipart → `/api/receipts` でStorage保存+メタ登録)、
-  画像プレビュー(`/api/receipts/[id]` がメンバーシップ検証後にStorageから返却)、取引への紐付け、
-  アーカイブ(確認ダイアログ)、AI抽出提案の採用/却下
-- **顧客一覧** `/customers`、**案件一覧** `/projects`: 一覧+登録/編集フォーム
-- **請求・入金** `/invoices`: 明細行の可変フォーム(数量×単価→合計プレビュー)、発行(draft→issued)、
-  入金記録(残額バリデーション)
-- **月次レポート** `/reports/monthly`: 月ナビ・売上/経費/損益・科目別内訳・集計の保存(再計算)
-- **決算チェック** `/closing`: 期間選択/作成、チェックリスト(下書き残・証憑未添付・未処理領収書・
-  未払・未入金)、オーナーのみ期次締め(確認ダイアログ)
-- **設定** `/settings`: アカウント表示、事業情報(オーナーのみ編集可)、メンバー招待/ロール変更/削除
-  (オーナー・確認ダイアログ)、新規事業作成
-
-### アーキテクチャ
-
-- **データアクセス集中**: 画面はServer Actions(`src/lib/actions/`)とルートハンドラのみ呼ぶ。
-  Firestore/Storage SDKは画面に置かない。Actionsは `requireViewer/requireEditor/requireOwner`
-  でセッションCookie検証 + membership/role検証(businessId越権をサーバー側で遮断)してから
-  `AccountingStore` ポート経由でドメインサービスを呼ぶ
-- **クライアント基盤**: `api-client.ts`(ActionResult→throw変換 + UNAUTHORIZED時にIDトークン
-  再取得してセッションCookie更新→1回リトライ)、`useApiData`(loading/error/emptyの統一)、
-  `useBrowserOnly`(React 19.3の `use(browser())` でブラウザ専用描画を宣言)
-- **UIルール準拠**: AI提案は `AiSuggestionCard`(破線indigo・「採用しても自動確定されません」明記)、
-  LoadingBlock/ErrorState/EmptyState全画面統一、破壊的操作はConfirmDialog(取引削除・領収書
-  アーカイブ・メンバー削除・期次締め)、全フォームZod検証(クライアント+サーバー同一スキーマ)、
-  金額は `Amount` コンポーネント(Intl JPY・¥表記)で統一表示
-- **Cache Components対応**: 認証依存画面はSuspense + `browser()` でブラウザ専用化、
-  `(app)/layout.tsx` と各pageに `export const instant = false`(instant検証の対象外)
-
-### 実行したチェック
-
-- `pnpm lint` — 合格(警告1件: 認証付きAPI経由の証憑画像に `<img>` 使用。意図的)
-- `pnpm typecheck` — 合格
-- `pnpm test` — 合格(10ファイル93件、emulator4件はskip)
-- `pnpm build` — 合格(全15ルート、画面はstatic・APIはdynamic)
-- `JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm test:emulators` — 合格(4件)
-- `pnpm test:e2e` — 合格(home.specをログイン誘導の確認に更新)
-
-### 変更ファイル
-
-- 新規: `src/app/(app)/**`(11画面+layout+error)、`src/app/login/**`、`src/app/api/{session,receipts}`、
-  `src/components/**`(auth-provider/app-shell/ui/status-badge/ai-suggestion-card)、
-  `src/lib/actions/**`(9ファイル)、`src/lib/api/**`(session/result/store/queries)、
-  `src/lib/{api-client,accounts,format,validation/schemas}.ts`、`src/lib/hooks/**`
-- 更新: `src/app/layout.tsx`(AppProvider組込)、`src/app/page.tsx`(/dashboardへリダイレクト)、
-  `src/lib/firebase/admin.ts`(getReceiptsBucket追加)、`.env.development`(emulator接続先の明示)、
-  `e2e/home.spec.ts`、`PLAN.md`
-
-### 未解決事項・備考
-
-- **worktree共有ディレクトリ問題は前回記録通り再発**: このworktreeでも `rm node_modules .next`
-  して `pnpm install` 済み(共有 .next への同時ビルドでturbopackがデッドロックする事例も確認)
-- viewerロールはUI上も登録/編集系ボタンを出さない。`listInvoiceRows` のoverdue最良努力更新は
-  editor以上のみ実行(viewerは書き込みを行わせない)
-- 確定済み取引の削除はオーナー限定(サーバー側で強制)。UIはmutableなら削除ボタンを出すが、
-  権限不足時はエラー表示でフィードバック
-- メンバー招待はメール→Authユーザー引きのため、招待相手が先にサインアップしている必要がある
-- `useApiData` の loader は `Promise<T>` を返す形に統一(callApi内でSession再取得リトライ)
-
-### 次の担当者への注意事項
-
-- 画面追加時も「画面→Server Action→AccountingStore」経路を守り、Firestore/Storage SDKを
-  client componentにimportしないこと
-- `pnpm typecheck` は `.next/types` の生成型に依存。`pnpm build` か `next typegen` 後に実行
-- React 19.3では effect本体内の同期setState・render中のref更新がlint errorになる。
-  ローディング制御はqueueMicrotask/派生値/useSyncExternalStoreで対処済み(各ファイル参照)
-
-## 2026-10-31: 経理ドメインの実装
-
-- Worktree: accounting-domain(ブランチ `mori-tt/accounting-domain`)
+- Worktree: firebase-security
 
 ### 実装内容
 
-`src/lib/accounting/` にFirestore非依存のドメイン層 + 永続化ポートを実装。UI・API層には会計ロジックを置かない設計。
-
-- **基盤**: `types.ts`(スキーマ準拠のエンティティ)、`errors.ts`(DomainError+コード)、`money.ts`(円整数バリデーション)、`dates.ts`(YYYY-MM-DD・月末・うるう年・会計年度/期間計算)、`audit.ts`、`suggestions.ts`(AI提案モデル・適用ロジック)
-- **Store**: `store/types.ts` の `AccountingReader`/`AccountingStore` ポート。`transact` は「トランザクション内読み取り + batch(puts+audits)の不可分適用」。`idempotencyKey` を指定すると記録を作成し、再実行は保存済み結果を replayed=true で返す
-- **実装**: `store/memory.ts`(テスト用)、`store/firestore.ts`(Admin SDK。`*At`フィールドをISO↔Timestamp変換、冪等キーはSHA-256 doc ID)
-- **サービス**: 事業体登録、取引登録/確定、経費登録/支払記録/未払検出、顧客・案件・請求書(明細から合計再計算)/発行/入金消込/過入金防止/overdue更新/未入金検出、証憑登録/紐付/アーカイブ、AI提案の記録・採用・拒否、月次集計(純粋関数+再計算)、会計期間の自動作成(`fy{year}`で冪等)/決算チェックリスト/期次締め
-
-### 主要な設計判断
-
-- **0円・負額は登録時に拒否**。訂正は正の金額の取消し仕訳で表現(ACCOUNTING_RULES方針)。税額・単価などは `assertNonNegativeYen` で0を許容
-- **締め済み期間の保護は日付ベース**: status=locked判定に加え、変更対象の日付(取引日・支払日・入金日・提案適用日)が closed 期間に入る操作はすべて PERIOD_CLOSED で拒否
-- **期次締め**: 期間内にdraftが1件でもあれば HAS_DRAFT_TRANSACTIONS で拒否。成功時は期間内の confirmed をすべて locked にし close の監査ログを記録
-- **AI**: 提案は `aiSuggestion` のみに保持。採用=許可フィールド(account/amount/date/counterparty/description/type)を確定値へコピーするが status は draft のまま。confirmed は `confirmTransaction` のみ。拒否は確定値を一切変更しない。呼び出し記録は `ai_suggest`/`approve_ai`/`reject_ai` として auditLogs に記録
-- **月次集計**: draft は除外(confirmed+lockedのみ)。monthlySummaries は常にTransactionから再計算して上書き
-- **監査ログ**: puts対象ごとに識別情報のみ記録(内容スナップショットなし)
+- `docs/FIRESTORE_SCHEMA.md`: 提示された基本案に合わせて確定
+  - 新規: `journalEntries`(仕訳: draft=候補/confirmed=確定/locked=締め済み、lines借貸・sourceType/sourceId/aiSuggestionId)、`closingChecks`(締めチェック: open/resolved/waived、fiscalPeriodId+type+targetPath+message)、`aiSuggestions`(提案: type/targetPath/suggestion/confidence/status(pending|accepted|rejected)/resolvedBy)
+  - `expenses`に`status`(draft/confirmed/locked)と`receiptId`を追加(自身のlockedで締め保護。旧:紐付くTransaction経由)
+  - `transactions`/`receipts`の`aiSuggestion`フィールドを廃止→`aiSuggestions`コレクションへ移行
+  - 「領収書→OCR抽出→AI提案→ユーザー確認→確定経費→仕訳候補→ユーザー確定」のデータフローを明文化。AI出力はaiSuggestionsにのみ存在させる
+  - 提案にない`users/{uid}`と`monthlySummaries`は維持(前者は認証プロファイル・実装済み、後者は月次集計要件F4対応)
+- `docs/DECISIONS.md`: ADR-0005「AI提案はaiSuggestionsコレクションで管理」を追加、ADR-0003に補足
+- `firestore.rules`: 新コレクション3件を追加
+  - journalEntries: transactionsと同型(locked保護、aiSuggestionIdは作成後変更不可)
+  - closingChecks: 作成はeditor+/openのみ、fiscalPeriodId/type/targetPathは事後変更不可、削除はopenのみ(editor)またはowner
+  - aiSuggestions: readのみmember可、create/delete=禁止(Admin SDKのみ)。updateはeditor+かつstatus遷移+resolvedBy=本人のみ、内容(suggestion/confidence/targetPath/type)変更不可
+  - expenses: 自身のstatusでlocked保護に変更(旧txLocked参照を廃止)
+- `firestore.indexes.json`: journalEntries(status+date)、aiSuggestions(status+createdAt, targetPath+createdAt)、closingChecks(fiscalPeriodId+status+createdAt)を追加
+- `src/lib/firebase/server.ts`: `setAiSuggestion`(フィールド書き込み)を`createAiSuggestion`(コレクション作成)に置き換え
+- `docs/SECURITY_RULES.md`: 新コレクションの認可方針を追記
+- テスト: journalEntries(5件)/aiSuggestions(6件)/closingChecks(6件)/デフォルト拒否(1件)/締め保護の拡充(locked journalEntry、locked紐付receipt、locked作成禁止)を追加
 
 ### 実行したテスト
 
 - `pnpm lint` — 合格
-- `pnpm typecheck` — 合格(`pnpm exec next typegen` 実行後)
-- `pnpm test` — 合格(10ファイル93件、emulatorテスト4件はskip)
-- `pnpm build` — 合格(下記「未解決事項」のworktree対応が必要)
-- `JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm test:emulators` — 合格(Firestore Emulator経由4件:往復・冪等リプレイ・監査・日付範囲クエリ)
-- カバレッジ: 0円/負額/小数、不正日付・2/30・うるう年、月末・年度境界(暦年/4月/12月始まり)、二重登録(冪等リプレイ)、未入金・超過入金・全額消込、未払・overdue検出、締め済み期間の全操作拒否、AI提案の採用/拒否/draft維持
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(1ファイル7件)
+- `pnpm test:rules` — 合格(2ファイル62件。起動中の別Emulator(8080/9199)があったため `FIRESTORE_EMULATOR_HOST=localhost:8080 FIREBASE_STORAGE_EMULATOR_HOST=localhost:9199 vitest run --config vitest.rules.config.mts` で既存Emulatorへ直接接続して実行)
+- `pnpm build` — 合格
 
-### 変更ファイル
+### 備考
 
-- 新規: `src/lib/accounting/**`(ドメイン層一式)、`tests/emulator/firestoreStore.test.ts`
-- 更新: `package.json`(`test:emulators`スクリプト)、`docs/FIRESTORE_SCHEMA.md`(idempotencyKeys、監査action追加、fiscalPeriods補足)
+- `monthlySummaries`は提示構成になかったが、月次集計(F4)・月次説明(monthly_explanation)の対象となるため維持。不要なら削除可能
+- aiSuggestionsのupdateはstatus解決専用。`resolvedBy`は必須で本人uidのみ(他人名義の承認不可)
+- closingChecksはサーバー生成(createdBy=`system`)とユーザーのカスタム項目(createdBy=uid)の両方を許容
+- 起動中の別Emulatorがある場合、`pnpm test:rules`(emulators:exec)はport競合で失敗する。上記の直接接続方式か、既存Emulatorを停止してから実行すること
 
-### 未解決事項
+## 2026-10-31: Firebase基盤とセキュリティ
 
-- **worktreeの共有ディレクトリ問題**: orcaの `sharedDirectories` により `node_modules`/`.next` は本体へのシンボリックリンクだが、Turbopackはworkspace root外実体を参照するシンボリックリンク経由のnext解決を拒否し `pnpm build` が失敗する。このworktreeでは `rm node_modules .next` 後に `pnpm install` してローカル実体に切替済み(本体・他worktreeには影響なし、git管理外)。他worktreeでも同様の対応が必要
-- **Security Rulesは依然として全拒否の骨格**。rules実装 + @firebase/rules-unit-testing導入は別タスク。本ドメイン層はサーバーサイド(Admin SDK)経由なのでrules非依存だが、クライアント直アクセスは現状一切できない
-- `emulators:exec` 初回実行時にポート競合で失敗することがある(再実行で解消)。グローバル版firebase-toolsはNode 26で起動自体に失敗するため `node_modules/.bin` の15系を使うこと
-- invoice/customer/project の更新・削除、transaction編集/削除(補正仕訳フロー)、Cloud Functions/Server Actionの接続は未着手
-- `seedClosedPeriod`(testing.ts)はcloseを通さず直接closed期間を作るテスト専用補助
+- Worktree: firebase-security
 
-### 次の担当者への注意事項
+### 実装内容
 
-- サービス呼び出しは必ず `AccountingStore` ポート経由。新しいコマンドは `transact` 内で読み取り→batch返却の形にし、変更対象日付の `assertDateInOpenPeriod`/`assertTransactionEditable` を忘れない
-- `idempotencyKey` は冪等性が必要なコマンドで必須パラメータ。リプレイ時は保存済みvalueがそのまま返るため、返り値はJSON化可能な形にすること
-- `pnpm test` だけではemulatorテストはskipされる。`pnpm test:emulators` は `JAVA_HOME=/opt/homebrew/opt/openjdk@21` を付けること
+- `firestore.rules`: docs/SECURITY_RULES.md準拠で全コレクション実装
+  - `request.auth != null`必須、`businesses/{businessId}/members/{uid}`のロール(owner/editor/viewer)で認可
+  - business作成と同一バッチで作成者本人をowner登録するブートストラップ(`getAfter()`でownerUid検証)。member管理はownerのみ
+  - 締め済み保護: `status='locked'`のTransactionはupdate/delete不可、lockedへの変更はAdmin SDKのみ。`expenses`/`receipts`は紐付くTransactionのlockを参照。`fiscalPeriods`はownerのみ作成・締め可、closed後の再オープン・削除不可
+  - `auditLogs`はappend-only(`actorUid == request.auth.uid`のみ追記可)
+  - `aiSuggestion`フィールドはクライアント書き込み禁止(Admin SDKのみ)
+  - `monthlySummaries`はクライアント書き込み禁止(Functions集計用)
+  - `users/{uid}`は本人のみ読み書き可(個人情報保護)
+  - 金額の整数(`is int`)・日付形式(YYYY-MM-DD)・statusenumの入力検証も実施
+- `storage.rules`: `receipts/{businessId}/{receiptId}/{fileName}`のみ。memberはread、owner/editorはcreate/update/delete。10MB上限・MIME制限(jpeg/png/webp/heic/pdf)。delete時に`request.resource`がnullになるためcreate/updateと分離
+- `firestore.indexes.json`: transactions(status+date, type+date)/invoices(status+dueDate)/receipts(status+createdAt)/payments(invoiceId+date)/expenses(paidAt+paymentDueDate)/auditLogs(targetPath+createdAt)の複合インデックス
+- Authentication(クライアント): `src/lib/firebase/auth.ts`(Google/メール・パスワードのsignin/signup/signOut、初回ログイン時の`users/{uid}`作成)、`auth-provider.tsx`(`AuthProvider` + `useAuth`、onAuthStateChanged)、`/login`ページ、`AuthStatus`コンポーネントを`/`に追加。layoutにAuthProviderを配置
+- Admin SDK共通処理: `admin.ts`に`getAdminBucket()`追加(storageBucketをapp optionsに設定)。`server.ts`新規(`verifyIdToken`/`authenticate`(Bearer)/`getMemberRole`/`requireMemberRole`/`writeAuditLog`(識別情報のみ)/`setAiSuggestion`(サーバー専用))
+- `.env.development`: admin用Emulator接続先(FIRESTORE_EMULATOR_HOST等)を追加
+- Rulesテスト: `@firebase/rules-unit-testing@6.0.0`導入。`tests/rules/`にFirestore 32件・Storage 10件。`vitest.rules.config.mts`(node環境・直列)と`pnpm test:rules`(emulators:exec経由)を追加。`pnpm test`からはEmulator必須テストを除外
+
+### 実行したテスト
+
+- `pnpm lint` — 合格
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(1ファイル7件)
+- `pnpm test:rules` — 合格(2ファイル42件、JAVA_HOME=/opt/homebrew/opt/openjdk@21で実行)
+- `pnpm build` — 合格(`/`と`/login`ともに静的生成)
+- `pnpm test:e2e` — 合格(chromium 1件)
+
+### 備考
+
+- **node_modules/.nextのシンボリックリンクを実ディレクトリに置き換え**: このworktreeでは共有node_modules(メインcheckout)へのシンボリックリンクが張られていたが、Turbopackが「workspace root外のファイルはコンパイル不可」でbuildエラーになるため、`pnpm install`でworktree内に実ディレクトリを作成(foundation worktreeと同じ構成)。なお、リンク経由でメインcheckoutのnode_modulesに`@firebase/rules-unit-testing`が残っている(無害、メイン側で`pnpm install`すれば整理される)
+- `members`のロール更新はownerのみ。最後のownerが降格・脱退するケースの防止は未実装(rulesでのカウントが困難。将来Functionsでガードする想定)
+- `invoices`/`payments`/`customers`/`projects`に対する締め済み期間の日付ベース保護は未実装。現在はTransactionの`locked`とそれに紐付くexpenses/receiptsのみ。期間全体の日付範囲ロックは期間締め機能(Phase 3)でAdmin SDK側の整合性処理と合わせて検討
+- Storage Rulesのreadは`firestore.exists()`でmember確認のみ(ロール非依存)。viewerもread可
 
 ## 2026-10-31: ルート管理ファイルの作成
 
@@ -199,3 +143,54 @@
 - **Next.js 16の差分**: async request API必須、`middleware.ts`ではなく`proxy.ts`、cacheComponents前提の設計(use cache / Suspense)。新規コードを書く前に `node_modules/next/dist/docs/` を参照
 - **金額は整数円**: 実装時はdocs/ACCOUNTING_RULES.mdに従う
 - Playwrightはchromiumのみ設定済み。firefox/webkitが必要になったらprojectsに追加 + `playwright install`
+
+## 2026-10-31: 経理ドメインの実装
+
+- Worktree: accounting-domain
+
+### 実装内容
+
+- `src/lib/accounting/domain/`: Firebase非依存の純粋なドメインロジック
+  - `errors.ts`: `DomainError` + エラーコード(`INVALID_AMOUNT`/`INVALID_DATE`/`PERIOD_CLOSED`/`INVALID_STATE`/`NOT_FOUND`/`ALREADY_EXISTS`/`PAYMENT_EXCEEDS_BALANCE`/`VALIDATION_FAILED`)
+  - `money.ts`: 円整数バリデーション(0円・負数・小数・非安全整数を拒否)
+  - `dates.ts`: `YYYY-MM-DD`実在日検証(うるう年対応)、`YYYY-MM`、日付比較・日数差
+  - `fiscal.ts`: `fiscalYearStartMonth`から年度・会計期間を算出、締め済み期間の検出
+  - `types.ts`: FIRESTORE_SCHEMA.mdに対応するエンティティ型。`idempotencyKey`フィールドを追加(冪等性用)
+  - `validate.ts` / `transitions.ts` / `ai.ts` / `audit.ts` / `summary.ts` / `checks.ts`
+- `src/lib/accounting/store.ts`: 永続化ポート `AccountingStore`(get/list/create/update/remove/findByIdempotencyKey/runInTransaction)。Firestoreアダプタは別実装とし、ドメイン層はこのポートのみに依存
+- `src/lib/accounting/memory-store.ts`: InMemory実装。`runInTransaction`はスナップショット方式で失敗時ロールバック(原子性)
+- `src/lib/accounting/service.ts`: `AccountingService`。全ての変更操作を `runInTransaction` 内で検証→書込→auditLogs記録の順に実行
+  - 取引登録/更新/削除/確定、経費登録(Transaction+Expenseを原子的に作成)、支払記録、顧客・案件・請求書登録、入金消込(残額超過を拒否・全額でpaid化)、領収書の状態遷移(unprocessed/linked/archived)、月次集計の再計算、未入金・未払チェック、決算チェックリスト、会計期間のopen/close(期間内Transactionをlocked化)、AI提案の保存/採用/拒否、重複候補検出
+
+### 設計上の判断
+
+- 金額は正の円整数のみ許可(0円・負数は拒否)。方向はtypeで表現する
+- `aiSuggestion`は専用メソッド経由でのみ書き込み。採用(accept)は提案値を確定フィールドへコピーするがstatusはdraftのまま — confirmedは別途ユーザーの確定操作が必須。拒否は確定値を一切変更しない
+- AuditActionを `suggest_ai`/`reject_ai` で拡張(スキーマの列挙は例示扱い)
+- 領収書↔取引の紐付けはlink/unlink操作のみが更新し両者を同一トランザクションで整合させる
+- `receiptIds`は入力patchで直接変更不可
+- 締め処理は期間内のdraft/confirmed全取引をlocked化。draft残存はチェックリストでblockerとして事前可視化
+- monthlySummariesはconfirmed/locked取引のみ集計する派生データで、監査対象外
+- `refreshInvoiceStatuses`はsystemアクターとしてissued→overdueを記録
+- ExpenseのIDは対応Transactionと同一(1:1)として整合性を確保
+- 会計ロジックは `src/lib/accounting/` に集約しUI(`src/app/`)には一切書いていない
+
+### 実行したテスト
+
+- `pnpm lint` — 合格
+- `pnpm typecheck` — 合格(ローカル`.next`再生成後)
+- `pnpm test` — 合格(8ファイル113件。金額0円/負数/小数、年度境界(4月始まりの3月末/4月初)、月末(大の月・うるう年2月)、二重登録(冪等キー再送)、未入金(全額/一部/過払い拒否/遅延日数)、未払(期限切れ検出・支払解消)、締め済み期間(登録/更新/削除/確定/支払記録の拒否・locked化・二重close拒否)、AI提案(採用してもconfirmedにならない/拒否で確定値不変/再操作拒否/信頼度範囲外)、状態遷移、監査ログ、トランザクション原子性)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 該当なし(ドメイン層はFirestore非依存。Rules/Emulator検証はfirebase-security worktreeの範囲)
+
+### 環境メモ(重要)
+
+- このworktreeの `node_modules` / `.next` はメインcheckoutへのシンボリンクだったが、Turbopackのhermetic root解決により `pnpm build` が「Could not find the Next.js package」で失敗し、共有`.next`の型生成物が他worktreeのページを参照して `typecheck` も壊れていた。firebase-securityと同様に実体install(`rm`シンボリンク→`pnpm install --frozen-lockfile`)へ切り替えて解消。他のシンボリンク組worktree(web-ui, ai-accounting)でも同じ問題が出るはず
+- 共有`.next`では複数worktreeのbuildがロック待ち・成果物を相互上書きするため、worktreeごとの実体`.next`の方が分離として正しい
+
+### 未解決事項・次の担当者への注意事項
+
+- `AccountingStore`ポートのFirestore実装(firebase-admin SDK + runTransaction + idempotencyKey一意制約)は未実装。Server Actions/Route Handlersからの接続はweb-ui側で行う
+- `businessId`スコープのアクセス制御・`aiSuggestion`のクライアント書込禁止・auditLogs改ざん防止はSecurity Rules層(firebase-security worktree)の責務
+- 個人事業主の消費税丸めルール(切り捨て)はvalidateにtaxAmount上限チェックのみ実装。税計算エンジン自体は未実装
+- サービスの`asOf`/`today()`はUTC基準。JST基準が必要ならclock注入側で調整する
