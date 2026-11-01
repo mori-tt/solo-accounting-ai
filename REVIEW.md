@@ -16,6 +16,41 @@
 
 ## Log
 
+## 2026-11-02: 取引のCSVエクスポート/インポート(Issue #31)
+
+- Worktree: csv-io
+
+### 実装内容
+
+取引一覧画面へのCSV出力・CSV取込機能。依存追加なしの自前CSV実装。
+
+- `src/lib/csv.ts`(新規): 汎用CSV部と取引マッピング部
+  - `serializeCsv`: RFC 4180 系(`,` `"` 改行をクォート、`"`→`""`、行末CRLF)
+  - `parseCsv`: クォート内改行・`""`・CRLF/LF/CR受理、先頭BOM除去、末尾改行で空行を作らない
+  - `decodeCsvBytes`: BOM検出(UTF-8/UTF-16LE/BE)+ UTF-8厳格デコード失敗時のShift_JISフォールバック(TextDecoder標準機能)
+  - 取引向け: `TRANSACTION_CSV_HEADER`(日付/種別/科目コード/科目名/取引先/摘要/金額/状態)、`buildTransactionsCsv`、`transactionToCsvRow`、`parseTransactionsCsv`
+  - インポート検証: 先頭行に既知列名が2つ以上あればヘッダーとして列名で対応付け(列順入れ替え・余分列を許容、必須は日付/種別/科目コード/金額)。なければエクスポート列順で位置読み。行ごとにエラー配列+`TransactionInput`を返す。科目コードはACCOUNT_OPTIONS照合、日付は`dateString`スキーマ、金額は全角数字・円記号・桁区切りを正規化して正の整数円のみ。最終確認としてサーバーと同一の`transactionSchema`で再検証
+- `src/app/(app)/transactions/transaction-csv-import.tsx`(新規): ファイル選択→パース→プレビュー表(行番号・解釈値・行別エラー)→「N件を登録」で行ごとに `createTransaction` を逐次呼ぶ取込パネル。エラー行は登録対象から自動除外。行ごとに `crypto.randomUUID()` の冪等キーを確定時点で採番し、失敗行の再登録・通信断での重複を防ぐ。登録済み行は対象外なので部分失敗後の再実行が安全。Shift_JIS等で読んだ場合はファイル名にエンコーディングを表示
+- `transactions-screen.tsx`: PageHeaderに「CSV出力」(全ロール、表示中の月範囲をBOM付UTF-8で `transactions-YYYYMM.csv` ダウンロード)と「CSV取込」ボタン(canEdit=viewer以外のみ)を追加。0件月はヘッダーのみ出力=取込テンプレートとしても使える
+- `src/lib/csv.test.ts`(新規): 26件。生成/パース/ラウンドトリップ、BOM・UTF-16・Shift_JIS検出、エクスポート列・ラベル、ヘッダー名マッピング、行別バリデーションエラー、空行/列不足/必須列欠如
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(25ファイル324件、skip 10)
+- `pnpm build` — 合格
+
+### 未解決事項・次の担当者への注意事項
+
+- インポート登録はクライアントから行ごとに `createTransaction` を逐次呼ぶ方式(既存経路踏襲)。締め期間違反等のサーバー側エラーは行単位で「失敗」として残り、再登録ボタンでリトライ可能(冪等キーは行ごとに固定済み)。全行を1トランザクションにするバルクAPIは要件外のため未実装
+- 取込は常に draft 作成のため CSV の「状態」列は読まない。「科目名」列も参照せず科目コードが正(科目名と不一致でも警告は出さない)
+- Shift_JIS判定は「UTF-8厳格デコード失敗→Shift_JIS」のヒューリスティック。SJISとしても不正なバイト列は U+FFFD になる(行エラーとして可視化される)
+- エクスポートは画面の種別/状態フィルタに関わらず表示月範囲の全取引を出力する(「月範囲の取引」の解釈)
+- `pnpm test:rules` / `pnpm test:emulators` / E2E は未実施(firestore.rules・storage.rules への変更なし、UI新規要素のE2E未カバーは既存画面と同じ扱い)
+
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 
 - Worktree: ai-ui-integration

@@ -47,6 +47,8 @@ import {
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
 import { AiSuggestionCard } from "@/components/ai-suggestion-card";
+import { buildTransactionsCsv, CSV_UTF8_BOM } from "@/lib/csv";
+import { TransactionCsvImport } from "./transaction-csv-import";
 import { TransactionForm } from "./transaction-form";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -342,6 +344,7 @@ export function TransactionsScreen() {
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
 
   const range = useMemo(() => monthKeyDateRange(monthKey), [monthKey]);
@@ -386,11 +389,43 @@ export function TransactionsScreen() {
         title="取引一覧"
         description="取引はまず下書きとして登録し、内容を確認してから確定します"
         actions={
-          canEdit ? (
-            <Button onClick={() => setShowForm((v) => !v)}>
-              {showForm ? "閉じる" : "取引を登録"}
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                // BOM付UTF-8でExcelでも文字化けせず開ける
+                const blob = new Blob(
+                  [
+                    CSV_UTF8_BOM +
+                      buildTransactionsCsv(data?.transactions ?? []),
+                  ],
+                  { type: "text/csv;charset=utf-8" },
+                );
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `transactions-${monthKey}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              disabled={data === undefined}
+            >
+              CSV出力
             </Button>
-          ) : undefined
+            {canEdit && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowImport((v) => !v)}
+                >
+                  {showImport ? "取込を閉じる" : "CSV取込"}
+                </Button>
+                <Button onClick={() => setShowForm((v) => !v)}>
+                  {showForm ? "閉じる" : "取引を登録"}
+                </Button>
+              </>
+            )}
+          </>
         }
       />
 
@@ -418,6 +453,14 @@ export function TransactionsScreen() {
             onCancel={() => setShowForm(false)}
           />
         </Card>
+      )}
+
+      {canEdit && showImport && (
+        <TransactionCsvImport
+          businessId={businessId ?? ""}
+          onImported={reload}
+          onClose={() => setShowImport(false)}
+        />
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
