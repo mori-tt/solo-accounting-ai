@@ -19,8 +19,8 @@ import { accountLabel } from "@/lib/accounts";
 import {
   currentMonthKey,
   formatMonthKey,
+  formatYen,
   monthKeyDateRange,
-  shiftMonthKey,
 } from "@/lib/format";
 import {
   Alert,
@@ -32,6 +32,7 @@ import {
   EmptyState,
   ErrorState,
   LoadingBlock,
+  MonthNav,
   PageHeader,
   Select,
   tableClass,
@@ -105,7 +106,7 @@ function TransactionRow({
           )}
           {t.receiptIds.length > 0 && (
             <span className="ml-1">
-              <Badge tone="gray">証憑{t.receiptIds.length}</Badge>
+              <Badge tone="gray">領収書{t.receiptIds.length}</Badge>
             </span>
           )}
         </td>
@@ -208,7 +209,7 @@ function TransactionRow({
       <ConfirmDialog
         open={confirmDelete}
         title="取引の削除"
-        message={`${t.date} / ${accountLabel(t.account)} / ${t.amount.toLocaleString("ja-JP")}円 を削除します。この操作は取り消せません。`}
+        message={`${t.date} / ${accountLabel(t.account)} / ${formatYen(t.amount)} を削除します。この操作は取り消せません。`}
         confirmLabel="削除する"
         loading={busy}
         onCancel={() => setConfirmDelete(false)}
@@ -235,7 +236,7 @@ export function TransactionsScreen() {
   const [formBusy, setFormBusy] = useState(false);
 
   const range = useMemo(() => monthKeyDateRange(monthKey), [monthKey]);
-  const { data, loading, error, reload } = useApiData(
+  const { data, initialLoading, error, reload } = useApiData(
     () =>
       callApi(() =>
         listTransactions(businessId ?? "", {
@@ -297,23 +298,7 @@ export function TransactionsScreen() {
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1">
-          <Button
-            variant="secondary"
-            onClick={() => setMonthKey(shiftMonthKey(monthKey, -1))}
-          >
-            ← 前月
-          </Button>
-          <span className="min-w-24 text-center text-sm font-medium">
-            {formatMonthKey(monthKey)}
-          </span>
-          <Button
-            variant="secondary"
-            onClick={() => setMonthKey(shiftMonthKey(monthKey, 1))}
-          >
-            翌月 →
-          </Button>
-        </div>
+        <MonthNav monthKey={monthKey} onChange={setMonthKey} />
         <Select
           className="w-32"
           value={typeFilter}
@@ -340,7 +325,7 @@ export function TransactionsScreen() {
 
       {error ? (
         <ErrorState message={error} onRetry={reload} />
-      ) : loading && data === undefined ? (
+      ) : initialLoading ? (
         <LoadingBlock />
       ) : filtered.length === 0 ? (
         <EmptyState

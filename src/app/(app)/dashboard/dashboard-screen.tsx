@@ -90,7 +90,7 @@ export function DashboardScreen() {
   if (!businessId) return <LoadingBlock />;
   if (initialLoading) return <LoadingBlock />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (!data) return <ErrorState message="データを取得できませんでした" onRetry={reload} />;
+  if (!data) return <ErrorState onRetry={reload} />;
 
   const profit = data.summary.totalIncome - data.summary.totalExpense;
   const allClear =

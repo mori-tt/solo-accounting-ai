@@ -16,6 +16,46 @@
 
 ## Log
 
+## 2026-11-02: (app)画面品質の統一 + 認証まわり死コード削除
+
+- Worktree: ui-polish
+
+### 実装内容
+
+- 死コード削除: `src/app/auth-status.tsx`(`AuthStatus`)と `src/lib/firebase/auth-provider.tsx`(`AuthProvider`/`useAuth`)。`AppProvider`(`@/components/auth-provider`)一本化済みで参照ゼロだった
+- `src/components/ui.tsx`
+  - `ErrorState` の `message` を省略可にし既定文言「データを取得できませんでした」へ統一(dashboard/closing/monthly の3表記揺れを解消)
+  - `MonthNav` 追加: 「← 前月 / 翌月 →」ブロックを取引一覧・月次レポートから共通化
+  - `FileInput` 追加: 領収書アップロードの素の `<input type=file>` を共通スタイル化
+  - `formIssuesMessage` 追加: `parseForm` の issues("path: message"形式)から英語パスを除去し、`items.N.field` は「N行目」に変換。全フォームの `issues.join(" / ")` を置き換え
+- フォームバリデーション表示の統一: 全 `<form>` に `noValidate` を付与し、ネイティブのポップアップ(必須・type=email)と zod+Alert の二系統表示を zod+Alert へ一本化。`required` 属性はセマンティクス/a11y用に残しつつ必須項目(顧客名・案件名・事業名・開始月・請求明細など)に補完
+- エラー表示の統一
+  - 請求書「発行する」がエラー時に無言失敗(unhandled rejection)だったのを `actionError`+Alert 化
+  - 入金フォーム・メンバー招待フォームの Alert が flex 行内に潰れて表示されていたのを行下へ移動
+  - 経費「支払済にする」に busy 状態を追加し、行操作エラーをフォームエラーと分離(actionError)
+- 日本語UIの統一
+  - 「証憑」表記を「領収書」へ統一(取引バッジ・決算チェックのセクション名。画面名は領収書確認)
+  - 「紐付け済み/紐付済み」→「紐付済み」、「オープン」→「未締め」(期間ステータス)、案件画面の「ステータス」→「状態」、フィルタ先頭項目を「すべての状態」へ統一
+  - 空状態を「〜がまだありません」パターンへ統一、フィルタ適用時は「条件に一致する〜がありません」を併用(領収書・案件も対応)
+  - 金額の `toLocaleString+"円"` 直書きを `formatYen`("¥12,000"表記)へ統一
+  - 領収書の「紐付け先」が取引ID生表示だったのを「日付 / 科目 / 金額」へ解決
+  - 取引フォームで現行種別に無い科目コードが英字生表示されるのを `accountLabel` 経由へ
+- `src/components/status-badge.tsx`: 期間 `open` のラベル「オープン」→「未締め」
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(先に `next typegen` で生成型 `.next/types` を作成。worktree 直後の初回のみ必要)
+- `pnpm test` — 合格(18ファイル213件、skip 7)
+- `pnpm build` — 合格(全ルート static prerender)
+- Firebase Emulator tests — 未実施(rules・サーバー側ロジックに変更なし)
+
+### 未解決事項・次の担当者への注意事項
+
+- `src/lib/firebase/auth.ts` は今回の削除で参照ゼロになったが、スコープ外(src/lib)のため残置。Googleサインイン等で再利用するなら維持、不要なら別タスクで削除候補
+- worktree 作成直後は `pnpm install` 後に `pnpm exec next typegen` も必要(`.next` 未生成だと `LayoutProps` 未解決で typecheck が落ちる)
+- `Field` コンポーネントの `error` prop は未使用のまま(エラーはフォーム単位の Alert に集約する現行方針を維持)
+
 ## 2026-11-02: `.next` symlink 除去と main のビルド破壊修復
 
 - Worktree: fix-next-symlink

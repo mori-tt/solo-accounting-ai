@@ -10,7 +10,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import { formatYen } from "@/lib/format";
+import { formatMonthKey, formatYen, shiftMonthKey } from "@/lib/format";
 
 /** 共通UIプリミティブ。全画面で ローディング/エラー/空状態 を統一する。 */
 
@@ -59,10 +59,10 @@ export function ScreenLoading({ label }: { label?: string }) {
 }
 
 export function ErrorState({
-  message,
+  message = "データを取得できませんでした",
   onRetry,
 }: {
-  message: string;
+  message?: string;
   onRetry?: () => void;
 }) {
   return (
@@ -259,6 +259,17 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className={`${inputClass} ${className}`} {...rest} />;
 }
 
+export function FileInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  const { className = "", ...rest } = props;
+  return (
+    <input
+      type="file"
+      className={`block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-700 hover:file:bg-zinc-50 dark:text-zinc-300 dark:file:border-zinc-700 dark:file:bg-zinc-800 dark:file:text-zinc-200 dark:hover:file:bg-zinc-700 ${className}`}
+      {...rest}
+    />
+  );
+}
+
 export function Card({
   children,
   className = "",
@@ -295,6 +306,57 @@ export function PageHeader({
         )}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * parseForm の issues("path: message" 形式)を表示用に整形する。
+ * スキーマのメッセージ自体が項目名を含むため、トップレベルの
+ * 英語パスは落とし、明細行などの配列パスだけ行番号を補う。
+ */
+export function formIssuesMessage(issues: string[]): string {
+  return issues
+    .map((issue) => {
+      const sep = issue.indexOf(": ");
+      if (sep === -1) return issue;
+      const path = issue.slice(0, sep);
+      const message = issue.slice(sep + 2);
+      const parts = path.split(".");
+      if (parts.length === 3 && Number.isInteger(Number(parts[1]))) {
+        return `${Number(parts[1]) + 1}行目: ${message}`;
+      }
+      if (/^[a-zA-Z]+$/.test(path)) return message;
+      return issue;
+    })
+    .join(" / ");
+}
+
+/** 月送りナビ(一覧・レポート画面で共用) */
+export function MonthNav({
+  monthKey,
+  onChange,
+}: {
+  monthKey: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="secondary"
+        onClick={() => onChange(shiftMonthKey(monthKey, -1))}
+      >
+        ← 前月
+      </Button>
+      <span className="min-w-24 text-center text-sm font-medium">
+        {formatMonthKey(monthKey)}
+      </span>
+      <Button
+        variant="secondary"
+        onClick={() => onChange(shiftMonthKey(monthKey, 1))}
+      >
+        翌月 →
+      </Button>
     </div>
   );
 }

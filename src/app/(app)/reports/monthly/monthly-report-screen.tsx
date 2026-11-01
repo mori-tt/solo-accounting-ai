@@ -14,7 +14,6 @@ import {
   currentMonthKey,
   formatDateTime,
   formatMonthKey,
-  shiftMonthKey,
 } from "@/lib/format";
 import {
   Alert,
@@ -24,6 +23,7 @@ import {
   EmptyState,
   ErrorState,
   LoadingBlock,
+  MonthNav,
   PageHeader,
   tableClass,
 } from "@/components/ui";
@@ -82,22 +82,8 @@ export function MonthlyReportScreen() {
         }
       />
 
-      <div className="mb-4 flex items-center gap-1">
-        <Button
-          variant="secondary"
-          onClick={() => setMonthKey(shiftMonthKey(monthKey, -1))}
-        >
-          ← 前月
-        </Button>
-        <span className="min-w-24 text-center text-sm font-medium">
-          {formatMonthKey(monthKey)}
-        </span>
-        <Button
-          variant="secondary"
-          onClick={() => setMonthKey(shiftMonthKey(monthKey, 1))}
-        >
-          翌月 →
-        </Button>
+      <div className="mb-4">
+        <MonthNav monthKey={monthKey} onChange={setMonthKey} />
       </div>
 
       {actionError && (
@@ -108,8 +94,10 @@ export function MonthlyReportScreen() {
 
       {error ? (
         <ErrorState message={error} onRetry={reload} />
-      ) : initialLoading || !data ? (
+      ) : initialLoading ? (
         <LoadingBlock />
+      ) : !data ? (
+        <ErrorState onRetry={reload} />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

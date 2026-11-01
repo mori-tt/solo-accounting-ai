@@ -87,7 +87,7 @@ function ChecklistBody({
 
   if (initialLoading) return <LoadingBlock />;
   if (error) return <ErrorState message={error} onRetry={reload} />;
-  if (!data) return <ErrorState message="取得に失敗しました" onRetry={reload} />;
+  if (!data) return <ErrorState onRetry={reload} />;
 
   const closed = data.period.status === "closed";
 
@@ -173,7 +173,7 @@ function ChecklistBody({
       </Section>
 
       <Section
-        title="証憑未添付の確定済み経費"
+        title="領収書未添付の確定済み経費"
         count={data.missingReceiptTransactions.length}
       >
         <table className={tableClass}>
@@ -413,7 +413,7 @@ export function ClosingScreen() {
         <LoadingBlock />
       ) : !selected ? (
         <EmptyState
-          title="会計期間がありません"
+          title="会計期間がまだありません"
           description={
             canEdit
               ? "日付を指定して「期間を作成」してください"

@@ -20,6 +20,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  formIssuesMessage,
   LoadingBlock,
   PageHeader,
   Select,
@@ -77,7 +78,7 @@ function ProjectForm({
     }
     const parsed = parseForm(projectSchema, { customerId, name });
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setError(undefined);
@@ -89,13 +90,14 @@ function ProjectForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form onSubmit={submit} noValidate className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="顧客">
           <Select
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
             disabled={!!initial}
+            required
           >
             <option value="">選択してください</option>
             {customers.map((c) => (
@@ -110,10 +112,11 @@ function ProjectForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="例: Webサイト制作"
+            required
           />
         </Field>
         {initial && (
-          <Field label="ステータス">
+          <Field label="状態">
             <Select
               value={status}
               onChange={(e) => setStatus(e.target.value as ProjectStatus)}
@@ -233,9 +236,9 @@ export function ProjectsScreen() {
           className="w-40"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          aria-label="ステータスで絞り込み"
+          aria-label="状態で絞り込み"
         >
-          <option value="">すべて</option>
+          <option value="">すべての状態</option>
           {STATUS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -250,7 +253,11 @@ export function ProjectsScreen() {
         <LoadingBlock />
       ) : filtered.length === 0 ? (
         <EmptyState
-          title="案件がまだありません"
+          title={
+            (data?.projects.length ?? 0) > 0
+              ? "条件に一致する案件がありません"
+              : "案件がまだありません"
+          }
           description={
             canEdit
               ? data?.customers.length
@@ -266,7 +273,7 @@ export function ProjectsScreen() {
               <tr>
                 <th>案件名</th>
                 <th>顧客</th>
-                <th>ステータス</th>
+                <th>状態</th>
                 {canEdit && <th></th>}
               </tr>
             </thead>

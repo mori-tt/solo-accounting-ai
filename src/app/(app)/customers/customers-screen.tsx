@@ -19,6 +19,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  formIssuesMessage,
   LoadingBlock,
   PageHeader,
   TextInput,
@@ -51,7 +52,7 @@ function CustomerForm({
     e.preventDefault();
     const parsed = parseForm(customerSchema, { name, email, address });
     if (!parsed.success) {
-      setError(parsed.issues.join(" / "));
+      setError(formIssuesMessage(parsed.issues));
       return;
     }
     setError(undefined);
@@ -67,13 +68,14 @@ function CustomerForm({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
+    <form onSubmit={submit} noValidate className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="顧客名">
           <TextInput
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="例: 株式会社サンプル"
+            required
           />
         </Field>
         <Field label="メールアドレス">
@@ -189,7 +191,7 @@ export function CustomersScreen() {
         <LoadingBlock />
       ) : !data || data.length === 0 ? (
         <EmptyState
-          title="顧客がまだ登録されていません"
+          title="顧客がまだありません"
           description={
             canEdit ? "「顧客を登録」から追加してください" : undefined
           }
