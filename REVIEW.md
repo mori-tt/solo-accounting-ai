@@ -67,6 +67,129 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - メンバー招待の E2E は Auth Emulator の `getUserByEmail` 依存。招待相手のユーザー作成が先に必要(helpers の `signUp` を別コンテキストの page で呼ぶ形を members.spec.ts 参照)
 - 領収書の「取引に紐付ける」UI 内の「紐付ける」ボタン表記は意図的に残っている模様(ui-polish ではバッジ/フィルタのみ統一)
 
+## 2026-11-02: 請求書への消費税エンジン適用(Issue #12)
+
+- Worktree: invoice-tax
+
+### 実装内容
+
+- `src/lib/accounting/invoice-tax.ts` 新規: 請求書用の消費税計算をまとめた純粋関数モジュール。税額算出は `domain/tax`(`computeTaxAmount`/`sumTaxAmounts`、10%/8%・整数円・切り捨て)へ委譲し再実装なし。`invoices-screen.tsx`(フォーム見積・一覧表示)と `services/sales.ts`(登録時の確定値)が同一計算経路を共有する
+  - `invoiceItemTaxAmount(item)`: 明細1行の内税。`computeInvoiceTotals(items)`: `{totalAmount, taxAmount}`(明細ごと切り捨て→合算)。`invoiceTaxAmount(invoice)`: 保存済み `taxAmount` 優先、未保存(税フィールド導入前データ)なら明細から導出
+  - 金額は税込として扱う(ACCOUNTING_RULES.md「初期版は税込表示を基準にする」)。税率省略時は標準税率10%(`DEFAULT_INVOICE_TAX_RATE`)
+- `src/lib/accounting/types.ts`: `InvoiceItem` に `taxRate?: ConsumptionTaxRate`・`taxAmount?`、`Invoice` に `taxAmount?` を追加(いずれもoptionalで後方互換)
+- `services/sales.ts`: `validateInvoiceItems` → `normalizeInvoiceItems` へ拡張。税率区分の検証(standard/reduced以外は INVALID_INPUT)・明細ごとの `taxRate`/`taxAmount` 付与・`invoice.taxAmount` 保存。クライアント指定の `item.taxAmount`/`input.taxAmount` は従来の `totalAmount` と同じく再計算値との一致を検証(AMOUNT_MISMATCH)
+- `validation/schemas.ts`: `invoiceItemSchema` に `taxRate` optional enum 追加。`actions/sales.ts` は `taxRate` をサービスへ渡すのみ(計算はサービス側)
+- `invoices-screen.tsx`: 明細行に税率セレクト(10%/軽減8%)、ローカル reduce 計算を `computeInvoiceTotals` に置換し「合計 ¥X(うち消費税 ¥Y)」を表示。一覧の請求額セルに「うち消費税」行を追加(formatYen/`Amount` 維持、旧データは `invoiceTaxAmount` で導出描画)
+- `docs/FIRESTORE_SCHEMA.md`: invoices の items 構造と `taxAmount` フィールドを追記
+
+### 設計上の判断
+
+- 税額の基準は「税込・内税」: `unitPrice`/`amount`/`totalAmount` は税込金額のまま据え置き、`basis: "inclusive"` で内税を取り出す。税抜計上への切替はBusinessの会計方式設定ができた段階で対応
+- firestore.rules の `validInvoice` は `items` 構造を検査しないため rules 変更なし。`toStore` が `undefined` を落とすため optional フィールドは新規ドキュメントのみに保存される
+- 旧請求書(税フィールドなし)は読み取り時に標準税率として導出表示する。書き換えはしない(締め済み含む既存データの直接変更を避ける)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(21ファイル268件、skip 7。invoice-tax.test.ts 新規8件 + sales.test.ts 追加5件)
+- `pnpm build` — 合格(全ルート static prerender)
+- Firebase Emulator tests — 未実施(rules変更なしのため)
+
+### 未解決事項・次の担当者への注意事項
+
+- `domain/`(旧世代 `service.ts`/`validate.ts`)側の請求書経路は未適用。新世代 `services/` のみ接続した(両世代の統合整理は別タスク)
+- 請求書の税額内訳(税率ごとの対象額・税額の適格請求書様式表示)、免税事業者モード時の扱いは未対応
+- 明細 `amount` 未達(`quantity`/`unitPrice` のみ)から税額を逆算する経路はなく、amount 確定後に内税を取り出す設計
+
+
+## 2026-11-02: AI提案パイプラインのAPI配線
+
+- Worktree: ai-api-wiring
+- Issue: #11
+
+### 実装内容
+
+- `src/lib/ai`(provider/service/store/schema)を Route Handler 経由でアプリに接続。前タスク(ai-llm-provider)が残した「接続は別タスク」の対応
+- `src/app/api/ai/suggestions/route.ts` 新規:
+  - `GET` 提案一覧。`targetType`/`targetId`/`kind`/`status`/`limit` で絞込、createdAt降順、viewer以上
+  - `POST` 提案実行。`{businessId, kind, target:{type,id}, input?}` を受理、editor以上。kind↔targetType対応と対象のbusinessId内存在を検証してから `AISuggestionService.run` へ。`input` は128KB上限
+- `src/app/api/ai/suggestions/[suggestionId]/route.ts` 新規: `PATCH` で `{businessId, decision: accepted|rejected, rejectReason?}` を受理し `service.accept/reject` を呼ぶ。確定データへの反映は行わない(AI_POLICY準拠)。存在しない提案は404、処理済みは400
+- `src/lib/api/ai.ts` 新規: `getAISuggestionService()`(FirestoreSuggestionStore + createAIProvider、llm-provider.ts記載の想定構成)と `assertSuggestionTarget()`(kind↔targetType対応+対象ドキュメント存在でbusinessId境界を担保)
+- `src/lib/ai/store.ts`: `SuggestionListFilter` 型・`DEFAULT_LIST_LIMIT(50)`/`MAX_LIST_LIMIT(100)`・`list` をインターフェースと InMemory に追加
+- `src/lib/ai/firestore-store.ts`: `list` 実装。複合インデックスを増やさないため単一フィールド等価 `where`(targetId→`target.id`、なければstatus)のみ使い、残りの絞込とcreatedAt降順ソートはメモリ。走査は200件打ち切り
+- `src/lib/ai/service.ts`: `get`/`list` パススルー追加(Route Handlerがサービス経由で完結するよう)
+- `src/lib/ai/types.ts`: `KIND_TARGET_TYPE` 対応表を追加(receipt_extraction→receipt等)
+- `src/lib/validation/schemas.ts`: `runSuggestionSchema`/`decideSuggestionSchema`/`listSuggestionQuerySchema` を追加(zod)
+- 監査は `AISuggestionService` の `appendAudit`(run_ai/approve_ai/reject_ai)が担保。提案・監査ともにサーバーサイド(Admin SDK)のみで、鍵は非NEXT_PUBLIC環境変数
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件は既存 receipts-screen の `<img>`)
+- `pnpm typecheck` — 合格(先に `next typegen` 実行)
+- `pnpm test` — 合格(21ファイル258件、skip 10。新規 `src/lib/ai/store.test.ts` 4件を含む)
+- `pnpm build` — 合格(`/api/ai/suggestions`, `/api/ai/suggestions/[suggestionId]` が dynamic ルートとして認識)
+- `pnpm test:emulators` — 合格(2ファイル7件。JDK21 `JAVA_HOME=/opt/homebrew/opt/openjdk@21/...` 設定で実行。新規 `tests/emulator/aiSuggestionStore.test.ts` でFirestore往復・list・businessId境界を検証)
+
+### 未解決事項・次の担当者への注意事項
+
+- `pnpm test:rules` は未実施。実行時点で別worktreeのEmulator(8080/9099/9199/4400)が起動中で、AGENTS.mdの「Emulatorは全worktree通して1系統」制約に従い見送り(rulesに変更なし。過去例では起動中Emulatorへの直接接続で代替可能)
+- `retry`(needs_review提案の再実行)はサービス層に実装済みだがAPI未公開(Issueの列挙に無いため)。UI配線時に必要ならPATCHか専用ルートで公開
+- rules の aiSuggestions update経路(`resolvedBy`等)は旧フィールド名(`type`/`targetPath`/`suggestion`)前提で、新shape(`kind`/`target`/`payload`/`decidedBy`)ドキュメントには実質機能しない。現状すべての状態解決はPATCH経由(Admin SDK)なので実害なし
+- `firestore.indexes.json` の aiSuggestions索引2件は旧shape向け。新実装のlistはorderBy不使用で参照されない(残置で無害)
+- `createAiSuggestion`(`src/lib/firebase/server.ts`)は旧shapeで未使用のまま。旧 `src/lib/accounting/services/aiSuggestions.ts` 系(ドキュメント内 `aiSuggestion` フィールド)との統合整理は別タスク
+- UI(領収書画面等)からの接続は未着手。本タスクはAPI公開まで
+- 提案実行の `input` はクライアント指定。receipt_extraction には `ocrText` が必要(OCR基盤は別タスク)
+## 2026-11-02: 死コード削除 `src/lib/firebase/auth.ts`(Issue #13)
+
+- Worktree: dead-code-cleanup
+
+### 実装内容
+
+- `src/lib/firebase/auth.ts`(`signInWithGoogle`/`signInWithEmail`/`signUpWithEmail`/`signOut`/`ensureUserDocument`)を削除。ui-polish で `src/lib/firebase/auth-provider.tsx`・`src/app/auth-status.tsx` が削除された結果、参照ゼロになっていた
+- 参照確認: `firebase/auth`・`@/lib/firebase/auth`・`./auth` 相対import・各export関数名を grep。import は npmパッケージ `firebase/auth` へのもののみ(`login-screen.tsx`/`components/auth-provider.tsx`/`client.ts`)、`signOut()` 呼出しは `useApp()` 経由で local 実装を `firebaseSignOut` 直呼びしており、本ファイルへの参照はゼロと確認
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 合格
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(先に `pnpm exec next typegen` が必要。worktree 初回のみ)
+- `pnpm test` — 合格(20ファイル254件、skip 7)
+- `pnpm build` — 合格(全ルート prerender)
+- Firebase Emulator tests — 未実施(クライアント側死コード削除のみ。Rules・サーバーロジックに変更なし)
+
+### 未解決事項・次の担当者への注意事項
+
+- Googleサインイン(`signInWithPopup`/`GoogleAuthProvider`)や初回 `users/{uid}` 作成(`ensureUserDocument`)は現状どの画面からも呼ばれていない。将来 Google ログインを実装する場合は同等処理の再実装が必要
+- REVIEW.md の記法は新しいエントリを `## Log` 直下へ前置する形式のため、末尾ではなく先頭に追記した
+## 2026-11-02: CI の Node バージョン修正(20 → 26)
+
+- Worktree: ci-node-version
+
+### 実装内容
+
+- GitHub Actions CI が全ジョブ失敗していた原因を修正。CI が `node-version: 20` 固定だったが、依存が Node 20 非対応:
+  - `vitest@5.0.5` — `engines: ^22.12.0 || ^24.0.0 || >=26.0.0` → forks worker が `Cannot read properties of undefined (reading 'bind')` で全テスト起動失敗
+  - `firebase-admin@14.5.0` — `engines: >=22` → CI で `firebase-admin/firestore` 由来の型が any 化したと見られる TS7006/TS18046 が typecheck/build 両ジョブで多発(ローカル Node 26 では非再現・メカニズム未確定だが本修正で切り分け)
+- `.node-version`(`26`)を新設し `actions/setup-node` の `node-version-file` で参照。ローカル開発の v26 と同一、CI/ローカルの単一ソース化
+- `package.json` に `engines.node` を追加し要件を宣言
+
+### 変更ファイル
+
+- `.github/actions/setup-node-pnpm/action.yml`: `node-version: 20` → `node-version-file: .node-version`
+- `.node-version`: 新規(26)
+- `package.json`: `engines` 追加
+
+### 実行したテスト
+
+- ファイル変更のみ(CI 自体の検証は本PRのチェック実行で確認)
+- ローカルで再現確認: `vitest` forks worker が Node 20 で起動不可、`tsc` はローカル(node 26)で全合格
+
+### 未解決事項・次の担当者への注意事項
+
+- `@types/node` が `^20` のまま。`^26` への更新は別タスクで検討(型定義の実害は未確認)
+- ローカル開発者の Node が 22.12 未満だと `pnpm install` 時に engines 警告が出る
+
 ## 2026-11-02: (app)画面品質の統一 + 認証まわり死コード削除
 
 - Worktree: ui-polish

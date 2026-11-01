@@ -14,6 +14,11 @@ import {
   type InvoiceRow,
 } from "@/lib/actions/sales";
 import { callApi } from "@/lib/api-client";
+import {
+  computeInvoiceTotals,
+  invoiceTaxAmount,
+} from "@/lib/accounting/invoice-tax";
+import type { ConsumptionTaxRate } from "@/lib/accounting/domain/tax";
 import { formatYen, todayDateString } from "@/lib/format";
 import {
   invoiceSchema,
@@ -42,6 +47,7 @@ interface ItemDraft {
   description: string;
   quantity: string;
   unitPrice: string;
+  taxRate: ConsumptionTaxRate;
 }
 
 function InvoiceForm({
@@ -63,14 +69,16 @@ function InvoiceForm({
   const [issueDate, setIssueDate] = useState(todayDateString());
   const [dueDate, setDueDate] = useState("");
   const [items, setItems] = useState<ItemDraft[]>([
-    { description: "", quantity: "1", unitPrice: "" },
+    { description: "", quantity: "1", unitPrice: "", taxRate: "standard" },
   ]);
   const [error, setError] = useState<string>();
 
   const customerProjects = projects.filter((p) => p.customerId === customerId);
-  const total = items.reduce(
-    (s, i) => s + (Number(i.quantity) || 0) * (Number(i.unitPrice) || 0),
-    0,
+  const totals = computeInvoiceTotals(
+    items.map((i) => ({
+      amount: (Number(i.quantity) || 0) * (Number(i.unitPrice) || 0),
+      taxRate: i.taxRate,
+    })),
   );
 
   const setItem = (idx: number, patch: Partial<ItemDraft>) =>
@@ -89,6 +97,7 @@ function InvoiceForm({
         description: i.description,
         quantity: Number(i.quantity),
         unitPrice: Number(i.unitPrice),
+        taxRate: i.taxRate,
       })),
     };
     const parsed = parseForm(invoiceSchema, input);
@@ -192,6 +201,19 @@ function InvoiceForm({
               onChange={(e) => setItem(idx, { unitPrice: e.target.value })}
               required
             />
+            <Select
+              className="w-28"
+              value={item.taxRate}
+              onChange={(e) =>
+                setItem(idx, {
+                  taxRate: e.target.value as ConsumptionTaxRate,
+                })
+              }
+              aria-label="税率"
+            >
+              <option value="standard">10%</option>
+              <option value="reduced">軽減8%</option>
+            </Select>
             <Button
               type="button"
               variant="ghost"
@@ -210,14 +232,22 @@ function InvoiceForm({
           onClick={() =>
             setItems((prev) => [
               ...prev,
-              { description: "", quantity: "1", unitPrice: "" },
+              {
+                description: "",
+                quantity: "1",
+                unitPrice: "",
+                taxRate: "standard",
+              },
             ])
           }
         >
           明細を追加
         </Button>
         <p className="mt-2 text-right text-sm">
-          合計: <Amount value={total} />
+          合計: <Amount value={totals.totalAmount} />
+          <span className="text-zinc-400">
+            (うち消費税 <Amount value={totals.taxAmount} />)
+          </span>
         </p>
       </div>
 
@@ -449,6 +479,10 @@ export function InvoicesScreen() {
                     </td>
                     <td className="text-right">
                       <Amount value={row.invoice.totalAmount} />
+                      <div className="text-xs text-zinc-400">
+                        うち消費税{" "}
+                        <Amount value={invoiceTaxAmount(row.invoice)} />
+                      </div>
                     </td>
                     <td className="text-right">
                       <Amount value={row.paidAmount} />
