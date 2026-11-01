@@ -46,6 +46,30 @@
 - 按分は表示専用で `monthlySummaries` 等の保存データには反映していない(Issueの「表示列追加レベル」指定どおり)。確定申告出力・決算書で按分額が必要になったら同じ `domain/allocation.ts` を再利用する
 - 割合編集はownerのみ(`updateBusinessSettings` 流用のため)。editorにも開放する場合はaction側の認可変更が必要
 - 按分ページは事業名等の既存値を `useApp().business` から同時送信する。別タブで事業設定を直後に変更した場合に古い値で上書きする可能性がある(設定画面と同じ既知の性質)
+## 2026-11-02: 監査ログ閲覧UI(Issue #48)
+- Worktree: audit-log-ui
+`businesses/{businessId}/auditLogs` を一覧表示する `/audit-log` 画面を新設。viewer以上・読み取り専用(編集操作なし)。依存追加なし。
+- `src/lib/audit-log-view.ts`(新規): 表示・絞り込みの純粋関数
+  - `parseAuditTargetPath`: `businesses/{bid}/{collection}/{docId}` を分解(事業ルートはcollection="businesses"、ネストパスは先頭サブコレクション+残り、解釈不可はundefined)
+  - `AUDIT_TARGET_TYPES` / `AUDIT_ACTIONS`: 対象種別・操作の日本語ラベル(フィルタ選択肢順を兼ねる)。actionはスキーマ上の4種に加え、実データで使われる `run_ai` / `approve_ai` / `reject_ai`(ai/service.tsのappendAudit経由)も定義
+  - `describeAuditEntry`: 「差分概要」列。監査ログはスナップショットを保存しない設計(docs/SECURITY_RULES.md)のため、targetPathの対象ラベル+操作から説明文を生成(例:「取引を更新」「会計期間を締め」「AI提案を承認」)
+  - `filterAuditLogs`: action完全一致・targetPathのコレクション部・createdAt期間(ISO瞬時・両端含む)で絞り込み、createdAt降順(同時刻はid降順)にソート
+- `src/lib/api/queries.ts`: `listAuditLogsRaw`追加(一覧クエリ集約方針に従う)。`.add()`で書かれたログはidフィールドを持たないためdoc.idを補完
+- `src/lib/actions/audit-logs.ts`(新規): `listAuditLogs(businessId)` Server Action。`requireViewer`で認可後、ログ一覧と`listMembers`を並列取得し`actorName`(displayName||email)を解決。名前解決失敗時もログは返す
+- `src/app/(app)/audit-log/`: `page.tsx`(既存ページと同じSuspense+`instant=false`パターン)と`audit-log-screen.tsx`
+  - 表示: 日時(formatDateTime)・ユーザー(名前。未解決はuid先頭8文字+titleにuid)・操作(Badge色分け)・対象種別・対象ID(titleにtargetPath)・概要
+  - フィルタ: 期間(開始日・終了日をローカルTZでISO瞬時に変換)・操作種別・対象種別。いずれもクライアント側で`filterAuditLogs`に適用
+  - ページング: 最新50件ずつ「さらに読み込み」(取得済みリストを表示側でスライス。フィルタ変更時は先頭に戻す)
+- `src/components/app-shell.tsx`: ナビに「監査ログ」追加(決算チェックと設定の間)
+- `src/lib/audit-log-view.test.ts`(新規): パース・ラベル・概要生成・絞り込み+ソートの単体テスト
+- `pnpm lint` — 合格(warning 1件: 既存のreceipts-screen `<img>`)
+- `pnpm test` — 合格(30ファイル379件、skip 10)
+- `pnpm build` — 合格(`/audit-log` が静的ルートとして登録)
+- Firebase Emulator tests — 該当なし(firestore.rules変更なし)
+- 監査ログのスキーマは識別情報のみ(targetPath+action)で差分スナップショットを持たない。「差分概要」は対象種別+操作の説明文であり、変更内容の差分そのものではない(スナップショット保存はSECURITY_RULESの方針と相談)
+- 一覧はコレクション全件取得→メモリ絞込(既存のlist系と同方針)。auditLogsが肥大化した場合は`firestore.indexes.json`既存の(targetPath ASC, createdAt DESC)索引を使ったサーバーサイドページングへの移行を検討(action絞り込みには別途索引が必要)
+- `action`フィールドのTS型(`AuditAction`)は4種だが実データにはAI系3種も混在する。画面はstring扱いで未知値をそのまま表示する
+- `writeAuditLog`/`appendAuditLog`経由のエントリはdocに`id`フィールドを持たず、`createdAt`欠損時は空文字フォールバック(表示上は空欄)
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
 ### 実装内容
