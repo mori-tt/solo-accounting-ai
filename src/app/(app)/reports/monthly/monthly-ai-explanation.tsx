@@ -12,6 +12,7 @@ import {
   runAiSuggestion,
 } from "@/lib/api-client";
 import { shiftMonthKey } from "@/lib/format";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import { useAISuggestions } from "@/lib/hooks/use-ai-suggestions";
 
 /**
@@ -31,6 +32,7 @@ export function MonthlyAIExplanation({
   canEdit: boolean;
 }) {
   const { businessId } = useApp();
+  const { label } = useAccounts();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const {
@@ -115,6 +117,7 @@ export function MonthlyAIExplanation({
               suggestion={s}
               busy={busy}
               canDecide={canEdit}
+              accountLabelFor={label}
               onDecide={
                 canEdit
                   ? (decision) =>

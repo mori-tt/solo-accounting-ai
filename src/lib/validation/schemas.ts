@@ -116,6 +116,30 @@ export const memberInviteSchema = z.object({
 });
 export type MemberInviteInput = z.infer<typeof memberInviteSchema>;
 
+/** カスタム科目コード。英数字と_(アンダースコア)のみ */
+export const accountCode = z
+  .string()
+  .min(1, "科目コードを入力してください")
+  .max(50, "科目コードは50文字以内で入力してください")
+  .regex(
+    /^[A-Za-z0-9_]+$/,
+    "科目コードは英数字と_(アンダースコア)で入力してください",
+  );
+
+export const customAccountItemSchema = z.object({
+  code: accountCode,
+  label: z.string().min(1, "科目名を入力してください").max(100),
+  kind: z.enum(["income", "expense"]),
+  parentCode: z.union([z.literal(""), accountCode]).optional(),
+  disabled: z.boolean().optional(),
+});
+export type CustomAccountInput = z.infer<typeof customAccountItemSchema>;
+
+/** 事業のカスタム科目一覧(上限50件)。一意性・標準科目との衝突はサーバー側でも検証 */
+export const customAccountsSchema = z
+  .array(customAccountItemSchema)
+  .max(50, "カスタム科目は50件までです");
+
 export const taxCategorySchema = z.enum([
   "taxable",
   "non_taxable",

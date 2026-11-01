@@ -10,7 +10,7 @@ import {
   markExpensePaidAction,
 } from "@/lib/actions/expenses";
 import { callApi } from "@/lib/api-client";
-import { accountOptionsFor, accountLabel } from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import { todayDateString } from "@/lib/format";
 import { expenseSchema, parseForm } from "@/lib/validation/schemas";
 import type { TaxCategory } from "@/lib/accounting/types";
@@ -44,6 +44,7 @@ const TAX_CATEGORY_LABELS: Record<TaxCategory, string> = {
 export function ExpensesScreen() {
   useBrowserOnly();
   const { businessId, business } = useApp();
+  const { optionsFor, label } = useAccounts();
   const canEdit = business?.role !== "viewer";
 
   const [date, setDate] = useState(todayDateString());
@@ -163,7 +164,7 @@ export function ExpensesScreen() {
                   required
                 >
                   <option value="">選択してください</option>
-                  {accountOptionsFor("expense").map((a) => (
+                  {optionsFor("expense").map((a) => (
                     <option key={a.code} value={a.code}>
                       {a.label}
                     </option>
@@ -276,7 +277,7 @@ export function ExpensesScreen() {
                   <td className="whitespace-nowrap">
                     {transaction?.date ?? "-"}
                   </td>
-                  <td>{accountLabel(transaction?.account ?? "")}</td>
+                  <td>{label(transaction?.account ?? "")}</td>
                   <td className="max-w-40 truncate">
                     {transaction?.counterparty || "-"}
                   </td>

@@ -12,7 +12,7 @@ import {
   listFiscalPeriods,
 } from "@/lib/actions/closing";
 import { callApi } from "@/lib/api-client";
-import { accountLabel } from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import { todayDateString } from "@/lib/format";
 import type { FiscalPeriod } from "@/lib/accounting/types";
 import {
@@ -74,6 +74,7 @@ function ChecklistBody({
   isOwner: boolean;
   onClosed: () => void;
 }) {
+  const { label } = useAccounts();
   const { data, initialLoading, error, reload } = useApiData(
     () =>
       callApi(() =>
@@ -155,7 +156,7 @@ function ChecklistBody({
               {data.draftTransactions.map((t) => (
                 <tr key={t.id}>
                   <td className="whitespace-nowrap">{t.date}</td>
-                  <td>{accountLabel(t.account)}</td>
+                  <td>{label(t.account)}</td>
                   <td className="text-right">
                     <Amount value={t.amount} />
                   </td>
@@ -184,7 +185,7 @@ function ChecklistBody({
               {data.missingReceiptTransactions.map((t) => (
                 <tr key={t.id}>
                   <td className="whitespace-nowrap">{t.date}</td>
-                  <td>{accountLabel(t.account)}</td>
+                  <td>{label(t.account)}</td>
                   <td className="text-right">
                     <Amount value={t.amount} />
                   </td>
@@ -232,7 +233,7 @@ function ChecklistBody({
                   <td className="whitespace-nowrap">
                     {u.transaction?.date ?? "-"}
                   </td>
-                  <td>{accountLabel(u.transaction?.account ?? "")}</td>
+                  <td>{label(u.transaction?.account ?? "")}</td>
                   <td>{u.expense.paymentDueDate ?? "期日未設定"}</td>
                   <td className="text-right">
                     {u.transaction && <Amount value={u.transaction.amount} />}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createTransaction } from "@/lib/actions/transactions";
 import { callApi } from "@/lib/api-client";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import {
   decodeCsvBytes,
   parseTransactionsCsv,
@@ -39,6 +40,7 @@ export function TransactionCsvImport({
   onImported: () => void;
   onClose: () => void;
 }) {
+  const { options } = useAccounts();
   const [fileLabel, setFileLabel] = useState<string>();
   const [fileError, setFileError] = useState<string>();
   const [rows, setRows] = useState<ImportRow[]>([]);
@@ -49,7 +51,7 @@ export function TransactionCsvImport({
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const { text, encoding } = decodeCsvBytes(bytes);
-      const result = parseTransactionsCsv(text);
+      const result = parseTransactionsCsv(text, options);
       setFileLabel(
         encoding === "utf-8"
           ? file.name

@@ -28,11 +28,7 @@ import {
   type AISuggestionJSON,
   type ReceiptExtractionPayload,
 } from "@/lib/ai/types";
-import {
-  ACCOUNT_OPTIONS,
-  accountLabel,
-  accountOptionsFor,
-} from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import { formatDateTime, formatYen, todayDateString } from "@/lib/format";
 import {
   parseForm,
@@ -103,6 +99,7 @@ function ReceiptRow({
   onChanged: () => void;
 }) {
   const { businessId } = useApp();
+  const { optionsFor, label, activeCodes } = useAccounts();
   const [linkTarget, setLinkTarget] = useState("");
   const [showLink, setShowLink] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
@@ -254,7 +251,7 @@ function ReceiptRow({
           description: linkedTx.description,
           date: linkedTx.date,
           amount: linkedTx.amount,
-          accountCandidates: ACCOUNT_OPTIONS.map((a) => a.code),
+          accountCandidates: activeCodes,
         },
       ),
     );
@@ -274,7 +271,7 @@ function ReceiptRow({
           <p className="mt-1 text-xs text-zinc-500">
             紐付け先:{" "}
             {linkedTx
-              ? `${linkedTx.date} / ${accountLabel(linkedTx.account)} / ${formatYen(linkedTx.amount)}`
+              ? `${linkedTx.date} / ${label(linkedTx.account)} / ${formatYen(linkedTx.amount)}`
               : receipt.transactionId}
           </p>
         )}
@@ -336,7 +333,7 @@ function ReceiptRow({
                       <option value="">選択してください</option>
                       {linkable.map((t) => (
                         <option key={t.id} value={t.id}>
-                          {t.date} / {accountLabel(t.account)} /{" "}
+                          {t.date} / {label(t.account)} /{" "}
                           {formatYen(t.amount)}
                           {t.counterparty ? ` / ${t.counterparty}` : ""}
                         </option>
@@ -445,7 +442,7 @@ function ReceiptRow({
                         required
                       >
                         <option value="">選択してください</option>
-                        {accountOptionsFor("expense").map((a) => (
+                        {optionsFor("expense").map((a) => (
                           <option key={a.code} value={a.code}>
                             {a.label}
                           </option>

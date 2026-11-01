@@ -1,5 +1,9 @@
 import type { Transaction, TransactionType } from "@/lib/accounting/types";
-import { ACCOUNT_OPTIONS, accountLabel } from "@/lib/accounts";
+import {
+  ACCOUNT_OPTIONS,
+  accountLabelIn,
+  type AccountOption,
+} from "@/lib/accounts";
 import {
   dateString,
   parseForm,
@@ -169,13 +173,16 @@ const STATUS_TO_LABEL: Record<Transaction["status"], string> = {
   locked: "締め済み",
 };
 
-/** 取引1件 → CSV行(エクスポート列順) */
-export function transactionToCsvRow(t: Transaction): string[] {
+/** 取引1件 → CSV行(エクスポート列順)。科目名は options(標準+カスタム)で解決 */
+export function transactionToCsvRow(
+  t: Transaction,
+  options: readonly AccountOption[] = ACCOUNT_OPTIONS,
+): string[] {
   return [
     t.date,
     TYPE_TO_LABEL[t.type] ?? t.type,
     t.account,
-    accountLabel(t.account),
+    accountLabelIn(options, t.account),
     t.counterparty,
     t.description,
     String(t.amount),
@@ -186,10 +193,11 @@ export function transactionToCsvRow(t: Transaction): string[] {
 /** 取引一覧 → ヘッダー付きCSV文字列(BOMなし) */
 export function buildTransactionsCsv(
   transactions: readonly Transaction[],
+  options: readonly AccountOption[] = ACCOUNT_OPTIONS,
 ): string {
   return serializeCsv([
     [...TRANSACTION_CSV_HEADER],
-    ...transactions.map(transactionToCsvRow),
+    ...transactions.map((t) => transactionToCsvRow(t, options)),
   ]);
 }
 
@@ -201,7 +209,18 @@ const TYPE_FROM_TEXT: Record<string, TransactionType> = {
   振替: "transfer",
 };
 
-const accountCodes = new Set(ACCOUNT_OPTIONS.map((a) => a.code));
+/** 科目コード照合に使う2集合。有効=取込可、無効=定義済みだが無効化済み */
+function accountCodeSets(options: readonly AccountOption[]): {
+  active: Set<string>;
+  disabled: Set<string>;
+} {
+  const active = new Set<string>();
+  const disabled = new Set<string>();
+  for (const a of options) {
+    (a.disabled ? disabled : active).add(a.code);
+  }
+  return { active, disabled };
+}
 
 /** プレビュー表示用に解釈した各列の生値 */
 export interface TransactionCsvRowValues {
@@ -244,7 +263,10 @@ function parseAmount(raw: string): number | undefined {
   return n;
 }
 
-function validateRow(values: TransactionCsvRowValues): {
+function validateRow(
+  values: TransactionCsvRowValues,
+  accountCodes: { active: Set<string>; disabled: Set<string> },
+): {
   input?: TransactionInput;
   errors: string[];
 } {
@@ -277,7 +299,9 @@ function validateRow(values: TransactionCsvRowValues): {
   const account = values.accountCode.trim();
   if (account === "") {
     errors.push("科目コードが未入力です");
-  } else if (!accountCodes.has(account)) {
+  } else if (accountCodes.disabled.has(account)) {
+    errors.push(`科目コード「${account}」は無効化されています`);
+  } else if (!accountCodes.active.has(account)) {
     errors.push(`科目コード「${account}」は定義されていません`);
   }
 
@@ -373,8 +397,14 @@ function valuesFromRecord(
  * - ヘッダーがなければエクスポートと同じ列順(日付,種別,科目コード,科目名,
  *   取引先,摘要,金額[,状態])とみなす
  * - 取込では常に draft として登録するため 状態・科目名 列は読まない
+ * - 科目コードの照合は options(標準+カスタム科目)に対して行い、
+ *   無効化された科目は取り込めない
  */
-export function parseTransactionsCsv(text: string): TransactionCsvParseResult {
+export function parseTransactionsCsv(
+  text: string,
+  options: readonly AccountOption[] = ACCOUNT_OPTIONS,
+): TransactionCsvParseResult {
+  const accountCodes = accountCodeSets(options);
   const records = parseCsv(text).filter((r) => !isBlankRecord(r));
   if (records.length === 0) {
     return { fileError: "CSVにデータ行がありません", rows: [] };
@@ -421,7 +451,7 @@ export function parseTransactionsCsv(text: string): TransactionCsvParseResult {
       };
     }
     const values = valuesFromRecord(record, index);
-    const validated = validateRow(values);
+    const validated = validateRow(values, accountCodes);
     errors.push(...validated.errors);
     return { rowNumber, values, input: validated.input, errors };
   });

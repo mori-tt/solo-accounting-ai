@@ -10,7 +10,7 @@ import {
   recomputeMonthlyReport,
 } from "@/lib/actions/reports";
 import { callApi } from "@/lib/api-client";
-import { accountLabel } from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import { applyAllocation } from "@/lib/accounting/domain/allocation";
 import {
   currentMonthKey,
@@ -34,6 +34,7 @@ import { MonthlyAIExplanation } from "./monthly-ai-explanation";
 export function MonthlyReportScreen() {
   useBrowserOnly();
   const { businessId, business } = useApp();
+  const { label } = useAccounts();
   const canEdit = business?.role !== "viewer";
 
   const [monthKey, setMonthKey] = useState(currentMonthKey());
@@ -170,7 +171,7 @@ export function MonthlyReportScreen() {
                 <tbody>
                   {rows.map(([code, v]) => (
                     <tr key={code}>
-                      <td>{accountLabel(code)}</td>
+                      <td>{label(code)}</td>
                       <td className="text-right">
                         {v.income > 0 ? <Amount value={v.income} /> : "-"}
                       </td>

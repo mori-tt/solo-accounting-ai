@@ -27,6 +27,18 @@ export type FiscalPeriodStatus = "open" | "closed";
 
 export type AuditAction = "create" | "update" | "delete" | "close";
 
+/** 事業ごとのカスタム勘定科目・補助科目(businessドキュメント内・最大50件) */
+export interface CustomAccount {
+  /** 科目コード。事業内一意・英数字 */
+  code: string;
+  label: string;
+  kind: "income" | "expense";
+  /** 補助科目の場合の親科目コード(標準科目または他のカスタム科目) */
+  parentCode?: string;
+  /** 無効化すると新規選択肢・照合から外れる(既存取引の表示は維持) */
+  disabled?: boolean;
+}
+
 /** 年度ごとの期首残高(businessドキュメント内に保持) */
 export interface OpeningBalance {
   /** 適用する会計年度(開始年) */
@@ -43,6 +55,7 @@ export interface Business {
   ownerUid: string;
   fiscalYearStartMonth: number;
   taxMode: TaxMode;
+  customAccounts?: CustomAccount[];
   /** 家事按分の事業割合(%)。科目コード→0-100の整数。未設定科目は100%扱い */
   allocationRatios?: Record<string, number>;
   /** 年度ごとの期首残高(資産系科目+任意コード)。未設定は空扱い */

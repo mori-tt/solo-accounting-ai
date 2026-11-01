@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { TaxCategory, Transaction } from "@/lib/accounting/types";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import type { ConsumptionTaxRate } from "@/lib/accounting/domain/tax";
-import { accountLabel, accountOptionsFor } from "@/lib/accounts";
 import {
   parseForm,
   transactionSchema,
@@ -95,7 +95,8 @@ export function TransactionForm({
   );
   const [error, setError] = useState<string>();
 
-  const accounts = accountOptionsFor(type);
+  const { optionsFor, label } = useAccounts();
+  const accounts = optionsFor(type);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,7 +172,7 @@ export function TransactionForm({
             ))}
             {account &&
               !accounts.some((a) => a.code === account) && (
-                <option value={account}>{accountLabel(account)}</option>
+                <option value={account}>{label(account)}</option>
               )}
           </Select>
         </Field>

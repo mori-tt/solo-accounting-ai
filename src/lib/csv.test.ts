@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Transaction } from "@/lib/accounting/types";
+import { getAccountOptions } from "./accounts";
 import {
   buildTransactionsCsv,
   decodeCsvBytes,
@@ -268,5 +269,59 @@ describe("parseTransactionsCsv", () => {
     expect(parseTransactionsCsv("").fileError).toBeDefined();
     expect(parseTransactionsCsv(HEADER).fileError).toBeDefined();
     expect(parseTransactionsCsv("\n\n").fileError).toBeDefined();
+  });
+
+  const customOptions = getAccountOptions({
+    customAccounts: [
+      { code: "software_fee", label: "ソフトウェア利用料", kind: "expense" },
+      {
+        code: "old_fee",
+        label: "旧手数料",
+        kind: "expense",
+        disabled: true,
+      },
+    ],
+  });
+
+  it("カスタム科目コードをoptions経由で受理する", () => {
+    const { rows } = parseTransactionsCsv(
+      `${HEADER}\n2026-11-01,支出,software_fee,,,,9800,`,
+      customOptions,
+    );
+    expect(rows[0].errors).toEqual([]);
+    expect(rows[0].input?.account).toBe("software_fee");
+    // optionsを渡さない場合は未定義コードとしてエラー
+    const { rows: defaultRows } = parseTransactionsCsv(
+      `${HEADER}\n2026-11-01,支出,software_fee,,,,9800,`,
+    );
+    expect(defaultRows[0].errors[0]).toContain("定義されていません");
+  });
+
+  it("無効化された科目コードは取り込めない", () => {
+    const { rows } = parseTransactionsCsv(
+      `${HEADER}\n2026-11-01,支出,old_fee,,,,9800,`,
+      customOptions,
+    );
+    expect(rows[0].errors[0]).toContain("無効化されています");
+    expect(rows[0].input).toBeUndefined();
+  });
+});
+
+describe("buildTransactionsCsv(カスタム科目)", () => {
+  it("カスタム科目の科目名をoptions経由で解決する", () => {
+    const options = getAccountOptions({
+      customAccounts: [
+        {
+          code: "software_fee",
+          label: "ソフトウェア利用料",
+          kind: "expense",
+        },
+      ],
+    });
+    const csv = buildTransactionsCsv(
+      [{ ...transactionFixture, account: "software_fee" }],
+      options,
+    );
+    expect(parseCsv(csv)[1][3]).toBe("ソフトウェア利用料");
   });
 });

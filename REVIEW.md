@@ -16,10 +16,38 @@
 
 ## Log
 
+## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
+- Worktree: custom-accounts
+### 実装内容
+事業ごとに最大50件のカスタム勘定科目・補助科目を定義できる機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `CustomAccount { code, label, kind: income|expense, parentCode?, disabled? }` と `Business.customAccounts?` を追加(businessドキュメント内格納・rules変更なし)
+- `src/lib/accounts.ts`: `ACCOUNT_OPTIONS` は不変のまま、`getAccountOptions(business)`(標準+カスタムをマージ。標準コード衝突・カスタム内重複は無視/先勝ち)、`accountLabelIn(options,code)`、`accountOptionsFor(kind, options)`(無効科目を除外して種別絞り)を追加
+- `src/lib/hooks/use-accounts.ts`(新規): `useApp().business` からマージ済みoptionsと `label`/`optionsFor` を返す共通hook
+- `src/lib/validation/schemas.ts`: `accountCode`(英数+`_`)、`customAccountItemSchema`、`customAccountsSchema`(上限50件・code一意)を追加
+- `src/lib/actions/accounts.ts`(新規): `saveCustomAccounts`(owner限定。zod検証・code一意・標準科目衝突拒否・上限50件をサーバーでも強制、`update_business_settings`監査)と `listUsedAccountCodes`(取引で使用中の科目コード集合を返す)
+- `src/lib/actions/businesses.ts`: `MyBusiness`/`listMyBusinesses`に `customAccounts` を通し、クライアント側hookが追加fetchなしで解決できるようにした
+- `/accounts` 管理ページ新設(`page.tsx`+`accounts-screen.tsx`): 一覧(標準科目+カスタム、親科目名・使用状態・有効/無効)・追加・編集・無効化/有効化・削除。使用中科目は削除ボタンを出さず無効化のみ可能(viewerは閲覧のみ)
+- `app-shell.tsx`: ナビに「勘定科目」を1行追加
+- `src/lib/csv.ts`: `parseTransactionsCsv`/`buildTransactionsCsv`/`transactionToCsvRow` が任意の `options` を受け、科目コード照合・科目名解決をbusiness-awareに。無効科目は取込時エラー、コードはそのまま保持
+- 参照差し替えのみ: 取引フォーム・一覧・CSV取込・経費登録・レシート・ダッシュボード・締め・月次/仕訳帳/総勘定元帳/試算表・AI提案カード/一覧が `useAccounts()`/`useBookAccountLabel()` 経由でカスタム科目を解決。AI `accountCandidates` には有効科目一覧を渡す
+- `src/lib/accounts.test.ts`(新規): マージ・衝突/重複無視・無効科目のlabel解決と絞り込み除外。`src/lib/csv.test.ts`: カスタム科目の受理/無効科目拒否・科目名出力
+- `docs/FIRESTORE_SCHEMA.md`: businessesの `customAccounts` フィールド追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功(/accountsのroute型生成)
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(30ファイル377件、skip 10)
+- `pnpm build` — 合格(`/accounts` が静的ルートとして登録)
+- Emulator系は未実施(rules変更なしのため既存rulesテストで担保)
+### 未解決事項・次の担当者への注意事項
+- code許容文字は `A-Za-z0-9_`(Issueは「英数」だが既存コードに合わせ `_` も許可)。UIのエラーメッセージも同文言
+- `parentCode` は表示用メタデータのみ(集計ロジックには未接続)。科目の親子集計を帳票へ出す場合は別途設計が必要
+- 保存は全体置換(編集競合は後勝ち)。同時編集が問題になる規模なら `updatedAt` 楽観ロックを検討
+- 無効科目は新規選択肢とCSV取込から外れるが、既存取引の表示ラベルとしては解決される(履歴保護のため意図的)
 ## 2026-11-02: 年次集計・消費税区分・決算書帳票(Issue #42)
 - Worktree: tax-filing
 - `pnpm install --frozen-lockfile` — 成功。依存追加なし
-### 実装内容
 - `src/lib/accounting/domain/yearly.ts`(新規): `buildYearlyReport`(会計年度開始月から12か月の月別収支推移+科目別年間合計。fiscal.ts の `fiscalPeriodRange` で期間決定、confirmed/locked の income/expense のみ・月次集計と同じ除外条件)と `buildConsumptionTaxSummary`(区分別集計。課税は税率別に標準/軽減を分割、未分類バケット付き。取引自身の taxCategory を優先し無ければ紐付く Expense の区分をフォールバック使用。課税は税込金額からの内税推定 `computeTaxAmount`、支出側は Expense.taxAmount の申告額を優先。`filingAmounts` は `computeConsumptionTaxFiling` への税率別入力)
 - `src/lib/accounting/domain/filing.ts`(新規): `buildIncomeStatement`(accountTotals → 収入金額/売上原価(科目コード `purchases` のみ)/経費/差引金額)、`computeNetIncome`(差引金額 − 専従者給与 − 青色申告特別控除 = 所得金額。控除上限65万円・所得を上限に切り詰め・0未満不可)、`BLUE_RETURN_DEDUCTION_MAX`。summary.ts の既存関数は未変更
 - `src/lib/accounting/types.ts`: `Transaction` に任意フィールド `taxCategory`/`taxRate` を追加(未設定=税導入前データの後方互換)
@@ -30,7 +58,6 @@
 - `src/app/(app)/reports/actions.ts`: `getYearlyReport`(年度範囲の取引+経費を読み、年次集計・区分別消費税集計・申告レベル概算を返す。`requireViewer`+`getStore`、年度1900..2200検証。簡易課税は事業区分未設定のため taxFiling=null)と `getFilingStatement`(事業名+IncomeStatement)を追加。集計は保存しない
 - 新規ページ: `reports/yearly`(年度ナビ・月別収支推移表・科目別年間合計表・消費税区分別集計表・申告概算)、`reports/filing`(収支内訳書様式レイアウト: 収入金額/売上原価/経費/差引金額 + 専従者給与・青色申告特別控除の入力欄(0〜65万検証) + 所得金額。`@media print` でナビ/入力欄を隠す印刷対応、`filing-sheet.tsx` を帳票部品として分離)。共通の `reports/year-nav.tsx` を新設。いずれも `useApp`/`useApiData`/`PageHeader` の既存レポートパターン踏襲
 - `src/components/app-shell.tsx`: ナビに「年次レポート」(`/reports/yearly`)と「決算書(収支内訳書)」(`/reports/filing`)を1行ずつ追加
-### 実行したテスト
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(31ファイル390件、skip 10。`domain/yearly.test.ts`・`domain/filing.test.ts` 新規 + `services/transactions.test.ts` に税正規化6件追加)
@@ -39,7 +66,6 @@
 ### 変更範囲について(重要な判断)
 - Issue の変更範囲指定は「reports新規ページ/domain新規ファイル/transactionsフォーム/app-shellナビ/queries.ts・api-client.ts」だが、**税区分を永続化するため Transaction 型・zodスキーマ・service正規化・Server Action への配線(types.ts/schemas.ts/services/transactions.ts/actions/transactions.ts)が必須のため拡張した**。クライアントクエリ層(queries.ts/api-client.ts)はレポートが Server Action 経由のため変更不要で未変更
 - settings画面・csv.ts・accounts.ts・firestore.rules は未変更。`validTransaction` の rules はフィールド追加を制限しないため rules 変更不要
-### 未解決事項・次の担当者への注意事項
 - 取引の税区分は税込金額の内税計算による推定表示。Expense のような実消費税額フィールドは取引側に持たないため、申告概算は概算値である旨を帳票上で明示すべき余白あり
 - 売上原価の判定は科目コード `purchases` のみ(accounts.ts の勘定体系が限定的なため)。勘定体系拡張時は振り分け定数の見直しが必要
 - 簡易課税のみなし仕入率(事業区分)は Business に設定項目がなく未対応のため、yearly の申告概算では null を返し画面側で非表示にしている
@@ -64,8 +90,6 @@
 - `docs/FIRESTORE_SCHEMA.md`: businessesに `allocationRatios` を追記
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm exec next typegen` — 成功
-- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
-- `pnpm typecheck` — 合格
 - `pnpm test` — 合格(30ファイル374件、skip 10。`domain/allocation.test.ts` 11件を新規追加)
 - `pnpm build` — 合格(`/allocations` が静的ルートとして登録)
 - Firebase Emulator テスト — 未実施(Issue制約でEmulator起動禁止。rules変更なしのため影響なしと判断)
@@ -150,7 +174,6 @@
 - 証憑のstoragePathはファイル実体の場所を指すため復元時も書き換えない(ファイル本体のコピーは範囲外)
 - `pnpm lint` — 合格(既存warning 1件のみ: receiptsの`<img>`)
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 実行後)
-- `pnpm test` — 合格(30ファイル377件、skip 10)
 - `pnpm build` — 合格(`/api/backup`が動的ルート、`/backup`が静的ページとして登録)
 - Firebase Emulator tests — 該当なし(backup.tsは純粋関数を単体テスト。Rules変更なし)
 - 復元の書き込みはバッチ400件単位の逐次commitで全件アトミックではない。大量データの復元途中失敗は部分適用になりうる(監査ログは成功時のみ記録)

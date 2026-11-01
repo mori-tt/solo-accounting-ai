@@ -2,7 +2,11 @@
 
 import { registerBusiness } from "@/lib/accounting/services/business";
 import { auditsFor } from "@/lib/accounting/services/common";
-import type { Business, MemberRole } from "@/lib/accounting/types";
+import type {
+  Business,
+  CustomAccount,
+  MemberRole,
+} from "@/lib/accounting/types";
 import { getAdminDb } from "@/lib/firebase/admin";
 import {
   findUidByEmail,
@@ -37,6 +41,7 @@ export interface MyBusiness {
   role: MemberRole;
   fiscalYearStartMonth: number;
   taxMode: string;
+  customAccounts?: CustomAccount[];
   /** 家事按分の事業割合(科目コード→0-100)。未設定科目は100%扱い */
   allocationRatios?: Record<string, number>;
 }
@@ -68,6 +73,7 @@ export async function listMyBusinesses(): Promise<
         role,
         fiscalYearStartMonth: business.fiscalYearStartMonth,
         taxMode: business.taxMode,
+        customAccounts: business.customAccounts,
         allocationRatios: business.allocationRatios,
       });
     }

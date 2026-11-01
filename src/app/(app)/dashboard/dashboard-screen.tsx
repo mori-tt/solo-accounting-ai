@@ -11,7 +11,7 @@ import {
   formatMonthKey,
   todayDateString,
 } from "@/lib/format";
-import { accountLabel } from "@/lib/accounts";
+import { useAccounts } from "@/lib/hooks/use-accounts";
 import {
   Amount,
   Badge,
@@ -75,6 +75,7 @@ const TYPE_LABELS: Record<string, string> = {
 export function DashboardScreen() {
   useBrowserOnly();
   const { businessId, business } = useApp();
+  const { label } = useAccounts();
   const monthKey = currentMonthKey();
   const { data, initialLoading, error, reload } = useApiData(
     () =>
@@ -200,7 +201,7 @@ export function DashboardScreen() {
                     <tr key={t.id}>
                       <td className="whitespace-nowrap">{t.date}</td>
                       <td>{TYPE_LABELS[t.type] ?? t.type}</td>
-                      <td>{accountLabel(t.account)}</td>
+                      <td>{label(t.account)}</td>
                       <td className="text-right">
                         <Amount value={t.amount} />
                       </td>

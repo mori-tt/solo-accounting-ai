@@ -54,9 +54,12 @@ function confidencePct(confidence: number): number {
 function SuggestionPayloadBody({
   suggestion,
   resolveTransaction,
+  accountLabelFor = accountLabel,
 }: {
   suggestion: AISuggestionJSON;
   resolveTransaction?: (transactionId: string) => Transaction | undefined;
+  /** 科目コード→表示名の解決(カスタム科目対応。省略時は標準科目のみ) */
+  accountLabelFor?: (code: string) => string;
 }) {
   const payload = suggestion.payload;
   if (!payload) return null;
@@ -89,7 +92,7 @@ function SuggestionPayloadBody({
         <ul className="mt-2 flex flex-col gap-1 text-sm">
           {p.candidates.map((c, i) => (
             <li key={`${c.account}-${i}`}>
-              <span className="font-medium">{accountLabel(c.account)}</span>
+              <span className="font-medium">{accountLabelFor(c.account)}</span>
               <span className="ml-2 text-xs text-zinc-500">
                 信頼度 {confidencePct(c.confidence)}%
               </span>
@@ -116,7 +119,7 @@ function SuggestionPayloadBody({
               <li key={c.transactionId}>
                 <span className="font-medium">
                   {t
-                    ? `${t.date} / ${accountLabel(t.account)} / ${formatYen(t.amount)}`
+                    ? `${t.date} / ${accountLabelFor(t.account)} / ${formatYen(t.amount)}`
                     : `取引 ${c.transactionId}`}
                 </span>
                 <span className="ml-2 text-xs text-zinc-500">
@@ -159,11 +162,13 @@ function DecideActions({
   busy,
   onApply,
   onDecide,
+  accountLabelFor = accountLabel,
 }: {
   suggestion: AISuggestionJSON;
   busy: boolean;
   onApply?: (value: AppliedSuggestionValue) => void;
   onDecide?: (decision: "accepted" | "rejected") => void;
+  accountLabelFor?: (code: string) => string;
 }) {
   const payload = suggestion.payload;
 
@@ -176,7 +181,7 @@ function DecideActions({
               onClick={() => onApply({ account: c.account })}
               disabled={busy}
             >
-              「{accountLabel(c.account)}」を採用
+              「{accountLabelFor(c.account)}」を採用
             </Button>
           ))
         : suggestion.kind === "transaction_description" && payload && onApply
@@ -218,6 +223,7 @@ export function AISuggestionCard({
   resolveTransaction,
   onApply,
   onDecide,
+  accountLabelFor = accountLabel,
 }: {
   suggestion: AISuggestionJSON;
   busy?: boolean;
@@ -229,6 +235,8 @@ export function AISuggestionCard({
   onApply?: (value: AppliedSuggestionValue) => void;
   /** 採用(確認)/却下の決定操作 */
   onDecide?: (decision: "accepted" | "rejected") => void;
+  /** 科目コード→表示名の解決(カスタム科目対応。省略時は標準科目のみ) */
+  accountLabelFor?: (code: string) => string;
 }) {
   const status = STATUS_BADGES[suggestion.status];
   const decidable =
@@ -251,6 +259,7 @@ export function AISuggestionCard({
       <SuggestionPayloadBody
         suggestion={suggestion}
         resolveTransaction={resolveTransaction}
+        accountLabelFor={accountLabelFor}
       />
 
       {suggestion.reason && (
@@ -277,6 +286,7 @@ export function AISuggestionCard({
           busy={busy}
           onApply={onApply}
           onDecide={onDecide}
+          accountLabelFor={accountLabelFor}
         />
       )}
 

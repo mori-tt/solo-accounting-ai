@@ -35,6 +35,7 @@ const NAV_ITEMS = [
   { href: "/reports/yearly", label: "年次レポート" },
   { href: "/reports/filing", label: "決算書(収支内訳書)" },
   { href: "/closing", label: "決算チェック" },
+  { href: "/accounts", label: "勘定科目" },
   { href: "/allocations", label: "家事按分" },
   { href: "/opening-balances", label: "期首残高" },
   { href: "/audit-log", label: "監査ログ" },
