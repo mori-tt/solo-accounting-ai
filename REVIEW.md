@@ -46,6 +46,42 @@
 - AI呼出のauditLogs記録は `AISuggestionService.execute` の `appendAudit("run_ai")` が既に担保しており、provider側は対象識別情報以外を記録しない設計を維持(個人情報・証憑内容のログ出力なし)
 - `createAIProvider` はまだどこからも呼ばれない(サーバーアクション/Route Handler側の接続は別タスク)。接続側では `AISuggestionService({ store: new FirestoreSuggestionStore(db), provider: createAIProvider() })` の形を想定
 - `store: false` は単発のステートレス呼出し前提。将来 `previous_response_id` 等の会話継続が必要になった場合は再検討
+## 2026-11-02: 消費税計算エンジンの実装
+
+- Worktree: tax-calc-engine
+
+### 実装内容
+
+- `src/lib/accounting/domain/tax.ts` 新規: 消費税計算の純粋関数群。Firebase非依存・副作用なしで service 層(AccountingService / services/*)から直接呼べる
+  - 端数処理はBusiness統一ルールに従い常に切り捨て。税率・みなし仕入率は既約分数(10%: 税抜1/10・税込1/11、8%: 2/25・2/27)で保持し、浮動小数点を介さない整数演算で算出(ADR-0002の構造的誤差排除)
+  - `computeTaxAmount(amount, {basis, rate})`: 税込/税抜いずれの基準でも標準10%・軽減8%の税額を算出。0円許容・負額/小数/非安全整数を拒否、乗算オーバーフローも INVALID_AMOUNT
+  - `computeNetAmount` / `sumTaxAmounts`(明細ごと切り捨て→合算)
+  - `isTaxableCategory` / `maxPossibleTaxAmount` / `assertTaxAmountConsistent`
+  - `computeConsumptionTaxPayable(mode, totals, {businessClass})`: taxMode 別の納付額。exempt→0、standard→outputTax−inputTax(負数=還付相当)、simple→みなし仕入率(第1〜6種=90〜40%)で控除額を切り捨て算出。simpleはbusinessClass必須、他方式では指定拒否
+- `src/lib/accounting/domain/types.ts`: `TaxMode` 型(exempt/simple/standard)を追加(FIRESTORE_SCHEMAのbusinesses.taxMode)
+- `src/lib/accounting/domain/validate.ts`: `validateExpenseInput` の税額チェックを「taxAmount ≤ amount」の粗い上限から `assertTaxAmountConsistent` へ置き換え(前回未解決事項の解消)。非課税・免税・不課税は税額0固定、課税仕入は税抜10%相当を上限とする
+- `src/lib/accounting/index.ts`: `./domain/tax` を export 追加
+- `src/lib/accounting/domain/tax.test.ts`: 25件(税率別・税込/税抜・境界端数・0円・不正入力・税区分別整合・3方式の納付額・みなし仕入切捨て)
+
+### 設計上の判断
+
+- `assertTaxAmountConsistent` の課税上限は `floor(amount×10%)`(税抜標準税率)。税込解釈(×10/110)より厳しくないが、Businessの会計方式(税込/税抜)を入力検証層が知らないため「いずれの解釈でもあり得る最大値」を採用。厳密な税込基準の検証はBusiness設定を引き回すようになった段階で絞る
+- 本則課税の還付(控除超過)は負数の taxPayable で表現し、0でクランプしない(還付申告の根拠額になるため)
+- `services/`(新世代)は別のTaxCategory表記(snake_case)を使うため本エンジンとは未接続。接続は表記統一と合わせて別タスク
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm build` による型生成後)
+- `pnpm test` — 合格(19ファイル238件、skip 7)
+- `pnpm build` — 合格(全ルート static prerender)
+- Firebase Emulator tests — 該当なし(rules変更なし、ドメイン層のみ)
+
+### 未解決事項・次の担当者への注意事項
+
+- 消費税の申告レベルの厳密計算(課税標準額の千円未満切捨て、国税6.3%/地方税2.2%の内訳、軽減税率の按分)は未実装。確定申告対応時に拡張する
+- `domain/`(旧世代)と`services/`+トップレベル`*.ts`(新世代)の2系統が併存したまま。TaxCategory表記(camelCase/snake_case)やEntity型が二重定義されており、統合整理は別タスク
+- `validateExpenseInput` は旧世代 `AccountingService` 経路のバリデーションであり、新世代 `services/expenses.ts` 側の税額チェック(現状 nonNegative のみ)への適用は未対応
 
 ## 2026-11-02: `.next` symlink 除去と main のビルド破壊修復
 
