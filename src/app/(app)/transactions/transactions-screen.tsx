@@ -58,12 +58,15 @@ const TYPE_LABELS: Record<string, string> = {
 function TransactionRow({
   transaction: t,
   suggestions,
+  existingTransactions,
   canEdit,
   onChanged,
 }: {
   transaction: Transaction;
   /** この取引を対象とするAI提案(新しい順) */
   suggestions: AISuggestionJSON[];
+  /** 重複チェック等の照合対象とする同月の取引一覧 */
+  existingTransactions: Transaction[];
   canEdit: boolean;
   onChanged: () => void;
 }) {
@@ -239,6 +242,56 @@ function TransactionRow({
                       disabled={busy}
                     >
                       科目をAI提案
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        run(() =>
+                          runAiSuggestion(
+                            businessId ?? "",
+                            "transaction_description",
+                            { type: "transaction", id: t.id },
+                            {
+                              counterparty: t.counterparty,
+                              date: t.date,
+                              type: t.type,
+                              amount: t.amount,
+                            },
+                          ),
+                        )
+                      }
+                      disabled={busy}
+                    >
+                      摘要をAI提案
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        run(() =>
+                          runAiSuggestion(
+                            businessId ?? "",
+                            "duplicate_detection",
+                            { type: "transaction", id: t.id },
+                            {
+                              transaction: {
+                                id: t.id,
+                                amount: t.amount,
+                                date: t.date,
+                              },
+                              existingTransactions: existingTransactions.map(
+                                (x) => ({
+                                  id: x.id,
+                                  amount: x.amount,
+                                  date: x.date,
+                                }),
+                              ),
+                            },
+                          ),
+                        )
+                      }
+                      disabled={busy}
+                    >
+                      重複チェック
                     </Button>
                     <Button
                       variant="secondary"
@@ -429,6 +482,7 @@ export function TransactionsScreen() {
                   key={t.id}
                   transaction={t}
                   suggestions={suggestionsByTarget.get(t.id) ?? []}
+                  existingTransactions={data?.transactions ?? []}
                   canEdit={canEdit}
                   onChanged={reload}
                 />

@@ -16,6 +16,44 @@
 
 ## Log
 
+## 2026-11-02: AI提案のUI接続(Issue #20)
+
+- Worktree: ai-ui-integration
+
+### 実装内容
+
+PR #17 で配線済みの REST API(`/api/ai/suggestions`)と画面を接続した。
+クライアントは fetch のみで Route Handler 経由(aiSuggestions コレクションへの直接アクセスなし)。
+
+- `src/lib/api-client.ts`: `apiFetch` を追加。`{ ok, data|error }` レスポンスを `callApi` と同じ規約(ApiClientError・UNAUTHORIZED 時のセッション張り直し+1回リトライ)で処理する JSON fetch ラッパー
+- `src/lib/ai/types.ts`: `AISuggestionDTO` を追加。`Response.json` で Date が ISO 文字列化されるため、wire 用に日時フィールドを string に置き換えた型
+- `src/lib/ai/client.ts`(新規): `listAISuggestions`(GET) / `runAISuggestion`(POST) / `decideAISuggestion`(PATCH) の型付き fetch ヘルパー
+- `src/lib/hooks/use-ai-suggestions.ts`(新規): 対象(type+id,任意でkind)に紐づく提案一覧を `useApiData` で取得するフック
+- `src/components/ai-suggestions.tsx`(新規): 提案ドキュメント用 `AISuggestionCard`。kind別payload表示(科目候補/摘要/重複候補/月次説明/証憑抽出フィールド)・状態バッジ・信頼度・根拠・採否ボタン。適用可能なkind(account_suggestion/transaction_description)は `onApply` で確定フィールドへの反映を呼び、情報表示系は「確認済みにする」で解決。needs_review(失敗)は警告+却下のみ
+- `src/app/(app)/transactions/transaction-ai-panel.tsx`(新規): 取引の展開行内に「AIアシスタント」パネル。`科目を提案`/`摘要を提案`/`重複チェック` の生成ボタン + その取引への提案一覧。receipt_extraction はOCR基盤が別タスクのため対象外
+  - 採用フロー(ADR-0005の2ステップ): 「この科目を採用」等 → `updateTransaction` で確定フィールドへコピー → `decideAISuggestion` で提案を accepted に解決。反映に失敗した場合は提案を未解決のまま残す。取引 status は変わらず draft/confirmed のまま(確定は confirmTransaction のみ)
+  - 重複チェックは一覧読込済みの同月取引を `existingTransactions` として照合・候補表示に使用
+- `src/app/(app)/reports/monthly/monthly-ai-explanation.tsx`(新規): 月次レポートに「AIによる月次の説明」カード。`monthly_explanation` の生成・表示・採否。表示のみで確定データに影響しない(AI_POLICY)
+  - 対象は保存済み monthlySummaries ドキュメントのため `data.persisted` がある場合のみ生成可(未保存時は案内表示)。input は `{ summary: persisted, previousSummary: 前月のpersisted ?? current }`
+- ロール制御: 生成/採否ボタンは editor 以上かつ対象が変更可能(取引は locked 以外)のときのみ表示。viewer は一覧閲覧のみ(GETはviewer権限)
+- `src/components/ai-suggestions.test.tsx`(新規): カードの kind 別表示・apply/decide コールバック・失敗時のボタン制御を6件検証
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(23ファイル278件、skip 10)
+- `pnpm build` — 合格
+
+### 未解決事項・次の担当者への注意事項
+
+- 採用=「確定値へ反映→提案をaccepted」は2リクエストのため、反映成功後にPATCHだけ失敗し得る。その場合提案は pending のまま残り、再度採用すれば冪等に解決できる
+- needs_review の再実行は「新しい提案をPOST」する方式(retry 用のエンドポイントは無い)。失敗した提案は却下して整理する運用
+- duplicate_detection の照合対象は画面に読み込まれた同月取引のみ。月またぎの重複は現状検出しない(必要なら全期間取得に拡張)
+- `transactions`/`receipts` の旧 `aiSuggestion` 埋め込みフィールドのUI(既存 AiSuggestionCard)は残置。ADR-0005 では廃止予定だが、既存データ表示の互換維持のため本タスクでは触っていない
+
 ## 2026-11-02: AI提案実装の統合(ADR-0005への一本化)
 
 - Worktree: ai-suggestion-consolidation

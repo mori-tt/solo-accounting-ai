@@ -27,6 +27,7 @@ import {
   PageHeader,
   tableClass,
 } from "@/components/ui";
+import { MonthlyAIExplanation } from "./monthly-ai-explanation";
 
 export function MonthlyReportScreen() {
   useBrowserOnly();
@@ -164,6 +165,12 @@ export function MonthlyReportScreen() {
               </table>
             )}
           </Card>
+
+          <MonthlyAIExplanation
+            monthKey={monthKey}
+            persisted={data.persisted}
+            canEdit={canEdit}
+          />
         </>
       )}
     </div>
