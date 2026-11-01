@@ -16,6 +16,34 @@
 
 ## Log
 
+## 2026-11-02: CI の Node バージョン修正(20 → 26)
+
+- Worktree: ci-node-version
+
+### 実装内容
+
+- GitHub Actions CI が全ジョブ失敗していた原因を修正。CI が `node-version: 20` 固定だったが、依存が Node 20 非対応:
+  - `vitest@5.0.5` — `engines: ^22.12.0 || ^24.0.0 || >=26.0.0` → forks worker が `Cannot read properties of undefined (reading 'bind')` で全テスト起動失敗
+  - `firebase-admin@14.5.0` — `engines: >=22` → CI で `firebase-admin/firestore` 由来の型が any 化したと見られる TS7006/TS18046 が typecheck/build 両ジョブで多発(ローカル Node 26 では非再現・メカニズム未確定だが本修正で切り分け)
+- `.node-version`(`26`)を新設し `actions/setup-node` の `node-version-file` で参照。ローカル開発の v26 と同一、CI/ローカルの単一ソース化
+- `package.json` に `engines.node` を追加し要件を宣言
+
+### 変更ファイル
+
+- `.github/actions/setup-node-pnpm/action.yml`: `node-version: 20` → `node-version-file: .node-version`
+- `.node-version`: 新規(26)
+- `package.json`: `engines` 追加
+
+### 実行したテスト
+
+- ファイル変更のみ(CI 自体の検証は本PRのチェック実行で確認)
+- ローカルで再現確認: `vitest` forks worker が Node 20 で起動不可、`tsc` はローカル(node 26)で全合格
+
+### 未解決事項・次の担当者への注意事項
+
+- `@types/node` が `^20` のまま。`^26` への更新は別タスクで検討(型定義の実害は未確認)
+- ローカル開発者の Node が 22.12 未満だと `pnpm install` 時に engines 警告が出る
+
 ## 2026-11-02: (app)画面品質の統一 + 認証まわり死コード削除
 
 - Worktree: ui-polish
