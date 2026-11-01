@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
@@ -423,6 +424,12 @@ export function TransactionsScreen() {
                 >
                   {showImport ? "取込を閉じる" : "CSV取込"}
                 </Button>
+                <Link
+                  href="/transactions/import"
+                  className="inline-flex items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  明細CSVインポート
+                </Link>
                 <Button onClick={() => setShowForm((v) => !v)}>
                   {showForm ? "閉じる" : "取引を登録"}
                 </Button>

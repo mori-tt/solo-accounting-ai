@@ -4,6 +4,8 @@ import {
   buildJournal,
   buildTrialBalance,
   CASH_ACCOUNT,
+  OPENING_EQUITY_ACCOUNT,
+  openingBalanceJournalEntries,
   transactionToJournalEntry,
   type JournalEntry,
   type JournalTransaction,
@@ -228,5 +230,136 @@ describe("buildTrialBalance", () => {
     expect(tb.debitTotal).toBe(0);
     expect(tb.creditTotal).toBe(0);
     expect(tb.balanced).toBe(true);
+  });
+});
+
+describe("openingBalanceJournalEntries", () => {
+  it("借方残高(正)は借方=科目・貸方=元入金に展開する", () => {
+    const entries = openingBalanceJournalEntries(
+      [{ fiscalYear: 2026, accountCode: "deposits", amount: 300_000 }],
+      2026,
+      "2025-12-31",
+    );
+    expect(entries).toEqual([
+      {
+        transactionId: "opening-2026-deposits",
+        date: "2025-12-31",
+        description: "期首残高",
+        counterparty: "",
+        lines: [
+          { account: "deposits", debit: 300_000, credit: 0 },
+          { account: OPENING_EQUITY_ACCOUNT, debit: 0, credit: 300_000 },
+        ],
+      },
+    ]);
+  });
+
+  it("貸方残高(負)は借方=元入金・貸方=科目に展開する", () => {
+    const entries = openingBalanceJournalEntries(
+      [{ fiscalYear: 2026, accountCode: "payables", amount: -50_000 }],
+      2026,
+      "2025-12-31",
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0].lines).toEqual([
+      { account: OPENING_EQUITY_ACCOUNT, debit: 50_000, credit: 0 },
+      { account: "payables", debit: 0, credit: 50_000 },
+    ]);
+  });
+
+  it("対象年度以外・金額0・科目コード空のレコードは出力しない", () => {
+    const entries = openingBalanceJournalEntries(
+      [
+        { fiscalYear: 2025, accountCode: "deposits", amount: 100 },
+        { fiscalYear: 2026, accountCode: "receivables", amount: 0 },
+        { fiscalYear: 2026, accountCode: "", amount: 100 },
+        { fiscalYear: 2026, accountCode: CASH_ACCOUNT, amount: 10_000 },
+      ],
+      2026,
+      "2025-12-31",
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0].lines[0].account).toBe(CASH_ACCOUNT);
+  });
+
+  it("複数レコードは科目コード昇順で返る", () => {
+    const entries = openingBalanceJournalEntries(
+      [
+        { fiscalYear: 2026, accountCode: "receivables", amount: 1 },
+        { fiscalYear: 2026, accountCode: "deposits", amount: 2 },
+        { fiscalYear: 2026, accountCode: CASH_ACCOUNT, amount: 3 },
+      ],
+      2026,
+      "2025-12-31",
+    );
+    expect(entries.map((e) => e.lines[0].account)).toEqual([
+      CASH_ACCOUNT,
+      "deposits",
+      "receivables",
+    ]);
+  });
+
+  it("dateは実在する日付でなければならない", () => {
+    expect(() =>
+      openingBalanceJournalEntries([], 2026, "2026-02-30"),
+    ).toThrowError(/date/);
+  });
+});
+
+describe("期首残高の帳簿反映", () => {
+  // 会計年度2026(1月始まり)の期首残高を前年度末付で仕訳化するケース
+  const opening = openingBalanceJournalEntries(
+    [
+      { fiscalYear: 2026, accountCode: CASH_ACCOUNT, amount: 200_000 },
+      { fiscalYear: 2026, accountCode: "deposits", amount: 500_000 },
+    ],
+    2026,
+    "2025-12-31",
+  );
+
+  it("総勘定元帳では年度内どの月でも繰越残高に集約される", () => {
+    const movement = entry("t1", "2026-01-10", CASH_ACCOUNT, "sales", 80_000);
+    const ledger = buildAccountLedger(
+      [movement, ...opening],
+      "deposits",
+      "2026-01-01",
+    );
+    // 預金に期首残高500,000が繰越として載り、明細行には出ない
+    expect(ledger.openingBalance).toBe(500_000);
+    expect(ledger.lines).toEqual([]);
+    expect(ledger.closingBalance).toBe(500_000);
+  });
+
+  it("期首残高は既存取引の繰越残高に加算される", () => {
+    const prior = entry("t0", "2025-11-15", CASH_ACCOUNT, "sales", 70_000);
+    const current = entry("t1", "2026-01-10", CASH_ACCOUNT, "sales", 80_000);
+    const ledger = buildAccountLedger(
+      [prior, current, ...opening],
+      CASH_ACCOUNT,
+      "2026-01-01",
+    );
+    // 現金の繰越 = 前期取引70,000 + 期首残高200,000
+    expect(ledger.openingBalance).toBe(270_000);
+    expect(ledger.closingBalance).toBe(350_000);
+    expect(ledger.lines[0].balance).toBe(350_000);
+  });
+
+  it("年度途中の月でも明細行ではなく繰越残高に集約される", () => {
+    // 前年度末付の転記なので、期首以外の月の帳簿でも必ず繰越側に入る
+    const ledger = buildAccountLedger(opening, "deposits", "2026-06-01");
+    expect(ledger.openingBalance).toBe(500_000);
+    expect(ledger.lines).toEqual([]);
+    expect(ledger.closingBalance).toBe(500_000);
+  });
+
+  it("試算表は期首残高を含めても貸借一致を保つ", () => {
+    const movement = entry("t1", "2026-01-10", CASH_ACCOUNT, "sales", 80_000);
+    const tb = buildTrialBalance([movement, ...opening]);
+    expect(tb.balanced).toBe(true);
+    expect(tb.debitTotal).toBe(tb.creditTotal);
+    const deposits = tb.rows.find((r) => r.account === "deposits");
+    expect(deposits?.balance).toBe(500_000);
+    const equity = tb.rows.find((r) => r.account === OPENING_EQUITY_ACCOUNT);
+    expect(equity?.balance).toBe(-700_000);
   });
 });
