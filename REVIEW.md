@@ -16,6 +16,35 @@
 
 ## Log
 
+## 2026-11-02: 請求書の印刷/PDF出力(Issue #33)
+
+- Worktree: invoice-print
+
+### 実装内容
+
+ブラウザの印刷ダイアログ→PDF保存で請求書を出力できるようにした(依存追加なし)。
+
+- `src/app/(app)/invoices/invoice-print-sheet.tsx`(新規): 請求書単票ビュー `InvoicePrintSheet`。`createPortal` で document.body 直下に描画し、印刷時にアプリUIと分離できる構造にした。宛名(顧客名+御中・住所・案件名)・請求番号・発行日・支払期限・明細表(品目/数量/単価/税率/金額、すべて税込)・税率別内訳表(対価の額と消費税額を10%/軽減8%ごとに集計+合計)・ご請求金額・振込先欄・発行元名・登録番号欄を含む。軽減税率の明細は※印+脚注で区別(適格請求書の記載要件に対応)
+  - 税率別集計 `groupInvoiceItemsByRate` は明細の `taxRate`/`taxAmount`(domain/tax 由来)をそのまま使い、未保存の旧データは `invoiceItemTaxAmount` で導出。既存の税計算経路と一致
+  - 登録番号・振込先は Business/設定側にフィールドが存在しないため罫線のみ(schema・設定画面は本タスクの範囲外)
+- `src/app/(app)/invoices/invoices-screen.tsx`: 行ごとの「印刷/PDF」ボタンを追加(操作列を全ロールで表示し、発行/入金ボタンは従来どおり editor 以上のみ)。押下で対象行を `printRow` state に保持 → 単票がDOMに出てから `window.print()` を起動 → `afterprint` で解除
+- `src/app/globals.css`: `@page`(A4・14mm)と `@media print` を追加。`body > *:not(.invoice-print-area)` で画面UIを非表示化、`.invoice-print-area` のみ表示。`.print-hidden` ユーティリティも用意。単票用の `ip-*` スタイルは固定色(白地・黒字)で記述し、OSのダークモードが印刷へ影響しないようにした。`tr`/集計/振込先ブロックに `break-inside: avoid` で改ページ制御
+- `src/app/(app)/invoices/invoice-print-sheet.test.tsx`(新規): 税率別集計・必須項目の描画・※注記の出し分けを5件検証
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(25ファイル303件、skip 10)
+- `pnpm build` — 合格
+
+### 未解決事項・次の担当者への注意事項
+
+- 印刷は実機ブラウザで未確認(next dev を起動しない制約のため)。Chrome/Edge の印刷プレビューで単票のみ出力される想定だが、実レイアウトの目視確認は残課題
+- 登録番号・振込先は罫線のみ。Business へのフィールド追加と設定画面UIは別タスク
+- draft の請求書も印刷可能だが、タイトルに「(下書き)」を併記して区別できるようにした
+
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 
 - Worktree: ai-ui-integration

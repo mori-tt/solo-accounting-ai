@@ -24,3 +24,250 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ===== 印刷(請求書単票) =====
+   InvoicePrintSheet は document.body 直下に portal される。
+   印刷時は body 直下の他要素(アプリのUI)をすべて隠し、
+   請求書エリア(.invoice-print-area)だけを出力する。 */
+
+@page {
+  size: A4;
+  margin: 14mm;
+}
+
+@media print {
+  /* 個別要素を印刷から外す用ユーティリティ */
+  .print-hidden {
+    display: none !important;
+  }
+
+  body > *:not(.invoice-print-area) {
+    display: none !important;
+  }
+
+  .invoice-print-area {
+    display: block;
+  }
+}
+
+/* 印刷専用コンテナ。画面では常に非表示。配色は白地・黒字で固定する */
+.invoice-print-area {
+  display: none;
+  background: #fff;
+  color: #111;
+  font-family:
+    "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", Meiryo,
+    sans-serif;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ip-sheet {
+  width: 100%;
+}
+
+.ip-title {
+  margin: 0 0 7mm;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.5em;
+  text-align: center;
+}
+
+.ip-draft-mark {
+  margin-left: 4mm;
+  font-size: 12px;
+  letter-spacing: normal;
+}
+
+.ip-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8mm;
+  margin-bottom: 6mm;
+}
+
+.ip-recipient {
+  min-width: 0;
+  flex: 1;
+}
+
+.ip-recipient-name {
+  display: inline-block;
+  padding-right: 20mm;
+  border-bottom: 1px solid #333;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ip-recipient-address,
+.ip-recipient-project {
+  margin-top: 2mm;
+  font-size: 11px;
+}
+
+.ip-greeting {
+  margin-top: 4mm;
+  font-size: 11px;
+}
+
+.ip-meta {
+  width: 72mm;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.ip-meta-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ip-meta-table th,
+.ip-meta-table td {
+  padding: 1mm 2mm;
+  text-align: left;
+  font-weight: 400;
+}
+
+.ip-meta-table th {
+  width: 24mm;
+  color: #555;
+}
+
+.ip-issuer {
+  margin-top: 4mm;
+  padding-left: 2mm;
+}
+
+.ip-issuer-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ip-issuer-reg {
+  margin-top: 2mm;
+  font-size: 11px;
+}
+
+/* 空欄の罫線(登録番号・振込先など未入力欄) */
+.ip-blank {
+  display: inline-block;
+  width: 30mm;
+  height: 5mm;
+  border-bottom: 1px solid #666;
+  vertical-align: bottom;
+}
+
+.ip-blank-reg {
+  width: 40mm;
+}
+
+.ip-blank-wide {
+  flex: 1;
+}
+
+.ip-total-box {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6mm;
+  border: 1.5px solid #111;
+  padding: 2.5mm 4mm;
+  font-weight: 700;
+  break-inside: avoid;
+}
+
+.ip-total-amount {
+  font-size: 18px;
+}
+
+.ip-section-title {
+  margin: 0 0 1.5mm;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ip-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2mm;
+}
+
+.ip-table th,
+.ip-table td {
+  border: 1px solid #555;
+  padding: 1.5mm 2.5mm;
+  text-align: left;
+}
+
+.ip-table th {
+  background: #efefef;
+  font-weight: 700;
+}
+
+.ip-table tr {
+  break-inside: avoid;
+}
+
+.ip-col-desc {
+  width: 40%;
+}
+
+.ip-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ip-note {
+  margin: 0 0 4mm;
+  font-size: 10px;
+  color: #333;
+}
+
+.ip-break {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6mm;
+  break-inside: avoid;
+}
+
+.ip-breakdown {
+  width: 95mm;
+  margin-bottom: 0;
+}
+
+.ip-breakdown-total td {
+  font-weight: 700;
+}
+
+.ip-foot {
+  break-inside: avoid;
+}
+
+.ip-bank {
+  width: 110mm;
+}
+
+.ip-bank-box {
+  border: 1px solid #555;
+  padding: 2mm 3mm;
+}
+
+.ip-bank-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 3mm;
+  border-bottom: 1px solid #999;
+  padding: 1.5mm 0;
+}
+
+.ip-bank-row:last-child {
+  border-bottom: none;
+}
+
+.ip-bank-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #555;
+}

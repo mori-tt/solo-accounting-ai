@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
@@ -42,6 +42,7 @@ import {
   tableClass,
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
+import { InvoicePrintSheet } from "./invoice-print-sheet";
 
 interface ItemDraft {
   description: string;
@@ -350,6 +351,8 @@ export function InvoicesScreen() {
   const [payTarget, setPayTarget] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string>();
+  // 印刷対象の請求書。セット中は単票ビューが body 直下に描画される
+  const [printRow, setPrintRow] = useState<InvoiceRow | null>(null);
 
   const { data, initialLoading, error, reload } = useApiData(async () => {
     const [rows, customers, projects] = await Promise.all([
@@ -372,6 +375,19 @@ export function InvoicesScreen() {
       new Map((data?.projects ?? []).map((p) => [p.id, p.name] as const)),
     [data],
   );
+
+  // 単票ビューがDOMに出てから印刷ダイアログを開き、
+  // ダイアログが閉じたら(afterprint)印刷対象を解除する
+  useEffect(() => {
+    if (!printRow) return;
+    const finish = () => setPrintRow(null);
+    window.addEventListener("afterprint", finish);
+    const timer = setTimeout(() => window.print(), 0);
+    return () => {
+      window.removeEventListener("afterprint", finish);
+      clearTimeout(timer);
+    };
+  }, [printRow]);
 
   const issue = async (invoiceId: string) => {
     setBusyIds((s) => new Set(s).add(invoiceId));
@@ -453,7 +469,7 @@ export function InvoicesScreen() {
                 <th className="text-right">請求額</th>
                 <th className="text-right">入金額 / 残額</th>
                 <th>状態</th>
-                {canEdit && <th>操作</th>}
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -495,36 +511,41 @@ export function InvoicesScreen() {
                         status={row.invoice.status}
                       />
                     </td>
-                    {canEdit && (
-                      <td className="whitespace-nowrap">
-                        <div className="flex gap-2">
-                          {row.invoice.status === "draft" && (
+                    <td className="whitespace-nowrap">
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          onClick={() => setPrintRow(row)}
+                        >
+                          印刷/PDF
+                        </Button>
+                        {canEdit && row.invoice.status === "draft" && (
+                          <Button
+                            onClick={() => void issue(row.invoice.id)}
+                            loading={busyIds.has(row.invoice.id)}
+                          >
+                            発行する
+                          </Button>
+                        )}
+                        {canEdit &&
+                          (row.invoice.status === "issued" ||
+                            row.invoice.status === "overdue") &&
+                          row.remaining > 0 && (
                             <Button
-                              onClick={() => void issue(row.invoice.id)}
-                              loading={busyIds.has(row.invoice.id)}
+                              variant="secondary"
+                              onClick={() =>
+                                setPayTarget(
+                                  payTarget === row.invoice.id
+                                    ? null
+                                    : row.invoice.id,
+                                )
+                              }
                             >
-                              発行する
+                              入金を記録
                             </Button>
                           )}
-                          {(row.invoice.status === "issued" ||
-                            row.invoice.status === "overdue") &&
-                            row.remaining > 0 && (
-                              <Button
-                                variant="secondary"
-                                onClick={() =>
-                                  setPayTarget(
-                                    payTarget === row.invoice.id
-                                      ? null
-                                      : row.invoice.id,
-                                  )
-                                }
-                              >
-                                入金を記録
-                              </Button>
-                            )}
-                        </div>
-                      </td>
-                    )}
+                      </div>
+                    </td>
                   </tr>
                   {canEdit && payTarget === row.invoice.id && (
                     <tr>
@@ -547,6 +568,21 @@ export function InvoicesScreen() {
             </tbody>
           </table>
         </Card>
+      )}
+
+      {printRow && (
+        <InvoicePrintSheet
+          invoice={printRow.invoice}
+          customer={(data?.customers ?? []).find(
+            (c) => c.id === printRow.invoice.customerId,
+          )}
+          projectName={
+            printRow.invoice.projectId
+              ? projectName.get(printRow.invoice.projectId)
+              : undefined
+          }
+          businessName={business?.name}
+        />
       )}
     </div>
   );
