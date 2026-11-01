@@ -19,7 +19,6 @@
 ## 2026-11-02: 全データJSONバックアップ/復元(Issue #47)
 - Worktree: backup-restore
 依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
-
 ### 実装内容
 - `src/lib/backup.ts`(新規): businessスコープの全データを1つのJSON(`version:1`付き)にエクスポート/復元するロジック。クライアント側でもzodスキーマを使うため firebase-admin の値importは持たない(`import type`のみ)
   - `BACKUP_COLLECTIONS`: firestore.rulesの実在14コレクション(members/customers/projects/transactions/expenses/receipts/invoices/payments/journalEntries/fiscalPeriods/closingChecks/aiSuggestions/monthlySummaries/auditLogs)。`idempotencyKeys`は内部機構、`users`はbusinessIdスコープ外のため対象外
@@ -34,7 +33,6 @@
 - `src/lib/api-client.ts`: `restoreBackup`追加
 - `src/components/app-shell.tsx`: ナビに「バックアップ」1行追加
 - `src/lib/backup.test.ts`(新規): 12件。スキーマ受理/拒否、summarize、planRestore(新規採番・参照張替・固定ID skip・protectedUids・パス書換・ファイル内重複ID・未知コレクション)
-
 ### 設計上の判断
 - **復元はowner限定**(エクスポートはowner/editor): members復元による権限昇格・auditLogs偽装・締め済みデータ改変を防ぐため
 - **固定IDコレクション**(members=uid/fiscalPeriods=fy{year}/monthlySummaries=yyyyMM)は新規採番すると意味が壊れるため、衝突時は既存維持でskip。それ以外の衝突は新規採番
@@ -42,7 +40,6 @@
 - **復元はマージ型**: 既存データの削除・上書きは行わない(set先は必ず未使用ID)
 - **`*At`フィールドの日時復元**: 時刻部(T)を持つISO文字列のみDate化→Timestamp。`paidAt`等のYYYY-MM-DD文字列は文字列のまま維持(toStoreの無条件`*At`変換と異なり型を壊さない)
 - 証憑のstoragePathはファイル実体の場所を指すため復元時も書き換えない(ファイル本体のコピーは範囲外)
-
 ### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm lint` — 合格(既存warning 1件のみ: receiptsの`<img>`)
@@ -50,12 +47,37 @@
 - `pnpm test` — 合格(30ファイル377件、skip 10)
 - `pnpm build` — 合格(`/api/backup`が動的ルート、`/backup`が静的ページとして登録)
 - Firebase Emulator tests — 該当なし(backup.tsは純粋関数を単体テスト。Rules変更なし)
-
 ### 未解決事項・次の担当者への注意事項
 - 復元の書き込みはバッチ400件単位の逐次commitで全件アトミックではない。大量データの復元途中失敗は部分適用になりうる(監査ログは成功時のみ記録)
 - 証憑ファイル本体(Storageオブジェクト)はバックアップ対象外。別businessIdへの復元時、storagePathは元businessのパスのまま(アクセス可否は元事業のmembership依存)
 - 復元にレート制限は未設定(ownerのみの低頻度操作想定)。必要ならrate-limit.tsへ追加
 - エミュレータ・実DBでの往復検証は未実施。Emulator環境でのexport→restoreの実動作確認が望ましい
+## 2026-11-02: 監査ログ閲覧UI(Issue #48)
+- Worktree: audit-log-ui
+`businesses/{businessId}/auditLogs` を一覧表示する `/audit-log` 画面を新設。viewer以上・読み取り専用(編集操作なし)。依存追加なし。
+- `src/lib/audit-log-view.ts`(新規): 表示・絞り込みの純粋関数
+  - `parseAuditTargetPath`: `businesses/{bid}/{collection}/{docId}` を分解(事業ルートはcollection="businesses"、ネストパスは先頭サブコレクション+残り、解釈不可はundefined)
+  - `AUDIT_TARGET_TYPES` / `AUDIT_ACTIONS`: 対象種別・操作の日本語ラベル(フィルタ選択肢順を兼ねる)。actionはスキーマ上の4種に加え、実データで使われる `run_ai` / `approve_ai` / `reject_ai`(ai/service.tsのappendAudit経由)も定義
+  - `describeAuditEntry`: 「差分概要」列。監査ログはスナップショットを保存しない設計(docs/SECURITY_RULES.md)のため、targetPathの対象ラベル+操作から説明文を生成(例:「取引を更新」「会計期間を締め」「AI提案を承認」)
+  - `filterAuditLogs`: action完全一致・targetPathのコレクション部・createdAt期間(ISO瞬時・両端含む)で絞り込み、createdAt降順(同時刻はid降順)にソート
+- `src/lib/api/queries.ts`: `listAuditLogsRaw`追加(一覧クエリ集約方針に従う)。`.add()`で書かれたログはidフィールドを持たないためdoc.idを補完
+- `src/lib/actions/audit-logs.ts`(新規): `listAuditLogs(businessId)` Server Action。`requireViewer`で認可後、ログ一覧と`listMembers`を並列取得し`actorName`(displayName||email)を解決。名前解決失敗時もログは返す
+- `src/app/(app)/audit-log/`: `page.tsx`(既存ページと同じSuspense+`instant=false`パターン)と`audit-log-screen.tsx`
+  - 表示: 日時(formatDateTime)・ユーザー(名前。未解決はuid先頭8文字+titleにuid)・操作(Badge色分け)・対象種別・対象ID(titleにtargetPath)・概要
+  - フィルタ: 期間(開始日・終了日をローカルTZでISO瞬時に変換)・操作種別・対象種別。いずれもクライアント側で`filterAuditLogs`に適用
+  - ページング: 最新50件ずつ「さらに読み込み」(取得済みリストを表示側でスライス。フィルタ変更時は先頭に戻す)
+- `src/components/app-shell.tsx`: ナビに「監査ログ」追加(決算チェックと設定の間)
+- `src/lib/audit-log-view.test.ts`(新規): パース・ラベル・概要生成・絞り込み+ソートの単体テスト
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存のreceipts-screen `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(30ファイル379件、skip 10)
+- `pnpm build` — 合格(`/audit-log` が静的ルートとして登録)
+- Firebase Emulator tests — 該当なし(firestore.rules変更なし)
+- 監査ログのスキーマは識別情報のみ(targetPath+action)で差分スナップショットを持たない。「差分概要」は対象種別+操作の説明文であり、変更内容の差分そのものではない(スナップショット保存はSECURITY_RULESの方針と相談)
+- 一覧はコレクション全件取得→メモリ絞込(既存のlist系と同方針)。auditLogsが肥大化した場合は`firestore.indexes.json`既存の(targetPath ASC, createdAt DESC)索引を使ったサーバーサイドページングへの移行を検討(action絞り込みには別途索引が必要)
+- `action`フィールドのTS型(`AuditAction`)は4種だが実データにはAI系3種も混在する。画面はstring扱いで未知値をそのまま表示する
+- `writeAuditLog`/`appendAuditLog`経由のエントリはdocに`id`フィールドを持たず、`createdAt`欠損時は空文字フォールバック(表示上は空欄)
 
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
