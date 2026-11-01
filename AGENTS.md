@@ -38,6 +38,12 @@
 - pnpm build
 - Firebase Emulator tests
 
+## Environment
+
+- Worktree 作成直後は `pnpm install --frozen-lockfile` が必要(node_modules は worktree 間で共有しない)
+- Firebase Emulator テスト(`pnpm test:rules` / `pnpm test:emulators`)は JDK 21+ が必要。この環境では `export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home` を設定してから実行する
+- Emulator・`next dev` の同時起動はポート衝突するため全 worktree 通して1系統まで
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 ## This is NOT the Next.js you know
