@@ -25,35 +25,7 @@ export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue";
 
 export type FiscalPeriodStatus = "open" | "closed";
 
-export type AuditAction =
-  | "create"
-  | "update"
-  | "delete"
-  | "close"
-  | "approve_ai"
-  | "reject_ai"
-  | "ai_suggest";
-
-export type AiSuggestionStatus = "pending" | "approved" | "rejected";
-
-/**
- * AI提案。確定値(本体フィールド)とは必ず分離して保持する
- * (docs/AI_POLICY.md / ADR-0003)。
- */
-export interface AiSuggestion {
-  /** 提案値のマップ。例: { account: "rent", confidence は本フィールド側 } */
-  suggested: Record<string, unknown>;
-  /** 0.0〜1.0 */
-  confidence: number;
-  rationale?: string;
-  model?: string;
-  /** 信頼度が閾値未満で「要確認」かどうか */
-  needsReview: boolean;
-  status: AiSuggestionStatus;
-  suggestedAt: string;
-  decidedAt?: string;
-  decidedBy?: string;
-}
+export type AuditAction = "create" | "update" | "delete" | "close";
 
 export interface Business {
   id: string;
@@ -77,7 +49,6 @@ export interface Transaction {
   description: string;
   receiptIds: string[];
   status: TransactionStatus;
-  aiSuggestion?: AiSuggestion;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -100,7 +71,6 @@ export interface Receipt {
   mimeType: string;
   transactionId?: string;
   status: ReceiptStatus;
-  aiSuggestion?: AiSuggestion;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

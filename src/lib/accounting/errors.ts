@@ -14,11 +14,7 @@ export type DomainErrorCode =
   | "HAS_DRAFT_TRANSACTIONS"
   | "INVALID_STATUS_TRANSITION"
   | "ALREADY_PAID"
-  | "OVERPAID"
-  | "SUGGESTION_NOT_FOUND"
-  | "SUGGESTION_NOT_PENDING"
-  | "SUGGESTION_FIELD_FORBIDDEN"
-  | "INVALID_SUGGESTION";
+  | "OVERPAID";
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;

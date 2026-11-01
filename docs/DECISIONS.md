@@ -72,3 +72,4 @@
 - 決定: AI提案を `aiSuggestions` コレクションの独立ドキュメントとして管理し、`type` / `targetPath` / `suggestion` / `confidence` / `status(pending|accepted|rejected)` を持たせる。生成はAdmin SDKのみ、クライアントはstatus解決のみ可能。確定データは `aiSuggestionId` で起源の提案を参照する
 - 理由: 提案のライフサイクル(生成→確認→採否)を単位として扱え、監査・再生成・複数対象への提案を統一モデルで扱える。AI出力が確定フィールドに混入する経路を構造的に排除できる
 - 影響: 採用時は「提案を読み→ユーザーが確定値へ反映」の2ステップが必須。`transactions`/`receipts` の `aiSuggestion` フィールドは廃止(Security Rulesで引き続き書き込み禁止)
+- 補足(2026-11-02): 実装のフィールド名は `kind` / `target:{type,id}` / `payload` / `reason` / `issues` / `attempts` / `retriable` / `lastError` / `decidedBy` / `decidedAt` / `rejectReason` で、statusは `pending`/`accepted`/`rejected`/`needs_review`。再実行・失敗記録を持てるよう `needs_review` を追加した(ai-suggestion-consolidationで旧実装を統合・削除済み)

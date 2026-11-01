@@ -26,7 +26,6 @@ function tx(
     description: "desc",
     receiptIds: [],
     status,
-    aiSuggestion: null,
     idempotencyKey: null,
     createdBy: "user",
     createdAt: NOW,

@@ -93,6 +93,7 @@ export function DashboardScreen() {
   if (!data) return <ErrorState onRetry={reload} />;
 
   const profit = data.summary.totalIncome - data.summary.totalExpense;
+  const suggestionTargets = new Set(data.pendingSuggestionTransactionIds);
   const allClear =
     data.draftCount === 0 &&
     data.pendingSuggestionCount === 0 &&
@@ -204,7 +205,7 @@ export function DashboardScreen() {
                     </td>
                     <td>
                       <StatusBadge kind="transaction" status={t.status} />
-                      {t.aiSuggestion?.status === "pending" && (
+                      {suggestionTargets.has(t.id) && (
                         <span className="ml-1">
                           <Badge tone="indigo">AI</Badge>
                         </span>

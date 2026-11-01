@@ -57,22 +57,6 @@
       ]
     },
     {
-      "collectionGroup": "aiSuggestions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "aiSuggestions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "targetPath", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "closingChecks",
       "queryScope": "COLLECTION",
       "fields": [

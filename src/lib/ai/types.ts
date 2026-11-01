@@ -135,6 +135,26 @@ export interface AISuggestion {
 
 export type NewAISuggestion = Omit<AISuggestion, "id">;
 
+/**
+ * API経由のJSON表現。TimestampはISO 8601文字列としてシリアライズされる。
+ * クライアント側(fetch/useState)ではこの型で扱う。
+ */
+export type AISuggestionJSON = Omit<
+  AISuggestion,
+  "createdAt" | "updatedAt" | "decidedAt"
+> & {
+  createdAt: string;
+  updatedAt: string;
+  decidedAt: string | null;
+};
+
+/** 未解決(ユーザー判断待ち)の提案かどうか */
+export function isUnresolvedSuggestion(
+  suggestion: Pick<AISuggestion, "status">,
+): boolean {
+  return suggestion.status === "pending" || suggestion.status === "needs_review";
+}
+
 /** 監査ログエントリ。証憑内容・個人情報は含めず対象の識別情報のみ */
 export interface AuditLogEntry {
   actorUid: string;

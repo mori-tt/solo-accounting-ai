@@ -218,14 +218,13 @@ describe("owner権限", () => {
 });
 
 describe("管理者権限(Admin SDK)", () => {
-  it("aiSuggestionをサーバーサイドから書き込める", async () => {
-    await seed(testEnv, { [tPath(BIZ, "t1")]: tx() });
+  it("aiSuggestionsドキュメントをサーバーサイドから作成できる", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await assertSucceeds(
-        ctx.firestore().doc(tPath(BIZ, "t1")).set(
-          { aiSuggestion: { account: "502", confidence: 0.9 } },
-          { merge: true },
-        ),
+        ctx
+          .firestore()
+          .doc(`businesses/${BIZ}/aiSuggestions/s1`)
+          .set(aiSuggestion()),
       );
     });
   });
@@ -476,29 +475,38 @@ describe("aiSuggestions", () => {
     await assertFails(owner.doc(sPath(BIZ, "s2")).delete());
   });
 
-  it("editor/ownerは提案を承認・却下できる", async () => {
+  it("editor/ownerは未解決の提案を承認・却下できる", async () => {
     await seed(testEnv, {
       [sPath(BIZ, "s1")]: aiSuggestion(),
-      [sPath(BIZ, "s2")]: aiSuggestion(),
+      [sPath(BIZ, "s2")]: aiSuggestion("needs_review"),
     });
     await assertSucceeds(
       asUser(testEnv, EDITOR)
         .doc(sPath(BIZ, "s1"))
-        .update({ status: "accepted", resolvedBy: EDITOR }),
+        .update({ status: "accepted", decidedBy: EDITOR }),
     );
     await assertSucceeds(
       asUser(testEnv, OWNER)
         .doc(sPath(BIZ, "s2"))
-        .update({ status: "rejected", resolvedBy: OWNER }),
+        .update({ status: "rejected", decidedBy: OWNER }),
     );
   });
 
-  it("resolvedByに他人を設定できない", async () => {
+  it("解決済みの提案はクライアントから再解決できない", async () => {
+    await seed(testEnv, { [sPath(BIZ, "s1")]: aiSuggestion("accepted") });
+    await assertFails(
+      asUser(testEnv, OWNER)
+        .doc(sPath(BIZ, "s1"))
+        .update({ status: "rejected", decidedBy: OWNER }),
+    );
+  });
+
+  it("decidedByに他人を設定できない", async () => {
     await seed(testEnv, { [sPath(BIZ, "s1")]: aiSuggestion() });
     await assertFails(
       asUser(testEnv, EDITOR)
         .doc(sPath(BIZ, "s1"))
-        .update({ status: "accepted", resolvedBy: OWNER }),
+        .update({ status: "accepted", decidedBy: OWNER }),
     );
   });
 
@@ -508,17 +516,22 @@ describe("aiSuggestions", () => {
     await assertFails(
       owner
         .doc(sPath(BIZ, "s1"))
-        .update({ status: "accepted", resolvedBy: OWNER, suggestion: { amount: 1 } }),
+        .update({ status: "accepted", decidedBy: OWNER, payload: { amount: 1 } }),
     );
     await assertFails(
       owner
         .doc(sPath(BIZ, "s1"))
-        .update({ status: "accepted", resolvedBy: OWNER, confidence: 0.1 }),
+        .update({ status: "accepted", decidedBy: OWNER, confidence: 0.1 }),
     );
     await assertFails(
       owner
         .doc(sPath(BIZ, "s1"))
-        .update({ status: "accepted", resolvedBy: OWNER, targetPath: "x" }),
+        .update({ status: "accepted", decidedBy: OWNER, kind: "duplicate_detection" }),
+    );
+    await assertFails(
+      owner
+        .doc(sPath(BIZ, "s1"))
+        .update({ status: "accepted", decidedBy: OWNER, target: { type: "transaction", id: "t9" } }),
     );
   });
 
@@ -527,7 +540,7 @@ describe("aiSuggestions", () => {
     await assertFails(
       asUser(testEnv, VIEWER)
         .doc(sPath(BIZ, "s1"))
-        .update({ status: "accepted", resolvedBy: VIEWER }),
+        .update({ status: "accepted", decidedBy: VIEWER }),
     );
   });
 });

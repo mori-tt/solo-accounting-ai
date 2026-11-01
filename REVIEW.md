@@ -16,6 +16,59 @@
 
 ## Log
 
+## 2026-11-02: AI提案実装の統合(ADR-0005への一本化)
+
+- Worktree: ai-suggestion-consolidation
+
+### 実装内容
+
+`aiSuggestions` コレクションの独立ドキュメント方式(ADR-0005、`src/lib/ai/*`)を正規実装とし、アプリ内の旧実装3系統を削除してUI・ダッシュボード・rules・docsを新shapeへ一本化した。前タスク(ai-api-wiring)が残した「旧 `services/aiSuggestions.ts` 系との統合整理は別タスク」の対応。
+
+- 削除(旧: ドキュメント内 `aiSuggestion` 埋め込みフィールド方式)
+  - `src/lib/accounting/services/aiSuggestions.ts`(+test)、`src/lib/accounting/suggestions.ts`、`src/lib/accounting/domain/ai.ts`
+  - `AccountingService.saveAiSuggestion/acceptAiSuggestion/rejectAiSuggestion` と関連テスト
+  - `src/lib/firebase/server.ts` の `createAiSuggestion`(旧shape・呼び出しなしの死コード)
+  - Server Actions `approveTransactionSuggestionAction`/`rejectTransactionSuggestionAction`/`decideReceiptSuggestionAction`
+  - `Transaction`/`Receipt`/`TransactionEntity`/`ReceiptEntity` の `aiSuggestion` フィールド、旧 `AiSuggestion`/`AiSuggestionStatus` 型、DomainErrorCode の SUGGESTION_* 4コード
+- 追加・変更(新方式への接続)
+  - `src/lib/ai/types.ts`: `AISuggestionJSON`(ISO文字列のJSON表現)と `isUnresolvedSuggestion()` を追加
+  - `src/lib/ai/apply.ts` 新規: 提案payloadから確定フィールドへのコピー値を組み立てる純粋関数。`account_suggestion`→最高信頼度候補のaccount、`transaction_description`→description のみ。採用(状態解決)とは別のユーザー操作として呼ぶADR-0005の「2ステップ」反映側
+  - `src/lib/api-client.ts`: `fetchAiSuggestions`/`runAiSuggestion`/`decideAiSuggestion`(GET/POST/PATCH `/api/ai/suggestions`)
+  - `components/ai-suggestion-card.tsx`: 旧 `suggested` map+`approved` 前提から canonical shape(kind別payload・`accepted`/`rejected`/`needs_review`・issues)へ書き換え
+  - transactions-screen: 提案をコレクションから取得しtarget.idでグルーピング。「科目をAI提案」で `runAiSuggestion`、採用は `decideAiSuggestion`→別操作で `updateTransaction` にpatch反映(確定ステータスにはしない)、却下は `decideAiSuggestion`。locked取引はpatch非適用
+  - receipts-screen: 同様にreceipt対象提案を表示・採否。抽出値の確定データへの自動反映なし(旧UIにも生成トリガーはなかった)
+  - dashboard: `getDashboard` が `getAISuggestionService().list` で未解決件数を数え、`pendingSuggestionTransactionIds` で取引行にAIバッジを出す(旧: transaction埋め込み `aiSuggestion.status==="pending"` の件数)
+  - `heuristic-provider`: フォールバック科目 `miscellaneous`→`misc_expense`(現行科目コードに合わせる)
+- firestore.rules: aiSuggestions update を新shapeに合わせ `pending`/`needs_review`→`accepted`/`rejected` かつ `decidedBy==本人` のみ許可、kind/target/payload等はunaffectedに。`firestore.indexes.json` の旧shape索引2件(targetPath等)を削除
+- テスト: `tests/rules` の aiSuggestion fixture・更新テストを新shapeへ(needs_review遷移・解決済み再操作禁止・payload不変)。`src/lib/ai/apply.test.ts` 新規
+- docs: FIRESTORE_SCHEMAの旧セクション・データフロー図、SECURITY_RULESの権限表、AI_POLICYのデータ分離節、DECISIONS ADR-0005に実装フィールド名の補足を追記
+
+### ドキュメント互換・移行方針
+
+- 既存Firestoreドキュメントに残っている可能性のある旧 `aiSuggestion` mapフィールドは移行・書き換えを行わない(締め済み含む既存データの直接変更を避ける方針と同じ。invoice-taxの税フィールド対応と同型)
+- アプリは型からフィールドを除去済みで読み書きしないため、残存データは無視される。表示・集計・権限判定への影響なし
+- `firestore.rules` は `transactions`/`receipts` への `aiSuggestion` 書き込みを引き続き禁止(rulesテストのガードも維持)。除去が必要になった場合はAdmin SDKで対応する
+- `aiSuggestions` コレクション側は旧shape(`type`/`targetPath`/`suggestion`)ドキュメントが作成される経路をすべて削除した(rulesでcreate禁止+`createAiSuggestion`削除のため新規混入不可)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(22ファイル257件、skip 10)
+- `pnpm build` — 合格
+- `pnpm test:rules` — 合格(63件。JDK21 `JAVA_HOME=/opt/homebrew/opt/openjdk@21/...` 設定)
+- `pnpm test:emulators` — 合格(7件)
+- `tests/firestore` — 合格(3件、emulators:exec経由で確認)
+
+### 未解決事項・次の担当者への注意事項
+
+- 提案の採用→反映は非アトミック: `decideAiSuggestion`(accept)後に `updateTransaction` が失敗すると「提案はacceptedだが取引は未反映」になり得る。UIはpatch適用可能な提案の採用ボタンを「提案を採用して反映」と表示し区別しているが、厳密にはサーバー側で「accepted+反映」を1操作にするApply APIの検討余地あり
+- `retry`(needs_review再実行)はサービス層のみ実装でAPI未公開のまま。UIからの再実行導線は別タスク
+- `monthly_explanation` の表示導線は未実装(kind・payload描画はカード側で対応済み)
+- `getDashboard` は `list(limit=MAX_LIST_LIMIT)` で全提案を走査して未解決を数える。store側の走査上限(MAX_LIST_LIMIT)を超える件数では件数が過小になる
+- `domain/`(旧世代 `service.ts`/`types.ts`)と `services/`+トップレベル型(新世代)の二重定義は今回の統合対象外。`aiSuggestion` 関連のみ除去し、Entity型等の統合整理は引き続き別タスク
+- E2E(`pnpm test:e2e`)は未実施。旧来からAI提案カード操作はE2E未カバー領域で、削除したUIの参照もなかった
+
 ## 2026-11-02: E2Eカバレッジ拡大(未カバー画面・ロール・請求/締めの分岐)
 
 - Worktree: e2e-coverage

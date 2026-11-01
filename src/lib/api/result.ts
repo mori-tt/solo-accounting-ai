@@ -51,10 +51,6 @@ const DOMAIN_ERROR_MESSAGES: Record<string, string> = {
   INVALID_STATUS_TRANSITION: "この状態では実行できない操作です",
   ALREADY_PAID: "すでに支払済み・入金済みです",
   OVERPAID: "請求額を超える入金はできません",
-  SUGGESTION_NOT_FOUND: "AI提案が見つかりません",
-  SUGGESTION_NOT_PENDING: "このAI提案はすでに処理済みです",
-  SUGGESTION_FIELD_FORBIDDEN: "AI提案で変更できない項目が含まれています",
-  INVALID_SUGGESTION: "AI提案の内容が不正です",
 };
 
 /** 例外 → ユーザー向けエラー。内部情報を漏らさない。 */

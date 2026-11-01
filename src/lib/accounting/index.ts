@@ -1,4 +1,3 @@
-export * from "./domain/ai";
 export * from "./domain/audit";
 export * from "./domain/checks";
 export * from "./domain/dates";

@@ -15,27 +15,7 @@ export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue";
 
 export type FiscalPeriodStatus = "open" | "closed";
 
-export type AuditAction =
-  | "create"
-  | "update"
-  | "delete"
-  | "close"
-  | "suggest_ai"
-  | "approve_ai"
-  | "reject_ai";
-
-export type AiSuggestionStatus = "pending" | "accepted" | "rejected";
-
-export interface AiSuggestion {
-  status: AiSuggestionStatus;
-  confidence: number;
-  account: string | null;
-  amount: number | null;
-  date: ISODate | null;
-  counterparty: string | null;
-  rationale: string | null;
-  suggestedAt: Date;
-}
+export type AuditAction = "create" | "update" | "delete" | "close";
 
 export interface TransactionEntity {
   id: string;
@@ -47,7 +27,6 @@ export interface TransactionEntity {
   description: string;
   receiptIds: string[];
   status: TransactionStatus;
-  aiSuggestion: AiSuggestion | null;
   idempotencyKey: string | null;
   createdBy: string;
   createdAt: Date;
@@ -72,7 +51,6 @@ export interface ReceiptEntity {
   mimeType: string;
   transactionId: string | null;
   status: ReceiptStatus;
-  aiSuggestion: AiSuggestion | null;
   idempotencyKey: string | null;
   createdBy: string;
   createdAt: Date;

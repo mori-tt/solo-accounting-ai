@@ -94,32 +94,3 @@ export async function writeAuditLog(params: {
     });
   return ref.id;
 }
-
-export type AiSuggestionType =
-  | "receipt_extraction"
-  | "account_suggestion"
-  | "journal_candidate"
-  | "duplicate_detection"
-  | "monthly_explanation";
-
-// aiSuggestionsコレクションはAdmin SDKからのみ生成する
-// (Security Rulesでクライアント作成を禁止済み。AI_POLICY.md/ADR-0005参照)
-export async function createAiSuggestion(params: {
-  businessId: string;
-  type: AiSuggestionType;
-  targetPath: string;
-  suggestion: Record<string, unknown>;
-  confidence: number;
-}): Promise<string> {
-  const ref = await getAdminDb()
-    .collection(`businesses/${params.businessId}/aiSuggestions`)
-    .add({
-      type: params.type,
-      targetPath: params.targetPath,
-      suggestion: params.suggestion,
-      confidence: params.confidence,
-      status: "pending",
-      createdAt: FieldValue.serverTimestamp(),
-    });
-  return ref.id;
-}
