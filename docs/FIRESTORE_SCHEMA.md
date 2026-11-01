@@ -248,6 +248,32 @@ AI提案。内容の生成はAdmin SDK(Cloud Functions等)のみ。
 | createdAt | Timestamp | |
 
 ※ 個人情報・証憑内容のスナップショットは保存しない。対象の識別情報のみ記録する。
+AI関連のactionは `run_ai` / `approve_ai` / `reject_ai` を使う。
+
+### businesses/{businessId}/aiSuggestions/{suggestionId}
+
+AI提案のライフサイクルを管理するコレクション(ADR-0005)。
+`aiSuggestion` mapフィールドの代わりに、状態遷移・再実行・監査を可能にするため独立したドキュメントとする。
+書き込みはサーバーサイド(Admin SDK)のみ。
+
+| Field | Type | Note |
+|---|---|---|
+| kind | string | `receipt_extraction` / `account_suggestion` / `duplicate_detection` / `transaction_description` / `monthly_explanation` |
+| target | map | `{ type: receipt/transaction/monthlySummary, id }` 対象の識別情報 |
+| status | string | `pending` / `accepted` / `rejected` / `needs_review` |
+| payload | map? | 提案値(kindごとの構造)。失敗時はnull |
+| confidence | number | 信頼度 0..1 |
+| reason | string | 提案の根拠(AI未返却時はシステム生成) |
+| issues | string[] | needs_reviewの理由コード(例: `amount_unreadable`, `timeout`) |
+| attempts | number | 実行回数(retryで増加) |
+| retriable | boolean | 再実行可能か |
+| lastError | map? | `{ code: timeout/provider_error/invalid_response, message }` 個人情報を含めない |
+| decidedBy | string? | 承認/拒否したuid |
+| decidedAt | Timestamp? | |
+| rejectReason | string? | ユーザーの拒否理由 |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
 
 ### businesses/{businessId}/idempotencyKeys/{hashedKey}
 
