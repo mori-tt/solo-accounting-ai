@@ -16,10 +16,37 @@
 
 ## Log
 
+## 2026-11-02: 期首残高/繰越設定(Issue #49)
+- Worktree: opening-balance
+### 実装内容
+年度ごとの期首残高を business ドキュメントに登録し、総勘定元帳の繰越行・試算表へ反映する機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `OpeningBalance` 型(`{ fiscalYear, accountCode, amount }`。amountは円・整数・借方残高を正とする)と `Business.openingBalances?` を追加。rules変更不要(Admin SDK経由の書き込みのため)
+- `src/lib/accounting/domain/ledger.ts`: `OPENING_EQUITY_ACCOUNT = "opening_equity"`(元入金=資本の内部コード)と `openingBalanceJournalEntries(balances, fiscalYear, date)` を追加。各残高を元入金相手の貸借一致した仮想仕訳へ展開(正=借方科目/貸元入金、負=逆)。既存関数のシグネチャは変更せず、仕訳列への連結方式としたため後方互換・貸借一致ともに担保
+- `src/lib/validation/schemas.ts`: `openingBalancesSchema`(要素検証+年度・科目重複拒否+500件上限。金額は負数許容=貸方残高)
+- `src/lib/actions/opening-balances.ts`(新規): `getOpeningBalances`(viewer)・`saveOpeningBalances`(owner・配列全体を置換保存・auditLogs付き)。締め済み会計年度に属するレコードは現状と完全一致しない限り `PERIOD_CLOSED` で拒否(締め済み期間の直接変更禁止ルール)
+- `src/lib/opening-balance-accounts.ts`(新規): 期首残高の科目選択肢(現金=cash・預金=deposits・売掛金=receivables。accounts.ts の科目マスタは触らない制約のため別管理)+元入金のラベル解決 `openingAccountLabel`
+- `src/app/(app)/reports/actions.ts`: 元帳・試算表の両レポートで `openingEntriesFor()`(表示月を含む会計年度の残高を前年度末付の仮想仕訳化)を仕訳列へ連結。前年度末付としたため当年度どの月でも明細行ではなく繰越残高側へ集約される
+- `src/app/(app)/reports/account-label.ts`: `bookAccountLabel` に期首残高関連コード(cash/deposits/receivables/opening_equity)のラベルを追加
+- `src/app/(app)/opening-balances/`(新規): 年度ごとの期首残高登録・編集画面。プリセット資産科目+「その他(コード入力)」のカスタム科目対応、行追加/削除、ownerのみ編集可(viewer/editorは読み取り表)
+- `src/components/app-shell.tsx`: ナビに「期首残高」1行追加(決算チェックと設定の間)
+- `src/lib/accounting/domain/ledger.test.ts`: ドメイン拡張のテスト10件追加(符号による貸借転換、年度/0円/空コードのフィルタ、繰越集約、TB貸借一致)
+- `docs/FIRESTORE_SCHEMA.md`: businesses の `openingBalances` フィールド追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功(LayoutProps等の生成型が無いとtypecheckが落ちるため)
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>` のみ)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(29ファイル374件、skip 10)
+- `pnpm build` — 合格(`/opening-balances` が静的ルートとして登録)
+- Emulator系はIssue制約により未実行
+### 備考・次の担当者への注意事項
+- 期首残高の転記日は「前会計年度の末日」。会計年度開始月が4月等でも当年度の全月で繰越側に集約される。前期最終月の元帳に「期首残高」行として現れることはない(表示月のFYでフィルタするため)
+- 試算表は月内取引+期首残高のみの合計。月初以前の期中取引は含めない既存仕様のまま(残高試算表への拡張は別課題)
+- 保存は owner のみ(`updateBusinessSettings` と同じ権限)。editorに開放する場合は `requireEditor` へ変更
+- 締め済み年度の編集はサーバー側で拒否するが、UI側では年度を選べてしまう。FiscalPeriod一覧を取って該当年度を非活性にする改善余地あり
 ## 2026-11-02: 全データJSONバックアップ/復元(Issue #47)
 - Worktree: backup-restore
 依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
-### 実装内容
 - `src/lib/backup.ts`(新規): businessスコープの全データを1つのJSON(`version:1`付き)にエクスポート/復元するロジック。クライアント側でもzodスキーマを使うため firebase-admin の値importは持たない(`import type`のみ)
   - `BACKUP_COLLECTIONS`: firestore.rulesの実在14コレクション(members/customers/projects/transactions/expenses/receipts/invoices/payments/journalEntries/fiscalPeriods/closingChecks/aiSuggestions/monthlySummaries/auditLogs)。`idempotencyKeys`は内部機構、`users`はbusinessIdスコープ外のため対象外
   - `backupFileSchema`(zod): version=1固定・businessId必須・各docは`id`必須のlooseObject。businessはname/fiscalYearStartMonth/taxModeのみpartial受理(ownerUid等はstripで落とす)。未知コレクションは受理して前方互換
@@ -40,8 +67,6 @@
 - **復元はマージ型**: 既存データの削除・上書きは行わない(set先は必ず未使用ID)
 - **`*At`フィールドの日時復元**: 時刻部(T)を持つISO文字列のみDate化→Timestamp。`paidAt`等のYYYY-MM-DD文字列は文字列のまま維持(toStoreの無条件`*At`変換と異なり型を壊さない)
 - 証憑のstoragePathはファイル実体の場所を指すため復元時も書き換えない(ファイル本体のコピーは範囲外)
-### 実行したテスト
-- `pnpm install --frozen-lockfile` — 成功
 - `pnpm lint` — 合格(既存warning 1件のみ: receiptsの`<img>`)
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 実行後)
 - `pnpm test` — 合格(30ファイル377件、skip 10)
@@ -70,7 +95,6 @@
 - `src/lib/audit-log-view.test.ts`(新規): パース・ラベル・概要生成・絞り込み+ソートの単体テスト
 - `pnpm exec next typegen` — 成功
 - `pnpm lint` — 合格(warning 1件: 既存のreceipts-screen `<img>`)
-- `pnpm typecheck` — 合格
 - `pnpm test` — 合格(30ファイル379件、skip 10)
 - `pnpm build` — 合格(`/audit-log` が静的ルートとして登録)
 - Firebase Emulator tests — 該当なし(firestore.rules変更なし)
