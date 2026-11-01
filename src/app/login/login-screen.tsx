@@ -14,7 +14,7 @@ import {
   Button,
   Card,
   Field,
-  formIssuesMessage,
+  issuesByField,
   TextInput,
 } from "@/components/ui";
 import { loginSchema, parseForm } from "@/lib/validation/schemas";
@@ -47,6 +47,7 @@ export function LoginScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
@@ -58,11 +59,12 @@ export function LoginScreen() {
     e.preventDefault();
     const parsed = parseForm(loginSchema, { email, password });
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setBusy(true);
     setError(undefined);
+    setFieldErrors({});
     try {
       const auth = getFirebaseAuth();
       if (mode === "signin") {
@@ -113,8 +115,10 @@ export function LoginScreen() {
               onClick={() => {
                 setMode(m);
                 setError(undefined);
+                setFieldErrors({});
               }}
-              className={`rounded px-3 py-1.5 ${
+              aria-pressed={mode === m}
+              className={`rounded px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-indigo-500 ${
                 mode === m
                   ? "bg-white font-medium shadow-sm dark:bg-zinc-900"
                   : "text-zinc-500"
@@ -130,7 +134,7 @@ export function LoginScreen() {
           noValidate
           className="mt-4 flex flex-col gap-3"
         >
-          <Field label="メールアドレス">
+          <Field label="メールアドレス" error={fieldErrors.email}>
             <TextInput
               type="email"
               autoComplete="email"
@@ -139,7 +143,11 @@ export function LoginScreen() {
               required
             />
           </Field>
-          <Field label="パスワード" hint="6文字以上">
+          <Field
+            label="パスワード"
+            hint="6文字以上"
+            error={fieldErrors.password}
+          >
             <TextInput
               type="password"
               autoComplete={
@@ -150,6 +158,9 @@ export function LoginScreen() {
               required
             />
           </Field>
+          {fieldErrors._form && (
+            <Alert tone="error">{fieldErrors._form}</Alert>
+          )}
           {error && <Alert tone="error">{error}</Alert>}
           <Button type="submit" loading={busy}>
             {mode === "signin" ? "ログイン" : "アカウントを作成"}
