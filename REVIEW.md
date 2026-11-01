@@ -17,11 +17,8 @@
 ## Log
 
 ## 2026-11-02: 仕訳帳・総勘定元帳・試算表レポート(Issue #32)
-
 - Worktree: ledger-reports
-
 ### 実装内容
-
 - `src/lib/accounting/domain/ledger.ts`(新規): 帳簿ロジック。Transaction(1行=type+account+amount)を複式仕訳へ展開する
   - `transactionToJournalEntry`: income=借方現金/貸方科目、expense=借方科目/貸方現金、transfer=借方科目(振替先)/貸方現金(振替元)。`CASH_ACCOUNT="cash"` を相手科目に使う
   - `buildJournal`: 確定済み(confirmed/locked)のみ日付昇順。draftは月次集計と同様に除外
@@ -31,28 +28,82 @@
 - 新規ページ: `reports/journal`(仕訳帳: 日付/借方科目/借方金額/貸方科目/貸方金額/摘要)、`reports/ledger`(総勘定元帳: 科目選択+繰越・期末残高+明細)、`reports/trial-balance`(試算表: 科目別貸借合計+合計行+貸借一致バッジ)。`useApiData`/`callApi`/`MonthNav` の既存パターン踏襲
 - `src/app/(app)/reports/account-label.ts`(新規): 帳簿用科目ラベル。`cash` は科目マスタ(accounts.ts)未登録の内部コードのため「現金」をここで補う
 - `src/components/app-shell.tsx`: ナビに仕訳帳/総勘定元帳/試算表を月次レポートの直下に追加
-
 ### 設計上の判断
-
 - **transfer の仕訳展開**: Transaction は相手科目を持たない(1科目のみ)ため、「借方=account(振替先)/貸方=現金(振替元)」の一方向として展開。収支と同じ「現金相手」モデルに揃え、Issue記載の「借方=振替先/貸方=振替元」に現金=振替元を当てはめた。振替は収支を構成しない点は月次集計(transferを収支に含めない)と同じ扱い
 - **元帳の残高方向**: 勘定体系に借方/貸方の性質マスタが無いため、全期間の貸借合計が大きい側を残高方向とするヒューリスティック(収益科目→貸方、費用・現金→借方が普通になる)
 - **総勘定元帳のデータ範囲**: 繰越残高のため `0001-01-01`〜月末の全取引を読む(dashboardのallTxと同じ手法)
-
 ### 実行したテスト
-
 - `pnpm install --frozen-lockfile` — 合格
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(25ファイル315件、skip 10。`domain/ledger.test.ts` 新規17件含む)
 - `pnpm build` — 合格(3新規ルートを含む全ルート生成)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。Emulator同時起動制約のため起動せず)
-
 ### 未解決事項・次の担当者への注意事項
-
 - `domain/`(旧世代)と`services/`(新世代)の2系統併存のため、domain関数の入力は `Pick<TransactionEntity>` 型(`JournalTransaction`)として services 側 `Transaction` をそのまま受け取れるようにした。Entity型の統合整理は従前どおり別タスク
 - `cash` 勘定は科目マスタ(accounts.ts)に無いため帳簿画面側で「現金」ラベルを補っている。正式な科目体系の整備時にマスタ側へ移す余地あり
 - 振替の逆方向(他口座→現金)は現モデルでは表現できない。相手科目フィールドが将来追加された場合は `transactionToJournalEntry` の展開を見直すこと
 - E2E(`pnpm test:e2e`)は未実施。帳簿画面のE2Eカバレッジは別タスク
+## 2026-11-02: UX/アクセシビリティ仕上げ(Issue #35)
+- Worktree: ux-a11y
+- 変更内容: ui.tsx プリミティブのアクセシビリティ強化と、対象画面のフォームエラー inline 化・モバイル用テーブル overflow 対応
+- 変更ファイル:
+  - `src/components/ui.tsx`
+    - `Button`: focus-visible アウトライン、disabled 時の `aria-disabled` + `disabled:opacity-60` で視覚統一、loading 時 `aria-busy`
+    - `Field`: `<label>` 包み込みから `<label htmlFor>` + 子コントロールへの `useId` ベース id 注入へ変更。error 時 `aria-invalid`、error/hint を `aria-describedby` で参照(子が既に id/aria-describedby を持つ場合は尊重・連結)
+    - `inputClass` 系(TextInput/NumberInput/Select/Textarea): disabled 視覚 + `aria-invalid:` 時の赤枠/赤リング。`FileInput` に focus-visible アウトライン + disabled 視覚
+    - `issuesByField` 新設: `parseForm` の issues("path: message")をフィールドマップへ変換(パス無しは `_form`)
+    - `ConfirmDialog`: `aria-label` → `aria-labelledby`(見出し参照)に変更、開時にキャンセルボタンへ autoFocus
+    - `tableClass`: `th` を whitespace-nowrap に
+  - `src/app/login/login-screen.tsx`: email/password をフィールド下エラー化(認証エラーは Alert 維持)、モード切替に `aria-pressed` + focus-visible
+  - `src/app/(app)/settings/settings-screen.tsx`: 事業情報/新規事業/メンバー招待フォームをフィールド下エラー化、members テーブルに overflow-x-auto、ロール変更 Select に aria-label
+  - `src/app/(app)/customers/customers-screen.tsx`、`projects/projects-screen.tsx`、`expenses/new/expenses-screen.tsx`: 各登録/編集フォームをフィールド下エラー化(projects 編集時の手動チェックも fieldErrors に統一)
+  - `src/app/(app)/dashboard/dashboard-screen.tsx`: 最近の取引テーブルを overflow-x-auto 化、要対応リンクに focus-visible アウトライン
+  - `src/app/(app)/closing/closing-screen.tsx`: チェックリスト5テーブルを overflow-x-auto 化
+  - `src/components/ui.test.tsx` 新規: Field の htmlFor 関連付け/aria-invalid/aria-describedby/hint/既存 id 尊重 + issuesByField を6件検証
+- Checks:
+  - `pnpm install --frozen-lockfile` — 成功
+  - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存・対象外ファイル)
+  - `pnpm exec next typegen` / `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(25ファイル304件、skip 10)
+  - `pnpm build` — 合格
+- 備考:
+  - 破壊的操作の ConfirmDialog は対象画面では既に徹底済み(settings メンバー削除、closing 期間締め)のため変更不要。expenses の「支払済にする」はデータ喪失を伴わない状態更新のため確認ダイアログ対象外と判断
+  - `Field` の子は全箇所で単一コントロールのため cloneElement 注入で問題なし。app-shell/transactions 等の対象外ファイルからも同じ Field を利用しており、そちらにも htmlFor 関連付けが波及(ファイル自体は未変更)
+  - `formIssuesMessage` は対象外ファイル(app-shell/transaction-form/invoices-screen)が現役利用のため export を維持
+  - `aria-disabled` はネイティブ `disabled` と併記(冗長だが issue 要件・一貫性のため)。loading 中は disabled と併せて付与
+  - Emulator 系チェック(test:rules/test:emulators)は本タスクの指定チェック範囲外のため未実施
+## 2026-11-02: 本番ハードニング(Issue #34)
+- Worktree: prod-hardening
+- `src/lib/env.ts`(新規): 起動時env検証。必須 `NEXT_PUBLIC_FIREBASE_*` が
+  空なら `EnvValidationError`(不足キー名を列挙した明確なメッセージ)。
+  本番(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR!=true`)で Emulator host 環境変数が
+  残っていたら console.warn で警告(起動は継続)。
+  `src/lib/firebase/client.ts` の `getFirebaseApp()` から
+  `assertFirebaseClientEnvOnce()` として呼ぶ(検証は1回のみ・失敗時はメモ化しない)
+- エラー境界: `src/app/error.tsx` / `src/app/not-found.tsx` /
+  `src/app/global-error.tsx` を新設(日本語メッセージ・再試行導線)。
+  既存 `src/app/(app)/error.tsx` を拡張(console.error による診断ログ・
+  本番サーバーエラーの digest 表示・ダッシュボードへの復帰導線)
+- `/api/ai/*` への簡易レート制限: `src/lib/api/rate-limit.ts`(新規)。
+  インメモリ Map の固定ウィンドウ方式・businessId単位
+  (サーバーレスではインスタンス単位の最良努力とコメント明記)。
+  提案生成 POST=60回/時、一覧 GET・承認/却下 PATCH=240回/時。
+  超過時は `RateLimitError`→HTTP 429 + `{ok:false,error:{code:"RATE_LIMITED"}}` + Retry-After ヘッダ
+- APIエラーレスポンス統一: `toErrorResponse()` を `src/lib/api/result.ts` に追加し、
+  全 Route Handler(api/ai/*・api/receipts/*・api/session)で共用する形に整理。
+  `/api/session` は `error` が文字列だった非準拠レスポンスを `{code,message}` 形式に修正。
+  あわせて INTERNAL を 400→500 に修正、receipts POST で NOT_FOUND→404 が抜けていたのを統一
+- `ApiError.code` に `RATE_LIMITED` を追加
+- README: 前提(Node 26+/pnpm/JDK 21+)/環境変数・Emulator セットアップ/
+  コマンド一覧(test:rules・test:emulators 追記)/本番 Firebase 切替手順/
+  デプロイ指針を整備。.env.example の変数一覧と整合
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(26ファイル314件、skip 10。env.test.ts 11件・rate-limit.test.ts 5件を新規追加)
+- `pnpm build` — 成功
+- Emulator・`next dev` は制約により未起動(Rules/E2E テストは未実施)
 
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 

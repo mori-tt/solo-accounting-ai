@@ -1,4 +1,4 @@
-import { toActionError, ApiError } from "@/lib/api/result";
+import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
 import { getAdminBucket } from "@/lib/firebase/admin";
@@ -35,15 +35,6 @@ export async function GET(
       },
     });
   } catch (e) {
-    const err = toActionError(e);
-    const status =
-      err.code === "UNAUTHORIZED"
-        ? 401
-        : err.code === "FORBIDDEN"
-          ? 403
-          : err.code === "NOT_FOUND"
-            ? 404
-            : 400;
-    return Response.json({ ok: false, error: err }, { status });
+    return toErrorResponse(e);
   }
 }
