@@ -134,3 +134,39 @@ export async function decideAiSuggestion(
     body: JSON.stringify({ businessId, decision, rejectReason }),
   });
 }
+
+// ---------- 領収書OCR API(/api/ai/receipt-ocr) ----------
+
+/** POST /api/ai/receipt-ocr の抽出結果。読み取れなかった項目はnull */
+export interface ReceiptOcrResult {
+  amount: number | null;
+  date: string | null;
+  vendor: string | null;
+  confidence: number;
+  reason: string;
+  issues: string[];
+}
+
+/** OCRの利用可否(AI_OCR_PROVIDER等の設定状態)を問い合わせる */
+export async function fetchReceiptOcrAvailability(
+  businessId: string,
+): Promise<{ available: boolean }> {
+  const params = new URLSearchParams({ businessId });
+  return requestJson<{ available: boolean }>(`/api/ai/receipt-ocr?${params}`);
+}
+
+/**
+ * 証憑をOCRし、日付・金額・取引先の抽出値を返す。
+ * サーバー側でStorageからファイルを取得して処理する(画像は送信しない)。
+ * 確定データには保存されず、フォームへの自動入力用。
+ */
+export async function runReceiptOcr(
+  businessId: string,
+  receiptId: string,
+): Promise<ReceiptOcrResult> {
+  return requestJson<ReceiptOcrResult>("/api/ai/receipt-ocr", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ businessId, receiptId }),
+  });
+}

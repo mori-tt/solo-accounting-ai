@@ -9,18 +9,35 @@ import {
   linkReceipt,
   listReceipts,
 } from "@/lib/actions/receipts";
-import { listTransactions } from "@/lib/actions/transactions";
+import {
+  createTransaction,
+  listTransactions,
+  updateTransaction,
+} from "@/lib/actions/transactions";
 import {
   callApi,
   decideAiSuggestion,
   fetchAiSuggestions,
+  fetchReceiptOcrAvailability,
+  runAiSuggestion,
+  runReceiptOcr,
 } from "@/lib/api-client";
+import { transactionPatchFromSuggestion } from "@/lib/ai/apply";
 import {
   isUnresolvedSuggestion,
   type AISuggestionJSON,
+  type ReceiptExtractionPayload,
 } from "@/lib/ai/types";
-import { accountLabel } from "@/lib/accounts";
-import { formatDateTime, formatYen } from "@/lib/format";
+import {
+  ACCOUNT_OPTIONS,
+  accountLabel,
+  accountOptionsFor,
+} from "@/lib/accounts";
+import { formatDateTime, formatYen, todayDateString } from "@/lib/format";
+import {
+  parseForm,
+  transactionSchema,
+} from "@/lib/validation/schemas";
 import type { Receipt, ReceiptStatus, Transaction } from "@/lib/accounting/types";
 import {
   Alert,
@@ -32,9 +49,13 @@ import {
   ErrorState,
   Field,
   FileInput,
+  formIssuesMessage,
   LoadingBlock,
+  NumberInput,
   PageHeader,
   Select,
+  Textarea,
+  TextInput,
   tableClass,
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
@@ -65,6 +86,8 @@ function ReceiptRow({
   receipt,
   transactions,
   suggestions,
+  txSuggestions,
+  ocrAvailable,
   canEdit,
   onChanged,
 }: {
@@ -72,12 +95,29 @@ function ReceiptRow({
   transactions: Transaction[];
   /** この証憑を対象とするAI提案(新しい順) */
   suggestions: AISuggestionJSON[];
+  /** 紐付け先の取引を対象とするAI提案(科目提案など) */
+  txSuggestions: AISuggestionJSON[];
+  /** サーバーでOCRが利用可能か(未設定時はボタンを無効化して明示する) */
+  ocrAvailable: boolean | undefined;
   canEdit: boolean;
   onChanged: () => void;
 }) {
   const { businessId } = useApp();
   const [linkTarget, setLinkTarget] = useState("");
   const [showLink, setShowLink] = useState(false);
+  const [showRegister, setShowRegister] = useState(false);
+  const [form, setForm] = useState({
+    date: todayDateString(),
+    amount: "",
+    account: "",
+    counterparty: "",
+    description: "",
+  });
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrNote, setOcrNote] = useState<{
+    tone: "info" | "warning";
+    text: string;
+  }>();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -100,6 +140,126 @@ function ReceiptRow({
     ? transactions.find((t) => t.id === receipt.transactionId)
     : undefined;
 
+  /** 証憑宛+紐付取引宛の提案を新しい順にまとめて表示する */
+  const displayedSuggestions = useMemo(() => {
+    const byId = new Map<string, AISuggestionJSON>();
+    for (const s of [...suggestions, ...txSuggestions]) byId.set(s.id, s);
+    return [...byId.values()].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    );
+  }, [suggestions, txSuggestions]);
+
+  /** OCR抽出値・採用した抽出提案を登録フォームへコピーする(保存は別操作) */
+  const prefillForm = (p: {
+    amount: number | null;
+    date: string | null;
+    vendor: string | null;
+  }) => {
+    setShowRegister(true);
+    setForm((f) => ({
+      ...f,
+      date: p.date ?? f.date,
+      amount: p.amount !== null ? String(p.amount) : f.amount,
+      counterparty: p.vendor ?? f.counterparty,
+    }));
+  };
+
+  const runOcr = async () => {
+    setOcrBusy(true);
+    setError(undefined);
+    try {
+      const r = await runReceiptOcr(businessId ?? "", receipt.id);
+      prefillForm(r);
+      setOcrNote(
+        r.issues.length > 0
+          ? {
+              tone: "warning",
+              text: `一部の項目を読み取れませんでした(${r.issues.join(", ")})。内容を確認して保存してください`,
+            }
+          : {
+              tone: "info",
+              text: "読み取り結果をフォームに反映しました。内容を確認して保存してください",
+            },
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "OCRに失敗しました");
+    } finally {
+      setOcrBusy(false);
+    }
+  };
+
+  const submitRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseForm(transactionSchema, {
+      type: "expense",
+      date: form.date,
+      amount: Number(form.amount),
+      account: form.account,
+      counterparty: form.counterparty || undefined,
+      description: form.description || undefined,
+    });
+    if (!parsed.success) {
+      setError(formIssuesMessage(parsed.issues));
+      return;
+    }
+    await run(async () => {
+      const tx = await callApi(() =>
+        createTransaction(businessId ?? "", {
+          ...parsed.data,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      );
+      await callApi(() =>
+        linkReceipt(businessId ?? "", receipt.id, tx.id),
+      );
+      setShowRegister(false);
+      setOcrNote(undefined);
+    });
+  };
+
+  const acceptSuggestion = (s: AISuggestionJSON) =>
+    run(async () => {
+      await decideAiSuggestion(businessId ?? "", s.id, "accepted");
+      if (s.kind === "receipt_extraction" && s.payload) {
+        // 抽出値は登録フォームへコピー。確定はユーザーの保存操作(AI_POLICY)
+        prefillForm(s.payload as ReceiptExtractionPayload);
+        return;
+      }
+      // 取引宛の提案(科目・摘要)は確定フィールドへコピーする(ADR-0005)
+      const patch = transactionPatchFromSuggestion(s);
+      if (patch && linkedTx && linkedTx.status !== "locked") {
+        await callApi(() =>
+          updateTransaction(businessId ?? "", linkedTx.id, {
+            type: linkedTx.type,
+            date: linkedTx.date,
+            amount: linkedTx.amount,
+            account: patch.account ?? linkedTx.account,
+            counterparty: linkedTx.counterparty || undefined,
+            description:
+              patch.description ?? (linkedTx.description || undefined),
+          }),
+        );
+      }
+    });
+
+  const suggestAccount = () => {
+    if (!linkedTx) return;
+    void run(() =>
+      runAiSuggestion(
+        businessId ?? "",
+        "account_suggestion",
+        { type: "transaction", id: linkedTx.id },
+        {
+          counterparty: linkedTx.counterparty,
+          description: linkedTx.description,
+          date: linkedTx.date,
+          amount: linkedTx.amount,
+          accountCandidates: ACCOUNT_OPTIONS.map((a) => a.code),
+        },
+      ),
+    );
+  };
+
   return (
     <tr>
       <td>
@@ -121,7 +281,7 @@ function ReceiptRow({
       </td>
       <td className="align-top">
         <StatusBadge kind="receipt" status={receipt.status} />
-        {suggestions.some(isUnresolvedSuggestion) && (
+        {displayedSuggestions.some(isUnresolvedSuggestion) && (
           <span className="ml-1">
             <Badge tone="indigo">AI提案</Badge>
           </span>
@@ -129,22 +289,22 @@ function ReceiptRow({
       </td>
       <td className="align-top">
         <div className="flex flex-col gap-2">
-          {suggestions.map((s) => (
+          {displayedSuggestions.map((s) => (
             <div key={s.id} className="max-w-md">
               <AiSuggestionCard
                 suggestion={s}
-                pendingLabel="領収書"
+                pendingLabel={
+                  s.target.type === "transaction" ? "取引" : "領収書"
+                }
                 busy={busy}
+                acceptLabel={
+                  transactionPatchFromSuggestion(s)
+                    ? "提案を採用して反映"
+                    : "提案を採用する"
+                }
                 onAccept={
                   canEdit && receipt.status !== "archived"
-                    ? () =>
-                        run(() =>
-                          decideAiSuggestion(
-                            businessId ?? "",
-                            s.id,
-                            "accepted",
-                          ),
-                        )
+                    ? () => void acceptSuggestion(s)
                     : undefined
                 }
                 onReject={
@@ -209,12 +369,26 @@ function ReceiptRow({
                   </Button>
                 </div>
               ) : (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button
                     variant="secondary"
                     onClick={() => setShowLink(true)}
                   >
                     取引に紐付ける
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowRegister((v) => !v)}
+                  >
+                    {showRegister ? "登録フォームを閉じる" : "領収書から登録"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => void runOcr()}
+                    loading={ocrBusy}
+                    disabled={!ocrAvailable || busy}
+                  >
+                    OCRで自動入力
                   </Button>
                   <Button
                     variant="danger"
@@ -224,8 +398,111 @@ function ReceiptRow({
                   </Button>
                 </div>
               )}
+              {ocrAvailable === false && (
+                <p className="text-xs text-zinc-400">
+                  OCRが未設定のため「OCRで自動入力」は利用できません(AI_OCR_PROVIDER
+                  未設定)
+                </p>
+              )}
+              {showRegister && (
+                <form
+                  onSubmit={submitRegister}
+                  noValidate
+                  className="flex flex-col gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-700"
+                >
+                  <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                    領収書から支出の下書き取引を登録します
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <Field label="日付">
+                      <TextInput
+                        type="date"
+                        value={form.date}
+                        onChange={(e) =>
+                          setForm({ ...form, date: e.target.value })
+                        }
+                        required
+                      />
+                    </Field>
+                    <Field label="金額(円)">
+                      <NumberInput
+                        value={form.amount}
+                        min={1}
+                        step={1}
+                        placeholder="例: 1280"
+                        onChange={(e) =>
+                          setForm({ ...form, amount: e.target.value })
+                        }
+                        required
+                      />
+                    </Field>
+                    <Field label="勘定科目">
+                      <Select
+                        value={form.account}
+                        onChange={(e) =>
+                          setForm({ ...form, account: e.target.value })
+                        }
+                        required
+                      >
+                        <option value="">選択してください</option>
+                        {accountOptionsFor("expense").map((a) => (
+                          <option key={a.code} value={a.code}>
+                            {a.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="取引先">
+                      <TextInput
+                        value={form.counterparty}
+                        onChange={(e) =>
+                          setForm({ ...form, counterparty: e.target.value })
+                        }
+                        placeholder="例: 〇〇商店"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="摘要">
+                    <Textarea
+                      rows={1}
+                      value={form.description}
+                      onChange={(e) =>
+                        setForm({ ...form, description: e.target.value })
+                      }
+                      placeholder="例: 備品購入"
+                    />
+                  </Field>
+                  {ocrNote && <Alert tone={ocrNote.tone}>{ocrNote.text}</Alert>}
+                  <div className="flex gap-2">
+                    <Button type="submit" loading={busy}>
+                      下書きとして登録して紐付ける
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setShowRegister(false)}
+                    >
+                      閉じる
+                    </Button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
+          {canEdit &&
+            receipt.status === "linked" &&
+            linkedTx &&
+            linkedTx.status !== "locked" && (
+              <div>
+                <Button
+                  variant="secondary"
+                  onClick={suggestAccount}
+                  disabled={busy}
+                >
+                  科目をAI提案
+                </Button>
+              </div>
+            )}
           {error && <Alert tone="error">{error}</Alert>}
         </div>
         <ConfirmDialog
@@ -260,19 +537,35 @@ export function ReceiptsScreen() {
   const [file, setFile] = useState<File | null>(null);
 
   const { data, initialLoading, error, reload } = useApiData(async () => {
-    const [receipts, transactions, suggestions] = await Promise.all([
-      callApi(() => listReceipts(businessId ?? "")),
-      callApi(() =>
-        listTransactions(businessId ?? "", {
-          startDate: "0001-01-01",
-          endDate: "9999-12-31",
-        }),
-      ),
-      businessId
-        ? fetchAiSuggestions(businessId, { targetType: "receipt" })
-        : Promise.resolve([]),
-    ]);
-    return { receipts, transactions, suggestions };
+    const [receipts, transactions, suggestions, txSuggestions, ocr] =
+      await Promise.all([
+        callApi(() => listReceipts(businessId ?? "")),
+        callApi(() =>
+          listTransactions(businessId ?? "", {
+            startDate: "0001-01-01",
+            endDate: "9999-12-31",
+          }),
+        ),
+        businessId
+          ? fetchAiSuggestions(businessId, { targetType: "receipt" })
+          : Promise.resolve([]),
+        businessId
+          ? fetchAiSuggestions(businessId, { targetType: "transaction" })
+          : Promise.resolve([]),
+        // OCR未設定・問い合わせ失敗でも領収書機能自体は止めない
+        businessId
+          ? fetchReceiptOcrAvailability(businessId).catch(() => ({
+              available: false,
+            }))
+          : Promise.resolve({ available: false }),
+      ]);
+    return {
+      receipts,
+      transactions,
+      suggestions,
+      txSuggestions,
+      ocrAvailable: ocr.available,
+    };
   }, [businessId]);
 
   const suggestionsByTarget = useMemo(() => {
@@ -284,6 +577,16 @@ export function ReceiptsScreen() {
     }
     return map;
   }, [data?.suggestions]);
+
+  const txSuggestionsByTarget = useMemo(() => {
+    const map = new Map<string, AISuggestionJSON[]>();
+    for (const s of data?.txSuggestions ?? []) {
+      const list = map.get(s.target.id) ?? [];
+      list.push(s);
+      map.set(s.target.id, list);
+    }
+    return map;
+  }, [data?.txSuggestions]);
 
   const filtered = useMemo(
     () =>
@@ -417,6 +720,12 @@ export function ReceiptsScreen() {
                   receipt={r}
                   transactions={data?.transactions ?? []}
                   suggestions={suggestionsByTarget.get(r.id) ?? []}
+                  txSuggestions={
+                    r.transactionId
+                      ? (txSuggestionsByTarget.get(r.transactionId) ?? [])
+                      : []
+                  }
+                  ocrAvailable={data?.ocrAvailable}
                   canEdit={canEdit}
                   onChanged={reload}
                 />

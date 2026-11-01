@@ -16,9 +16,38 @@
 
 ## Log
 
+## 2026-11-02: 領収書OCRの画面配線(Issue #30)
+- Worktree: ocr-ui
+### 実装内容
+Issue #21 のOCR基盤(`AI_OCR_PROVIDER=openai|none`)を画面へ接続した。依存追加なし。
+- `src/lib/ai/receipt-ocr.ts`(出口のみ変更): `isReceiptOcrAvailable(env)`(`createReceiptOcr()!==null` と同判定だがクライアント構築・警告出力なし。UIの有効判定用)と `isOcrSupportedMimeType(mime)` を公開
+- `src/app/api/ai/receipt-ocr/route.ts` 新規: `/api/ai/suggestions` のRoute Handlerパターン踏襲(requireViewer・ApiError・businessId検証・`{ok,data|error}`エンベロープ)
+  - `GET ?businessId=` → `{ available }`。OCR設定可否のみ返す(鍵・内容は含まない)
+  - `POST { businessId, receiptId }` → businessId内のreceiptを解決し(storagePathはクライアントから受け取らず登録済みレコード由来のみ。他businessIdはNOT_FOUND)、`ReceiptOcrResolver` で Storage取得→OCR→receipt_extraction を実行し `{ amount, date, vendor, confidence, reason, issues }` を返す。60秒総合タイムアウト
+  - aiSuggestionsドキュメントは作成しない読み取り系(フォーム自動入力専用)。OCR未設定は `error.code="OCR_UNAVAILABLE"`、非対応MIME/ファイル未取得/サイズ超過/タイムアウト等は固定文言へ正規化(OCRテキスト・SDKエラーを返さない・ログにも出さない)
+- `src/lib/api-client.ts`: `ReceiptOcrResult`・`fetchReceiptOcrAvailability`・`runReceiptOcr`
+- `src/app/(app)/receipts/receipts-screen.tsx`:
+  - 「領収書から登録」フォーム(日付/金額/勘定科目/取引先/摘要)。`transactionSchema`で検証し、`createTransaction`(支出・下書き)→`linkReceipt`で紐付けまで行う。確定は必ずユーザーの保存操作
+  - 「OCRで自動入力」ボタン(unprocessed・editor以上): POST `/api/ai/receipt-ocr` の抽出値でフォームをプリフィル。`issues`があれば警告で明示し確認を促す
+  - OCR未設定時(`available=false`・問い合わせ失敗も同扱い)はボタンを無効化し「OCRが未設定…」を明示。失敗しても領収書機能自体は止めない
+  - 証憑抽出提案の採用 → `decideAiSuggestion` 後に抽出値を登録フォームへコピー(保存は別操作)。紐付先取引宛の提案(科目・摘要)は採用時に `updateTransaction` で確定フィールドへ反映(ADR-0005の2ステップ)
+  - linked状態の行に「科目をAI提案」(`runAiSuggestion`の`account_suggestion`。抽出/登録済み取引の値をinputに使用)
+  - 取引宛提案も `targetType:"transaction"` で取得し、紐付先idで行に表示(証憑宛と併せて新しい順)
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(24ファイル300件、skip 10)
+- `pnpm build` — 合格(`/api/ai/receipt-ocr` が動的ルートとして登録)
+### 未解決事項・次の担当者への注意事項
+- OCR実行経路は提案ドキュメントを作成しないため `run_ai` 監査も残らない。監査が必要なら既存 `POST /api/ai/suggestions`(kind=receipt_extraction)経由にするか、本ルートでもauditLogsを書く検討が必要
+- OCR route はIssue指定どおり `requireViewer`(書き込みなしの読み取り系)。外部APIコストの乱用が懸念される場合は `requireEditor` への引き上げを検討
+- 「領収書から登録」は createTransaction→linkReceipt の2リクエスト。link失敗時は孤立した下書き取引が残る(取引一覧から紐付/削除で回収可能)
+- HEIC/HEIFはアップロード可能だがOCR非対応のまま(事前にINVALID_INPUTで案内。Issue #21と同じ制約)
+- 抽出フローの型は `ReceiptExtractionPayload` をそのまま利用。`ReceiptOcrResult` は自信度・根拠・issuesを追加した応答shape(api-client.ts)
 ## 2026-11-02: 取引のCSVエクスポート/インポート(Issue #31)
 - Worktree: csv-io
-### 実装内容
 取引一覧画面へのCSV出力・CSV取込機能。依存追加なしの自前CSV実装。
 - `src/lib/csv.ts`(新規): 汎用CSV部と取引マッピング部
   - `serializeCsv`: RFC 4180 系(`,` `"` 改行をクォート、`"`→`""`、行末CRLF)
@@ -29,14 +58,9 @@
 - `src/app/(app)/transactions/transaction-csv-import.tsx`(新規): ファイル選択→パース→プレビュー表(行番号・解釈値・行別エラー)→「N件を登録」で行ごとに `createTransaction` を逐次呼ぶ取込パネル。エラー行は登録対象から自動除外。行ごとに `crypto.randomUUID()` の冪等キーを確定時点で採番し、失敗行の再登録・通信断での重複を防ぐ。登録済み行は対象外なので部分失敗後の再実行が安全。Shift_JIS等で読んだ場合はファイル名にエンコーディングを表示
 - `transactions-screen.tsx`: PageHeaderに「CSV出力」(全ロール、表示中の月範囲をBOM付UTF-8で `transactions-YYYYMM.csv` ダウンロード)と「CSV取込」ボタン(canEdit=viewer以外のみ)を追加。0件月はヘッダーのみ出力=取込テンプレートとしても使える
 - `src/lib/csv.test.ts`(新規): 26件。生成/パース/ラウンドトリップ、BOM・UTF-16・Shift_JIS検出、エクスポート列・ラベル、ヘッダー名マッピング、行別バリデーションエラー、空行/列不足/必須列欠如
-### 実行したテスト
-- `pnpm install --frozen-lockfile` — 成功
-- `pnpm exec next typegen` — 成功
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
-- `pnpm typecheck` — 合格
 - `pnpm test` — 合格(25ファイル324件、skip 10)
 - `pnpm build` — 合格
-### 未解決事項・次の担当者への注意事項
 - インポート登録はクライアントから行ごとに `createTransaction` を逐次呼ぶ方式(既存経路踏襲)。締め期間違反等のサーバー側エラーは行単位で「失敗」として残り、再登録ボタンでリトライ可能(冪等キーは行ごとに固定済み)。全行を1トランザクションにするバルクAPIは要件外のため未実装
 - 取込は常に draft 作成のため CSV の「状態」列は読まない。「科目名」列も参照せず科目コードが正(科目名と不一致でも警告は出さない)
 - Shift_JIS判定は「UTF-8厳格デコード失敗→Shift_JIS」のヒューリスティック。SJISとしても不正なバイト列は U+FFFD になる(行エラーとして可視化される)
@@ -120,6 +144,7 @@
 - README: 前提(Node 26+/pnpm/JDK 21+)/環境変数・Emulator セットアップ/
   コマンド一覧(test:rules・test:emulators 追記)/本番 Firebase 切替手順/
   デプロイ指針を整備。.env.example の変数一覧と整合
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm exec next typegen` — 成功
 - `pnpm typecheck` — 合格
