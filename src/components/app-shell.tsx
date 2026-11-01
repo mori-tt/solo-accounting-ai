@@ -35,6 +35,7 @@ const NAV_ITEMS = [
   { href: "/opening-balances", label: "期首残高" },
   { href: "/audit-log", label: "監査ログ" },
   { href: "/settings", label: "設定" },
+  { href: "/backup", label: "バックアップ" },
 ] as const;
 
 function NavLinks() {
