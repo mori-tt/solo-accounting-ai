@@ -1,12 +1,16 @@
 import { FirestoreSuggestionStore } from "@/lib/ai/firestore-store";
 import { createAIProvider } from "@/lib/ai/llm-provider";
+import {
+  createReceiptOcr,
+  ReceiptOcrResolver,
+} from "@/lib/ai/receipt-ocr";
 import { AISuggestionService } from "@/lib/ai/service";
 import {
   KIND_TARGET_TYPE,
   type SuggestionKind,
   type SuggestionTarget,
 } from "@/lib/ai/types";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { getAdminBucket, getAdminDb } from "@/lib/firebase/admin";
 import { ApiError } from "./result";
 import { getStore } from "./store";
 
@@ -21,7 +25,21 @@ let service: AISuggestionService | undefined;
 export function getAISuggestionService(): AISuggestionService {
   service ??= new AISuggestionService({
     store: new FirestoreSuggestionStore(getAdminDb()),
-    provider: createAIProvider(),
+    // receipt_extraction の ocrText はStorage上の証憑ファイルから
+    // サーバーサイドで生成する(receipt-ocr.ts)。クライアント指定の
+    // ocrText も引き続き使える(Emulator/開発用)。
+    provider: new ReceiptOcrResolver({
+      inner: createAIProvider(),
+      ocr: createReceiptOcr(),
+      getReceipt: async (businessId, receiptId) =>
+        (await getStore().getReceipt(businessId, receiptId)) ?? null,
+      downloadFile: async (storagePath) => {
+        const [buffer] = await getAdminBucket()
+          .file(storagePath)
+          .download();
+        return buffer;
+      },
+    }),
   });
   return service;
 }
