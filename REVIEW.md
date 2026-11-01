@@ -46,6 +46,62 @@
 - 按分は表示専用で `monthlySummaries` 等の保存データには反映していない(Issueの「表示列追加レベル」指定どおり)。確定申告出力・決算書で按分額が必要になったら同じ `domain/allocation.ts` を再利用する
 - 割合編集はownerのみ(`updateBusinessSettings` 流用のため)。editorにも開放する場合はaction側の認可変更が必要
 - 按分ページは事業名等の既存値を `useApp().business` から同時送信する。別タブで事業設定を直後に変更した場合に古い値で上書きする可能性がある(設定画面と同じ既知の性質)
+## 2026-11-02: 期首残高/繰越設定(Issue #49)
+- Worktree: opening-balance
+年度ごとの期首残高を business ドキュメントに登録し、総勘定元帳の繰越行・試算表へ反映する機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `OpeningBalance` 型(`{ fiscalYear, accountCode, amount }`。amountは円・整数・借方残高を正とする)と `Business.openingBalances?` を追加。rules変更不要(Admin SDK経由の書き込みのため)
+- `src/lib/accounting/domain/ledger.ts`: `OPENING_EQUITY_ACCOUNT = "opening_equity"`(元入金=資本の内部コード)と `openingBalanceJournalEntries(balances, fiscalYear, date)` を追加。各残高を元入金相手の貸借一致した仮想仕訳へ展開(正=借方科目/貸元入金、負=逆)。既存関数のシグネチャは変更せず、仕訳列への連結方式としたため後方互換・貸借一致ともに担保
+- `src/lib/validation/schemas.ts`: `openingBalancesSchema`(要素検証+年度・科目重複拒否+500件上限。金額は負数許容=貸方残高)
+- `src/lib/actions/opening-balances.ts`(新規): `getOpeningBalances`(viewer)・`saveOpeningBalances`(owner・配列全体を置換保存・auditLogs付き)。締め済み会計年度に属するレコードは現状と完全一致しない限り `PERIOD_CLOSED` で拒否(締め済み期間の直接変更禁止ルール)
+- `src/lib/opening-balance-accounts.ts`(新規): 期首残高の科目選択肢(現金=cash・預金=deposits・売掛金=receivables。accounts.ts の科目マスタは触らない制約のため別管理)+元入金のラベル解決 `openingAccountLabel`
+- `src/app/(app)/reports/actions.ts`: 元帳・試算表の両レポートで `openingEntriesFor()`(表示月を含む会計年度の残高を前年度末付の仮想仕訳化)を仕訳列へ連結。前年度末付としたため当年度どの月でも明細行ではなく繰越残高側へ集約される
+- `src/app/(app)/reports/account-label.ts`: `bookAccountLabel` に期首残高関連コード(cash/deposits/receivables/opening_equity)のラベルを追加
+- `src/app/(app)/opening-balances/`(新規): 年度ごとの期首残高登録・編集画面。プリセット資産科目+「その他(コード入力)」のカスタム科目対応、行追加/削除、ownerのみ編集可(viewer/editorは読み取り表)
+- `src/components/app-shell.tsx`: ナビに「期首残高」1行追加(決算チェックと設定の間)
+- `src/lib/accounting/domain/ledger.test.ts`: ドメイン拡張のテスト10件追加(符号による貸借転換、年度/0円/空コードのフィルタ、繰越集約、TB貸借一致)
+- `docs/FIRESTORE_SCHEMA.md`: businesses の `openingBalances` フィールド追記
+- `pnpm exec next typegen` — 成功(LayoutProps等の生成型が無いとtypecheckが落ちるため)
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>` のみ)
+- `pnpm test` — 合格(29ファイル374件、skip 10)
+- `pnpm build` — 合格(`/opening-balances` が静的ルートとして登録)
+- Emulator系はIssue制約により未実行
+### 備考・次の担当者への注意事項
+- 期首残高の転記日は「前会計年度の末日」。会計年度開始月が4月等でも当年度の全月で繰越側に集約される。前期最終月の元帳に「期首残高」行として現れることはない(表示月のFYでフィルタするため)
+- 試算表は月内取引+期首残高のみの合計。月初以前の期中取引は含めない既存仕様のまま(残高試算表への拡張は別課題)
+- 保存は owner のみ(`updateBusinessSettings` と同じ権限)。editorに開放する場合は `requireEditor` へ変更
+- 締め済み年度の編集はサーバー側で拒否するが、UI側では年度を選べてしまう。FiscalPeriod一覧を取って該当年度を非活性にする改善余地あり
+## 2026-11-02: 全データJSONバックアップ/復元(Issue #47)
+- Worktree: backup-restore
+依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
+- `src/lib/backup.ts`(新規): businessスコープの全データを1つのJSON(`version:1`付き)にエクスポート/復元するロジック。クライアント側でもzodスキーマを使うため firebase-admin の値importは持たない(`import type`のみ)
+  - `BACKUP_COLLECTIONS`: firestore.rulesの実在14コレクション(members/customers/projects/transactions/expenses/receipts/invoices/payments/journalEntries/fiscalPeriods/closingChecks/aiSuggestions/monthlySummaries/auditLogs)。`idempotencyKeys`は内部機構、`users`はbusinessIdスコープ外のため対象外
+  - `backupFileSchema`(zod): version=1固定・businessId必須・各docは`id`必須のlooseObject。businessはname/fiscalYearStartMonth/taxModeのみpartial受理(ownerUid等はstripで落とす)。未知コレクションは受理して前方互換
+  - `exportBusinessBackup(db,businessId)`: businessドキュメント+全コレクションを取得しJSON化(Timestamp→ISO文字列、docデータ内idよりdoc.idを正とする)
+  - `planRestore`(純粋関数): ID衝突解決の書き込み計画。衝突時は新規採番し参照フィールド(transactionId/receiptId/customerId/projectId/invoiceId/receiptIds/fiscalPeriodId/sourceId/target.id)を張替。docデータ内の`businessId`/`targetPath`も復元先へ書き換え
+  - `restoreBusinessBackup(db,...)`: 既存IDを`listDocuments()`で収集→planRestore→400件ずつbatch commit。businessドキュメントは許可フィールドのみmerge
+- `src/app/api/backup/route.ts`(新規):
+  - `GET ?businessId=` → `requireEditor`(owner/editor)でJSONをattachmentダウンロード
+  - `POST {businessId,backup}` → `requireOwner`で復元。content-length上限64MB・zod再検証・auditLogsへ`update`記録
+- `src/app/(app)/backup/page.tsx` + `backup-screen.tsx`(新規): エクスポートボタン(blob→ダウンロード)・JSON選択→クライアント側zod検証→コレクション別件数プレビュー→ConfirmDialog経由で復元実行。復元はownerのみUI表示
+- `src/lib/api-client.ts`: `restoreBackup`追加
+- `src/components/app-shell.tsx`: ナビに「バックアップ」1行追加
+- `src/lib/backup.test.ts`(新規): 12件。スキーマ受理/拒否、summarize、planRestore(新規採番・参照張替・固定ID skip・protectedUids・パス書換・ファイル内重複ID・未知コレクション)
+### 設計上の判断
+- **復元はowner限定**(エクスポートはowner/editor): members復元による権限昇格・auditLogs偽装・締め済みデータ改変を防ぐため
+- **固定IDコレクション**(members=uid/fiscalPeriods=fy{year}/monthlySummaries=yyyyMM)は新規採番すると意味が壊れるため、衝突時は既存維持でskip。それ以外の衝突は新規採番
+- **protectedUids**: 復元実行者・business.ownerUidのmemberドキュメントは常にskipし、自己降格・ロックアウトを防止
+- **復元はマージ型**: 既存データの削除・上書きは行わない(set先は必ず未使用ID)
+- **`*At`フィールドの日時復元**: 時刻部(T)を持つISO文字列のみDate化→Timestamp。`paidAt`等のYYYY-MM-DD文字列は文字列のまま維持(toStoreの無条件`*At`変換と異なり型を壊さない)
+- 証憑のstoragePathはファイル実体の場所を指すため復元時も書き換えない(ファイル本体のコピーは範囲外)
+- `pnpm lint` — 合格(既存warning 1件のみ: receiptsの`<img>`)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 実行後)
+- `pnpm test` — 合格(30ファイル377件、skip 10)
+- `pnpm build` — 合格(`/api/backup`が動的ルート、`/backup`が静的ページとして登録)
+- Firebase Emulator tests — 該当なし(backup.tsは純粋関数を単体テスト。Rules変更なし)
+- 復元の書き込みはバッチ400件単位の逐次commitで全件アトミックではない。大量データの復元途中失敗は部分適用になりうる(監査ログは成功時のみ記録)
+- 証憑ファイル本体(Storageオブジェクト)はバックアップ対象外。別businessIdへの復元時、storagePathは元businessのパスのまま(アクセス可否は元事業のmembership依存)
+- 復元にレート制限は未設定(ownerのみの低頻度操作想定)。必要ならrate-limit.tsへ追加
+- エミュレータ・実DBでの往復検証は未実施。Emulator環境でのexport→restoreの実動作確認が望ましい
 ## 2026-11-02: 監査ログ閲覧UI(Issue #48)
 - Worktree: audit-log-ui
 `businesses/{businessId}/auditLogs` を一覧表示する `/audit-log` 画面を新設。viewer以上・読み取り専用(編集操作なし)。依存追加なし。
@@ -62,6 +118,7 @@
   - ページング: 最新50件ずつ「さらに読み込み」(取得済みリストを表示側でスライス。フィルタ変更時は先頭に戻す)
 - `src/components/app-shell.tsx`: ナビに「監査ログ」追加(決算チェックと設定の間)
 - `src/lib/audit-log-view.test.ts`(新規): パース・ラベル・概要生成・絞り込み+ソートの単体テスト
+- `pnpm exec next typegen` — 成功
 - `pnpm lint` — 合格(warning 1件: 既存のreceipts-screen `<img>`)
 - `pnpm test` — 合格(30ファイル379件、skip 10)
 - `pnpm build` — 合格(`/audit-log` が静的ルートとして登録)
@@ -952,3 +1009,35 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - `businessId`スコープのアクセス制御・`aiSuggestion`のクライアント書込禁止・auditLogs改ざん防止はSecurity Rules層(firebase-security worktree)の責務
 - 個人事業主の消費税丸めルール(切り捨て)はvalidateにtaxAmount上限チェックのみ実装。税計算エンジン自体は未実装
 - サービスの`asOf`/`today()`はUTC基準。JST基準が必要ならclock注入側で調整する
+## 2026-11-02: 銀行/カード明細CSVインポートと自動マッチング(Issue #44)
+- Worktree: bank-import
+### 実装内容
+取引とは別形式の「銀行・カード明細CSV」から候補取引を一括取込する専用画面 `/transactions/import`。依存追加なし。
+- `src/lib/bank-csv.ts`(新規):
+  - `parseBankCsv`: `csv.ts` の `parseCsv` を再利用し、先頭10行以内から「日付 + 金額系列」を持つ行をヘッダー検出(口座情報等の前置行を読み飛ばす)。列名ゆらぎは `HEADER_ALIASES` の正規化別名表(全角数字・空白・末尾の「(円)」等の単位括弧を除去して照合)で吸収し、列順の入れ替え・余分列を許容。必須は 日付・摘要・金額系のいずれか
+  - 金額列の形式を `split`(出金額/入金額 別列: 出金→支出・入金→収入)と `single`(「金額/利用金額」単一列: 全行支出)に分けて解釈。両列値あり・負数(△/▲/−/(…)表記)・非数値・日付解釈不能は行エラー、金額が空の行(繰越・見出し等)は `skippedReason` 付きの対象外行(エラーにしない)
+  - `normalizeBankDate`: YYYY-MM-DD/YYYY/M/D/YYYY.M.D/YYYYMMDD/YYYY年M月D日/和暦(令和N年・R8.11.6 等・元号+元年)を正規化。曜日括弧・時刻末尾を除去。年なし表記(M/D等)は推測せず不受理
+  - マッチング: `findExistingMatches`(同金額・日付差±N日の既存取引を日付差順で返す。AI提案 duplicate_detection「金額・日付一致」の近日付拡張をクライアント側で実施)と `findInFileDuplicatePartners`(同一CSV内で 日付+種別+金額 一致行を相互参照)、照合窓算出用 `shiftDate`
+- `src/app/(app)/transactions/import/`(新規: `page.tsx` + `import-screen.tsx`):
+  - ファイル選択→`decodeCsvBytes`デコード(既存CSV取込と同じShift_JISフォールバック)→パース→候補一覧。候補日付範囲±3日の既存取引を `listTransactions` で取得し行ごとに照合。既存取引取得失敗時は警告を出しファイル内重複チェックのみで継続
+  - 各行: 選択チェック・日付・摘要・種別(推定値を初期値とするSelect、支出/収入/振替に変更可)・金額・勘定科目Select・マッチング状態(既存取引との重複可能性=amberバッジ+titleで候補日付金額、ファイル内重複=skyバッジ+相手行番号)・結果(エラー/対象外/登録済み/失敗)
+  - 重複可能性フラグのある行は誤登録防止のため初期選択外。登録は既存 `createTransaction` を行ごとに逐次呼出し(冪等キーは行ごとに採番済み)、失敗行のみ再実行可能。全件一括トランザクションではなく既存CSV取込と同じ部分失敗モデル
+  - 「支出の既定科目」「収入の既定科目」で未個別編集行(accountAuto)を一括追従。行の種別変更時は種別に対応した既定科目へリセット。登録は全て下書き、摘要は description へ(counterparty は空)
+  - viewerは `business?.role !== "viewer"` で判定し EmptyState で拒否(取引一覧へのリンクのみ)
+- `transactions-screen.tsx`: PageHeader に `next/link` の「明細CSVインポート」ボタン(secondaryスタイルのクラスをLinkへ適用)を `canEdit` ブロック内に1個追加。既存「CSV取込」ボタンはそのまま
+- `src/lib/bank-csv.test.ts`(新規): 24件。基本形/列名ゆらぎ(メガバンク風・ゆうちょ風)/列順入れ替え/前置行読み飛ばし/単一金額列モード/日付各種表記(和暦含む)/金額正規化/繰越行スキップ/両列値・負数・非数値・不正日付エラー/ヘッダー欠如・摘要欠如/重複マッチング/ファイル内重複
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(30ファイル389件、skip 10。bank-csv.test.ts 24件含む)
+- `pnpm build` — 合格(`/transactions/import` が静的ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+### 設計上の判断・備考
+- 照合対象の既存取引は候補日付範囲±3日に限定して取得。遠い日付の同金額取引はフラグされない(duplicate_detection提案と同様、検出漏れは許容する設計)
+- 重複判定は金額+日付差のみで種別・摘要は見ない(既存ヒューリスティックと同種)。摘要類似度まで見るかは別IssueのAI提案側の責務
+- 負数金額(返金・取消等)は取込エラーとし登録不可。Transactionが正の金額しか持てない現モデルに合わせた
+- `single`モード(金額単一列)はカード明細向けに全行を支出として推定。出金/入金別列があれば `split` を優先し単一列は無視
+- 全角元号アルファベット(Ｒ等)は数字のみ半角化するため列名・日付ともに対象外(半角表記のみ受理)
+- `api-client.ts`・`csv.ts`・`accounts.ts`・`firestore.rules`・設定画面は変更なし(許容範囲内で不要だった)
+- E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク

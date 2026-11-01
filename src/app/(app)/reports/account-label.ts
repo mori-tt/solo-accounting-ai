@@ -1,7 +1,8 @@
-import { CASH_ACCOUNT } from "@/lib/accounting/domain/ledger";
 import { accountLabel } from "@/lib/accounts";
+import { openingAccountLabel } from "@/lib/opening-balance-accounts";
 
-/** 帳簿画面用の科目ラベル。現金勘定は科目マスタ未登録の内部コードなのでここで補う */
+/** 帳簿画面用の科目ラベル。現金・元入金・期首残高用資産コードなど科目マスタ外のコードをここで補う */
 export function bookAccountLabel(code: string): string {
-  return code === CASH_ACCOUNT ? "現金" : accountLabel(code);
+  const label = openingAccountLabel(code);
+  return label !== code ? label : accountLabel(code);
 }

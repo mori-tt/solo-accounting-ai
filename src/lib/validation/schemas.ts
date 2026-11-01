@@ -85,6 +85,31 @@ export const businessSchema = z.object({
 });
 export type BusinessInput = z.infer<typeof businessSchema>;
 
+export const openingBalanceEntrySchema = z.object({
+  fiscalYear: z
+    .number({ error: "会計年度は数値で入力してください" })
+    .int("会計年度は整数で入力してください")
+    .min(1900, "会計年度が不正です")
+    .max(2200, "会計年度が不正です"),
+  accountCode: z
+    .string()
+    .min(1, "勘定科目を入力してください")
+    .max(50, "科目コードは50文字以内で入力してください"),
+  amount: z
+    .number({ error: "金額は数値で入力してください" })
+    .int("金額は円単位の整数で入力してください"),
+});
+export const openingBalancesSchema = z
+  .array(openingBalanceEntrySchema)
+  .max(500, "期首残高は500件以内で登録してください")
+  .refine(
+    (list) =>
+      new Set(list.map((b) => `${b.fiscalYear}:${b.accountCode}`)).size ===
+      list.length,
+    { message: "同じ年度・科目の期首残高が重複しています" },
+  );
+export type OpeningBalancesInput = z.infer<typeof openingBalancesSchema>;
+
 export const memberInviteSchema = z.object({
   email: z.email("メールアドレスの形式が正しくありません"),
   role: z.enum(["editor", "viewer"]),
