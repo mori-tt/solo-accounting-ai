@@ -1,5 +1,6 @@
 import { getAISuggestionService } from "@/lib/api/ai";
-import { ApiError, toActionError } from "@/lib/api/result";
+import { aiApiRateLimiter } from "@/lib/api/rate-limit";
+import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireEditor } from "@/lib/api/session";
 import { decideSuggestionSchema, parseForm } from "@/lib/validation/schemas";
 
@@ -25,6 +26,7 @@ export async function PATCH(
     }
     const { businessId, decision, rejectReason } = parsed.data;
     const actor = await requireEditor(businessId);
+    aiApiRateLimiter.consume(businessId);
 
     const service = getAISuggestionService();
     const existing = await service.get(businessId, suggestionId);
@@ -49,15 +51,6 @@ export async function PATCH(
           );
     return Response.json({ ok: true, data: suggestion });
   } catch (e) {
-    const err = toActionError(e);
-    const status =
-      err.code === "UNAUTHORIZED"
-        ? 401
-        : err.code === "FORBIDDEN"
-          ? 403
-          : err.code === "NOT_FOUND"
-            ? 404
-            : 400;
-    return Response.json({ ok: false, error: err }, { status });
+    return toErrorResponse(e);
   }
 }

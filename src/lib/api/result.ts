@@ -26,6 +26,7 @@ export class ApiError extends Error {
       | "FORBIDDEN"
       | "NOT_FOUND"
       | "INVALID_INPUT"
+      | "RATE_LIMITED"
       | "INTERNAL",
     message: string,
   ) {
@@ -77,4 +78,36 @@ export async function run<T>(
   } catch (e) {
     return { ok: false, error: toActionError(e) };
   }
+}
+
+/** ActionError.code → HTTPステータス。ドメインエラー等の未定義codeは400。 */
+const ERROR_HTTP_STATUS: Record<string, number> = {
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  INVALID_INPUT: 400,
+  RATE_LIMITED: 429,
+  INTERNAL: 500,
+};
+
+/**
+ * Route Handler 用の統一エラーレスポンス。
+ * 例外 → { ok: false, error: { code, message } } + HTTPステータス。
+ * RateLimitError(retryAfterSec保持)なら Retry-After ヘッダを付ける。
+ */
+export function toErrorResponse(e: unknown): Response {
+  const err = toActionError(e);
+  const retryAfter =
+    err.code === "RATE_LIMITED" && e instanceof Error && "retryAfterSec" in e
+      ? Math.ceil(Number(e.retryAfterSec))
+      : undefined;
+  return Response.json(
+    { ok: false, error: err },
+    {
+      status: ERROR_HTTP_STATUS[err.code] ?? 400,
+      headers: retryAfter
+        ? { "Retry-After": String(retryAfter) }
+        : undefined,
+    },
+  );
 }
