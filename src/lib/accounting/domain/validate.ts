@@ -5,6 +5,7 @@ import {
   assertPositiveYen,
   isIntegerYen,
 } from "./money";
+import { assertTaxAmountConsistent } from "./tax";
 import type {
   InvoiceItem,
   TaxCategory,
@@ -98,13 +99,7 @@ export function validateExpenseInput(input: ExpenseInput): void {
       `taxCategory must be one of ${TAX_CATEGORIES.join("/")}`,
     );
   }
-  assertNonNegativeYen(input.taxAmount, "taxAmount");
-  if (input.taxAmount > input.amount) {
-    throw new DomainError(
-      "VALIDATION_FAILED",
-      "taxAmount must not exceed the expense amount",
-    );
-  }
+  assertTaxAmountConsistent(input.taxCategory, input.amount, input.taxAmount);
   if (input.paymentDueDate !== undefined) {
     assertISODate(input.paymentDueDate, "paymentDueDate");
   }
