@@ -39,6 +39,7 @@ import {
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
 import { AiSuggestionCard } from "@/components/ai-suggestion-card";
+import { TransactionAIPanel } from "./transaction-ai-panel";
 import { TransactionForm } from "./transaction-form";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -49,10 +50,12 @@ const TYPE_LABELS: Record<string, string> = {
 
 function TransactionRow({
   transaction: t,
+  existingTransactions,
   canEdit,
   onChanged,
 }: {
   transaction: Transaction;
+  existingTransactions: Transaction[];
   canEdit: boolean;
   onChanged: () => void;
 }) {
@@ -150,6 +153,13 @@ function TransactionRow({
                   }
                 />
               )}
+
+              <TransactionAIPanel
+                transaction={t}
+                existingTransactions={existingTransactions}
+                canEdit={canEdit && mutable}
+                onChanged={onChanged}
+              />
 
               {editing ? (
                 <TransactionForm
@@ -358,6 +368,7 @@ export function TransactionsScreen() {
                 <TransactionRow
                   key={t.id}
                   transaction={t}
+                  existingTransactions={data ?? []}
                   canEdit={canEdit}
                   onChanged={reload}
                 />

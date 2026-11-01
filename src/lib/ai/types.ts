@@ -135,6 +135,20 @@ export interface AISuggestion {
 
 export type NewAISuggestion = Omit<AISuggestion, "id">;
 
+/**
+ * Route Handler(JSON)経由でクライアントへ返す提案。
+ * Response.json が Date を ISO 8601 文字列へ変換するため、
+ * 日時フィールドのみ string に置き換えた wire 型。
+ */
+export type AISuggestionDTO = Omit<
+  AISuggestion,
+  "createdAt" | "updatedAt" | "decidedAt"
+> & {
+  createdAt: string;
+  updatedAt: string;
+  decidedAt: string | null;
+};
+
 /** 監査ログエントリ。証憑内容・個人情報は含めず対象の識別情報のみ */
 export interface AuditLogEntry {
   actorUid: string;

@@ -55,3 +55,51 @@ export async function callApi<T>(
   }
   return res.data;
 }
+
+/**
+ * Route Handler の `{ ok, data | error }` レスポンスを処理する fetch ラッパー。
+ * callApi と同様に UNAUTHORIZED 時はセッションを張り直して1回リトライする。
+ * body に文字列を渡す場合のみ JSON の content-type を付ける
+ * (FormData 送信時はブラウザの multipart 境界に任せる)。
+ */
+export async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  let res = await requestApi<T>(path, init);
+  if (!res.ok && res.error.code === "UNAUTHORIZED") {
+    if (await refreshSession(true)) {
+      res = await requestApi<T>(path, init);
+    }
+  }
+  if (!res.ok) {
+    throw new ApiClientError(res.error.code, res.error.message);
+  }
+  return res.data;
+}
+
+async function requestApi<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<ActionResult<T>> {
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    ...init,
+    headers: {
+      ...(typeof init?.body === "string"
+        ? { "content-type": "application/json" }
+        : {}),
+      ...init?.headers,
+    },
+  });
+  const json = (await res
+    .json()
+    .catch(() => null)) as ActionResult<T> | null;
+  if (!json || typeof json.ok !== "boolean") {
+    return {
+      ok: false,
+      error: { code: "INTERNAL", message: "サーバーエラーが発生しました" },
+    };
+  }
+  return json;
+}
