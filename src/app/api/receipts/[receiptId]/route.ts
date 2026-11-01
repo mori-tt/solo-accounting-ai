@@ -1,7 +1,7 @@
 import { toActionError, ApiError } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
-import { getReceiptsBucket } from "@/lib/firebase/admin";
+import { getAdminBucket } from "@/lib/firebase/admin";
 
 /**
  * 証憑ファイルの取得(プレビュー/ダウンロード用)。
@@ -24,7 +24,7 @@ export async function GET(
     if (!receipt) {
       throw new ApiError("NOT_FOUND", "証憑が見つかりません");
     }
-    const [buffer] = await getReceiptsBucket()
+    const [buffer] = await getAdminBucket()
       .file(receipt.storagePath)
       .download();
     return new Response(new Uint8Array(buffer), {

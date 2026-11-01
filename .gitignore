@@ -14,7 +14,7 @@
 /coverage
 
 # next.js
-/.next/
+/.next
 /out/
 
 # production
@@ -44,7 +44,7 @@ yarn-error.log*
 /firestore-debug.log
 /ui-debug.log
 /firebase-export-*/
-/.firebase/
+/.firebase
 /emulator-data/
 
 # vercel
