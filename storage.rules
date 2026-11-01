@@ -1,16 +1,50 @@
 rules_version = '2';
 
-// 注意: このファイルは意図的に未完成の骨格。
-// docs/SECURITY_RULES.md の方針に基づき、Emulatorテストとともに実装すること。
-// 実装が必要な内容(推測で完成させないこと):
-//   - receipts/{businessId}/... 配下は対応するmemberロールで認可
-//   - viewerは読み取りのみ、editor/ownerはアップロード可
-//   - ファイルサイズ・MIMEタイプの制限
+// docs/SECURITY_RULES.md に基づくStorage認可ルール。
+// - パスは receipts/{businessId}/{receiptId}/{fileName} のみ許可
+// - 対応するFirestore memberドキュメントのロールで認可する
+// - viewerは読み取りのみ、editor/ownerはアップロード可
+// - ファイルサイズ(10MB)とMIMEタイプを制限する
 service firebase.storage {
   match /b/{bucket}/o {
-    // 安全側デフォルト: すべて拒否
-    match /{allPaths=**} {
-      allow read, write: if false;
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberDoc(businessId) {
+      return /databases/(default)/documents/businesses/$(businessId)/members/$(request.auth.uid);
+    }
+
+    function isMember(businessId) {
+      return signedIn() && firestore.exists(memberDoc(businessId));
+    }
+
+    function role(businessId) {
+      return firestore.get(memberDoc(businessId)).data.get('role', '');
+    }
+
+    function canWrite(businessId) {
+      return isMember(businessId) && role(businessId) in ['owner', 'editor'];
+    }
+
+    // 証憑として許可する形式と上限(10MB)
+    function validFile() {
+      return request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType in [
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+          'image/heic',
+          'application/pdf',
+        ];
+    }
+
+    match /receipts/{businessId}/{receiptId}/{fileName} {
+      allow read: if isMember(businessId);
+      // deleteではrequest.resourceがnullのためcreate/updateと分離する
+      allow create, update: if canWrite(businessId) && validFile();
+      allow delete: if canWrite(businessId);
     }
   }
 }
