@@ -6,6 +6,7 @@ export * from "./domain/errors";
 export * from "./domain/fiscal";
 export * from "./domain/money";
 export * from "./domain/summary";
+export * from "./domain/tax";
 export * from "./domain/transitions";
 export * from "./domain/types";
 export * from "./domain/validate";
