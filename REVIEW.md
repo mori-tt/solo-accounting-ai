@@ -16,6 +16,44 @@
 
 ## Log
 
+## 2026-10-31: AI支援機能の実装(Phase 4コア)
+
+- Worktree: ai-accounting
+- 変更内容: AI提案のライフサイクル管理を実装。`businesses/{businessId}/aiSuggestions` コレクションで5種類の提案(証憑抽出/勘定科目候補/重複候補/取引内容説明/月次変動説明)を管理
+- 変更ファイル: `src/lib/ai/types.ts`, `errors.ts`, `schemas.ts`, `provider.ts`, `heuristic-provider.ts`, `store.ts`, `firestore-store.ts`, `service.ts`, `service.test.ts`, `tests/firestore/ai-suggestions.rules.test.ts`, `docs/FIRESTORE_SCHEMA.md`, `docs/AI_POLICY.md`, `docs/DECISIONS.md`(ADR-0005), `firestore.rules`(コメント), `next.config.ts`, `package.json`
+
+### 実装の要点
+
+- `AISuggestionService`: `run`(提案生成) / `retry`(再実行) / `accept` / `reject`。accepted/rejectedは再実行不可
+- 状態遷移: 成功=`pending`、必須項目欠落=`needs_review`+issuesコード、失敗(timeout/provider_error/invalid_response)=`needs_review`+lastError
+- zodで生AIレスポンスを検証。形が不正なら`invalid_response`としてneeds_review(再実行可能)
+- confidenceは0..1に丸めて保存、reasonはAI未返却時にフォールバック文言を生成して必ず保存
+- AI出力は`payload`に隔離し、Transaction等の確定フィールドには一切書き込まない(acceptしてもconfirmedにならない)
+- プロバイダの生エラーメッセージは証憑内容を含み得るため保存せず`provider_error`に汎用化(個人情報非ログ方針)
+- `AIProvider`インターフェースで外部APIと疎結合。開発用に決定論的な`HeuristicAIProvider`を同梱
+- ストア抽象化: `AISuggestionStore`(本番=`FirestoreSuggestionStore`/Admin SDK、テスト=`InMemorySuggestionStore`)
+- 監査ログ: `run_ai`/`approve_ai`/`reject_ai`をauditLogsに記録(対象パスのみ、内容は記録しない)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(24件。service.test.ts 21件 + rules 3件)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 合格(JDK21で起動、FIRESTORE_EMULATOR_HOST指定でrules 3件実行。クライアントからのaiSuggestions読み書き拒否を確認)
+
+### 未解決事項
+
+- 実際のAIプロバイダ(LLM API)は未接続。`AIProvider`実装を追加すれば差し替え可能
+- UI/API層(Route Handler等)は未実装。認証実装後にserviceを呼ぶ経路を追加する
+- aiSuggestionsへのクライアントreadは現行全拒否Rulesのまま。UI実装時にmembersロールでread許可を検討
+
+### 次の担当者への注意事項
+
+- `aiSuggestion` mapフィールド(Transactions/Receipts)は最新提案への参照のみ。提案本体はaiSuggestionsコレクション
+- Emulatorテストは `FIRESTORE_EMULATOR_HOST=localhost:8080` を付けて `pnpm test` を実行すると有効になる
+- このworktreeはnode_modules/.nextがメインチェックアウトへのシンボリンク。Turbopackがルート外解決を拒否するため `next.config.ts` の `experimental.turbopackAdditionalRoots` で実体の親ディレクトリを許可した(通常チェックアウトでは自動的に無効化)
+
 ## 2026-10-31: ルート管理ファイルの作成
 
 - Worktree: foundation

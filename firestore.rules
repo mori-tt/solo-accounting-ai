@@ -7,6 +7,8 @@ rules_version = '2';
 //   - 締め済みfiscalPeriodに属するデータのupdate/delete禁止
 //   - auditLogsはappend-only
 //   - aiSuggestionフィールドはクライアントから書き込み不可(Admin SDKのみ)
+//   - aiSuggestions/auditLogsコレクション自体もクライアント読み書き不可
+//     (提案の取得・承認・拒否はサーバーサイド経由。tests/firestore/で検証)
 service cloud.firestore {
   match /databases/{database}/documents {
     // 安全側デフォルト: すべて拒否
