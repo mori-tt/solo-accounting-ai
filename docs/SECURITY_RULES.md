@@ -62,8 +62,9 @@ Firebase Security Rules(Firestore / Storage)の方針。
 
 - AI提案は `aiSuggestions` コレクションで管理する(ADR-0005)
 - 提案ドキュメントの生成・削除はサーバーサイド(Admin SDK経由)のみ
-- クライアントは `status`(pending/accepted/rejected)の解決と
-  `resolvedBy`(本人のみ)の記録のみ可能。提案内容・対象・信頼度は変更不可
+- クライアントは未解決(`pending`/`needs_review`)の提案を
+  `accepted`/`rejected` に解決することのみ可能で、`decidedBy` は本人のみ。
+  提案内容(`payload`)・対象(`target`)・信頼度・実行履歴は変更不可
 - 確定データ側の `aiSuggestionId` は作成時のみ設定可・以後変更不可(追跡性)
 
 ## Storage Rules

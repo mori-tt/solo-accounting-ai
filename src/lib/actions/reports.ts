@@ -8,6 +8,8 @@ import { findUnpaidExpenses } from "@/lib/accounting/services/expenses";
 import { findUnpaidInvoices } from "@/lib/accounting/services/sales";
 import { monthKeyRange } from "@/lib/accounting/dates";
 import type { MonthlySummary, Transaction } from "@/lib/accounting/types";
+import { MAX_LIST_LIMIT } from "@/lib/ai/store";
+import { getAISuggestionService } from "@/lib/api/ai";
 import { run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -70,6 +72,8 @@ export interface DashboardData {
   summary: MonthlySummary;
   draftCount: number;
   pendingSuggestionCount: number;
+  /** 未解決のAI提案があるTransactionのID一覧(バッジ表示用) */
+  pendingSuggestionTransactionIds: string[];
   unprocessedReceiptCount: number;
   unpaidExpenseCount: number;
   overdueExpenseCount: number;
@@ -91,13 +95,14 @@ export async function getDashboard(
     const store = getStore();
     const { startDate, endDate } = monthKeyRange(parsed.data);
 
-    const [monthTx, allTx, receipts, unpaidExpenses, unpaidInvoices] =
+    const [monthTx, allTx, receipts, unpaidExpenses, unpaidInvoices, suggestions] =
       await Promise.all([
         store.listTransactionsInRange(businessId, startDate, endDate),
         store.listTransactionsInRange(businessId, "0001-01-01", "9999-12-31"),
         store.listReceipts(businessId, "unprocessed"),
         findUnpaidExpenses(store, businessId, input.asOf),
         findUnpaidInvoices(store, businessId, input.asOf),
+        getAISuggestionService().list(businessId, { limit: MAX_LIST_LIMIT }),
       ]);
 
     const summary = computeMonthlySummary(
@@ -108,13 +113,18 @@ export async function getDashboard(
     const recentTransactions = [...allTx]
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 8);
+    // 未解決(pending/needs_review)の提案を対応件数として数える
+    const unresolved = suggestions.filter(
+      (s) => s.status === "pending" || s.status === "needs_review",
+    );
 
     return {
       summary,
       draftCount: allTx.filter((t) => t.status === "draft").length,
-      pendingSuggestionCount: allTx.filter(
-        (t) => t.aiSuggestion?.status === "pending",
-      ).length,
+      pendingSuggestionCount: unresolved.length,
+      pendingSuggestionTransactionIds: unresolved
+        .filter((s) => s.target.type === "transaction")
+        .map((s) => s.target.id),
       unprocessedReceiptCount: receipts.length,
       unpaidExpenseCount: unpaidExpenses.length,
       overdueExpenseCount: unpaidExpenses.filter((u) => u.overdue).length,

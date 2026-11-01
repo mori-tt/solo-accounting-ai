@@ -64,7 +64,7 @@ export class HeuristicAIProvider implements AIProvider {
     return {
       candidates: [
         {
-          account: hit ? hit[1] : "miscellaneous",
+          account: hit ? hit[1] : "misc_expense",
           confidence: hit ? 0.6 : 0.2,
           reason: hit ? hit[2] : "該当する分類手がかりが見つかりませんでした",
         },

@@ -1,9 +1,3 @@
-import {
-  assertPendingSuggestion,
-  buildAiSuggestion,
-  suggestedFieldPatch,
-  type AiSuggestionFields,
-} from "./domain/ai";
 import { buildAuditLog, businessDocPath } from "./domain/audit";
 import {
   buildClosingChecklist,
@@ -223,7 +217,6 @@ export class AccountingService {
         description: input.description,
         receiptIds: [],
         status: "draft",
-        aiSuggestion: null,
         idempotencyKey: input.idempotencyKey ?? null,
         createdBy: actorUid,
         createdAt: now,
@@ -407,7 +400,6 @@ export class AccountingService {
         description: input.description,
         receiptIds: [],
         status: "draft",
-        aiSuggestion: null,
         idempotencyKey: input.idempotencyKey ?? null,
         createdBy: actorUid,
         createdAt: now,
@@ -778,7 +770,6 @@ export class AccountingService {
         mimeType: input.mimeType,
         transactionId: null,
         status: "unprocessed",
-        aiSuggestion: null,
         idempotencyKey: input.idempotencyKey ?? null,
         createdBy: actorUid,
         createdAt: this.now(),
@@ -966,128 +957,6 @@ export class AccountingService {
         receiptId,
       );
       return this.requireDoc(store, businessId, "receipts", receiptId);
-    });
-  }
-
-  async saveAiSuggestion(
-    businessId: string,
-    target: { collection: "transactions" | "receipts"; id: string },
-    fields: AiSuggestionFields,
-    actorUid: string,
-  ): Promise<void> {
-    const suggestion = buildAiSuggestion(fields, this.now());
-    return this.store.runInTransaction(async (store) => {
-      if (target.collection === "transactions") {
-        const transaction = await this.requireDoc(
-          store,
-          businessId,
-          "transactions",
-          target.id,
-        );
-        assertTransactionMutable(transaction);
-      } else {
-        const receipt = await this.requireDoc(
-          store,
-          businessId,
-          "receipts",
-          target.id,
-        );
-        if (receipt.status === "archived") {
-          throw new DomainError(
-            "INVALID_STATE",
-            "cannot attach an AI suggestion to an archived receipt",
-          );
-        }
-      }
-      await store.update(businessId, target.collection, target.id, {
-        aiSuggestion: suggestion,
-      });
-      await this.writeAudit(
-        store,
-        businessId,
-        actorUid,
-        "suggest_ai",
-        target.collection,
-        target.id,
-      );
-    });
-  }
-
-  async acceptAiSuggestion(
-    businessId: string,
-    transactionId: string,
-    actorUid: string,
-  ): Promise<TransactionEntity> {
-    return this.store.runInTransaction(async (store) => {
-      const transaction = await this.requireDoc(
-        store,
-        businessId,
-        "transactions",
-        transactionId,
-      );
-      assertTransactionMutable(transaction);
-      assertPendingSuggestion(transaction.aiSuggestion);
-
-      const patch = suggestedFieldPatch(transaction.aiSuggestion);
-      const merged: TransactionInput = {
-        type: transaction.type,
-        date: patch.date ?? transaction.date,
-        amount: patch.amount ?? transaction.amount,
-        account: patch.account ?? transaction.account,
-        counterparty: patch.counterparty ?? transaction.counterparty,
-        description: transaction.description,
-      };
-      validateTransactionInput(merged);
-      await this.assertPeriodOpen(store, businessId, transaction.date);
-      await this.assertPeriodOpen(store, businessId, merged.date);
-
-      await store.update(businessId, "transactions", transactionId, {
-        date: merged.date,
-        amount: merged.amount,
-        account: merged.account,
-        counterparty: merged.counterparty,
-        aiSuggestion: { ...transaction.aiSuggestion, status: "accepted" },
-        updatedAt: this.now(),
-      });
-      await this.writeAudit(
-        store,
-        businessId,
-        actorUid,
-        "approve_ai",
-        "transactions",
-        transactionId,
-      );
-      return this.requireDoc(store, businessId, "transactions", transactionId);
-    });
-  }
-
-  async rejectAiSuggestion(
-    businessId: string,
-    transactionId: string,
-    actorUid: string,
-  ): Promise<TransactionEntity> {
-    return this.store.runInTransaction(async (store) => {
-      const transaction = await this.requireDoc(
-        store,
-        businessId,
-        "transactions",
-        transactionId,
-      );
-      assertTransactionMutable(transaction);
-      assertPendingSuggestion(transaction.aiSuggestion);
-      await store.update(businessId, "transactions", transactionId, {
-        aiSuggestion: { ...transaction.aiSuggestion, status: "rejected" },
-        updatedAt: this.now(),
-      });
-      await this.writeAudit(
-        store,
-        businessId,
-        actorUid,
-        "reject_ai",
-        "transactions",
-        transactionId,
-      );
-      return this.requireDoc(store, businessId, "transactions", transactionId);
     });
   }
 

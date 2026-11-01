@@ -301,15 +301,19 @@ service cloud.firestore {
       }
 
       // ---------- aiSuggestions ----------
-      // 提案内容の生成はAdmin SDKのみ。クライアントはstatusの承認/却下と
-      // resolvedByの記録のみ行える(ADR-0005)
+      // 提案ドキュメントの生成・削除はAdmin SDKのみ。クライアントは未解決
+      // (pending/needs_review)提案のstatus解決とdecidedByの記録のみ行える。
+      // 提案の内容・対象・信頼度は変更不可(ADR-0005)
       match /aiSuggestions/{suggestionId} {
         allow get, list: if isMember(businessId);
         allow create, delete: if false;
         allow update: if canEdit(businessId)
-          && request.resource.data.status in ['pending', 'accepted', 'rejected']
-          && request.resource.data.get('resolvedBy', '') == request.auth.uid
-          && unaffected(['type', 'targetPath', 'suggestion', 'confidence', 'createdAt']);
+          && resource.data.status in ['pending', 'needs_review']
+          && request.resource.data.status in ['accepted', 'rejected']
+          && request.resource.data.decidedBy == request.auth.uid
+          && unaffected(['kind', 'target', 'payload', 'confidence', 'reason',
+                         'issues', 'attempts', 'retriable', 'lastError',
+                         'createdBy', 'createdAt']);
       }
 
       // ---------- monthlySummaries ----------

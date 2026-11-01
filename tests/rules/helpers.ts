@@ -133,13 +133,23 @@ export function journalEntry(status: "draft" | "confirmed" | "locked" = "draft")
   };
 }
 
-export function aiSuggestion(status: "pending" | "accepted" | "rejected" = "pending") {
+export function aiSuggestion(
+  status: "pending" | "accepted" | "rejected" | "needs_review" = "pending",
+) {
   return {
-    type: "receipt_extraction",
-    targetPath: `businesses/${BIZ}/receipts/r1`,
-    suggestion: { amount: 1000, date: "2026-10-15" },
-    confidence: 0.9,
+    kind: "receipt_extraction",
+    target: { type: "receipt", id: "r1" },
     status,
+    payload: { amount: 1000, date: "2026-10-15", vendor: "テスト商店" },
+    confidence: 0.9,
+    reason: "seed",
+    issues: [],
+    attempts: 1,
+    retriable: true,
+    lastError: null,
+    decidedBy: null,
+    decidedAt: null,
+    rejectReason: null,
     createdBy: "system",
   };
 }
