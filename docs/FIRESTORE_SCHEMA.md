@@ -149,8 +149,9 @@ receipts(証憑ファイル)
 | projectId | string? | |
 | issueDate | string | YYYY-MM-DD |
 | dueDate | string | YYYY-MM-DD |
-| items | array | [{ description, quantity, unitPrice, amount }] |
-| totalAmount | number | 円・整数 |
+| items | array | [{ description, quantity, unitPrice, amount, taxRate, taxAmount }] ※unitPrice/amountは税込、taxRateは `standard`(10%) / `reduced`(8%)、taxAmountは明細の内税額 |
+| totalAmount | number | 円・整数(税込) |
+| taxAmount | number? | 消費税合計(円・整数・明細ごと切り捨ての合算)。税フィールド導入前データは未設定 |
 | status | string | `draft` / `issued` / `paid` / `overdue` |
 | createdAt | Timestamp | |
 

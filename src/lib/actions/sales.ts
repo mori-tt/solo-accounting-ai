@@ -228,6 +228,7 @@ export async function createInvoice(
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       amount: item.quantity * item.unitPrice,
+      taxRate: item.taxRate,
     }));
     const { invoice } = await registerInvoice(getStore(), businessId, actor, {
       idempotencyKey: input.idempotencyKey,

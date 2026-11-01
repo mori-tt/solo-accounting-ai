@@ -1,5 +1,10 @@
 import { assertDateString } from "../dates";
 import { DomainError } from "../errors";
+import {
+  computeInvoiceTotals,
+  invoiceItemTaxAmount,
+  isInvoiceTaxRate,
+} from "../invoice-tax";
 import { assertNonNegativeYen, assertYenAmount } from "../money";
 import type { AccountingReader, AccountingStore, PutOp } from "../store/types";
 import type {
@@ -127,14 +132,24 @@ export interface RegisterInvoiceInput {
    * クライアント計算値の鵜呑みを防ぐ。
    */
   totalAmount?: number;
+  /** totalAmount と同様に再計算値との一致を検証する */
+  taxAmount?: number;
 }
 
-function validateInvoiceItems(items: InvoiceItem[]): number {
+/**
+ * 明細を検証し、税率の既定値適用と消費税額(税込の内税)を付与した
+ * 正規化済み明細と合計を返す。税額算出は invoice-tax 経由で
+ * domain/tax のエンジンを使う(再実装しない)。
+ */
+function normalizeInvoiceItems(items: InvoiceItem[]): {
+  items: InvoiceItem[];
+  totalAmount: number;
+  taxAmount: number;
+} {
   if (!Array.isArray(items) || items.length === 0) {
     throw new DomainError("INVALID_INPUT", "invoice requires at least one item");
   }
-  let total = 0;
-  for (const [index, item] of items.entries()) {
+  const normalized: InvoiceItem[] = items.map((item, index) => {
     if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
       throw new DomainError(
         "INVALID_QUANTITY",
@@ -150,9 +165,23 @@ function validateInvoiceItems(items: InvoiceItem[]): number {
         `items[${index}].amount ${item.amount} != quantity*unitPrice ${expected}`,
       );
     }
-    total += item.amount;
-  }
-  return total;
+    if (item.taxRate !== undefined && !isInvoiceTaxRate(item.taxRate)) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `items[${index}].taxRate must be one of standard/reduced`,
+      );
+    }
+    const taxAmount = invoiceItemTaxAmount(item);
+    if (item.taxAmount !== undefined && item.taxAmount !== taxAmount) {
+      throw new DomainError(
+        "AMOUNT_MISMATCH",
+        `items[${index}].taxAmount ${item.taxAmount} != computed ${taxAmount}`,
+      );
+    }
+    return { ...item, taxRate: item.taxRate ?? "standard", taxAmount };
+  });
+  const { totalAmount, taxAmount } = computeInvoiceTotals(normalized);
+  return { items: normalized, totalAmount, taxAmount };
 }
 
 /** 請求書を draft として登録する。合計は items から再計算する。 */
@@ -170,11 +199,18 @@ export async function registerInvoice(
       `dueDate ${dueDate} is before issueDate ${issueDate}`,
     );
   }
-  const totalAmount = validateInvoiceItems(input.items);
+  const normalized = normalizeInvoiceItems(input.items);
+  const { totalAmount, taxAmount } = normalized;
   if (input.totalAmount !== undefined && input.totalAmount !== totalAmount) {
     throw new DomainError(
       "AMOUNT_MISMATCH",
       `totalAmount ${input.totalAmount} != computed ${totalAmount}`,
+    );
+  }
+  if (input.taxAmount !== undefined && input.taxAmount !== taxAmount) {
+    throw new DomainError(
+      "AMOUNT_MISMATCH",
+      `taxAmount ${input.taxAmount} != computed ${taxAmount}`,
     );
   }
 
@@ -210,8 +246,9 @@ export async function registerInvoice(
         projectId: input.projectId,
         issueDate,
         dueDate,
-        items: input.items,
+        items: normalized.items,
         totalAmount,
+        taxAmount,
         status: "draft",
         createdAt: at,
         updatedAt: at,

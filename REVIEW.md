@@ -16,6 +16,42 @@
 
 ## Log
 
+## 2026-11-02: 請求書への消費税エンジン適用(Issue #12)
+
+- Worktree: invoice-tax
+
+### 実装内容
+
+- `src/lib/accounting/invoice-tax.ts` 新規: 請求書用の消費税計算をまとめた純粋関数モジュール。税額算出は `domain/tax`(`computeTaxAmount`/`sumTaxAmounts`、10%/8%・整数円・切り捨て)へ委譲し再実装なし。`invoices-screen.tsx`(フォーム見積・一覧表示)と `services/sales.ts`(登録時の確定値)が同一計算経路を共有する
+  - `invoiceItemTaxAmount(item)`: 明細1行の内税。`computeInvoiceTotals(items)`: `{totalAmount, taxAmount}`(明細ごと切り捨て→合算)。`invoiceTaxAmount(invoice)`: 保存済み `taxAmount` 優先、未保存(税フィールド導入前データ)なら明細から導出
+  - 金額は税込として扱う(ACCOUNTING_RULES.md「初期版は税込表示を基準にする」)。税率省略時は標準税率10%(`DEFAULT_INVOICE_TAX_RATE`)
+- `src/lib/accounting/types.ts`: `InvoiceItem` に `taxRate?: ConsumptionTaxRate`・`taxAmount?`、`Invoice` に `taxAmount?` を追加(いずれもoptionalで後方互換)
+- `services/sales.ts`: `validateInvoiceItems` → `normalizeInvoiceItems` へ拡張。税率区分の検証(standard/reduced以外は INVALID_INPUT)・明細ごとの `taxRate`/`taxAmount` 付与・`invoice.taxAmount` 保存。クライアント指定の `item.taxAmount`/`input.taxAmount` は従来の `totalAmount` と同じく再計算値との一致を検証(AMOUNT_MISMATCH)
+- `validation/schemas.ts`: `invoiceItemSchema` に `taxRate` optional enum 追加。`actions/sales.ts` は `taxRate` をサービスへ渡すのみ(計算はサービス側)
+- `invoices-screen.tsx`: 明細行に税率セレクト(10%/軽減8%)、ローカル reduce 計算を `computeInvoiceTotals` に置換し「合計 ¥X(うち消費税 ¥Y)」を表示。一覧の請求額セルに「うち消費税」行を追加(formatYen/`Amount` 維持、旧データは `invoiceTaxAmount` で導出描画)
+- `docs/FIRESTORE_SCHEMA.md`: invoices の items 構造と `taxAmount` フィールドを追記
+
+### 設計上の判断
+
+- 税額の基準は「税込・内税」: `unitPrice`/`amount`/`totalAmount` は税込金額のまま据え置き、`basis: "inclusive"` で内税を取り出す。税抜計上への切替はBusinessの会計方式設定ができた段階で対応
+- firestore.rules の `validInvoice` は `items` 構造を検査しないため rules 変更なし。`toStore` が `undefined` を落とすため optional フィールドは新規ドキュメントのみに保存される
+- 旧請求書(税フィールドなし)は読み取り時に標準税率として導出表示する。書き換えはしない(締め済み含む既存データの直接変更を避ける)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(21ファイル268件、skip 7。invoice-tax.test.ts 新規8件 + sales.test.ts 追加5件)
+- `pnpm build` — 合格(全ルート static prerender)
+- Firebase Emulator tests — 未実施(rules変更なしのため)
+
+### 未解決事項・次の担当者への注意事項
+
+- `domain/`(旧世代 `service.ts`/`validate.ts`)側の請求書経路は未適用。新世代 `services/` のみ接続した(両世代の統合整理は別タスク)
+- 請求書の税額内訳(税率ごとの対象額・税額の適格請求書様式表示)、免税事業者モード時の扱いは未対応
+- 明細 `amount` 未達(`quantity`/`unitPrice` のみ)から税額を逆算する経路はなく、amount 確定後に内税を取り出す設計
+
+
 ## 2026-11-02: AI提案パイプラインのAPI配線
 
 - Worktree: ai-api-wiring

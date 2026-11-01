@@ -1,4 +1,5 @@
 import type { DateString } from "./dates";
+import type { ConsumptionTaxRate } from "./domain/tax";
 
 /**
  * docs/FIRESTORE_SCHEMA.md に対応するドメイン型。
@@ -125,10 +126,14 @@ export interface InvoiceItem {
   description: string;
   /** 正の整数 */
   quantity: number;
-  /** 円・整数・0以上 */
+  /** 円・整数・0以上(税込) */
   unitPrice: number;
-  /** 円・整数 = quantity * unitPrice */
+  /** 円・整数 = quantity * unitPrice(税込) */
   amount: number;
+  /** 税率区分。省略時は標準税率(税フィールド導入前データの後方互換) */
+  taxRate?: ConsumptionTaxRate;
+  /** 明細に含まれる消費税額(円・整数)。登録時にサーバーで算出 */
+  taxAmount?: number;
 }
 
 export interface Invoice {
@@ -138,8 +143,10 @@ export interface Invoice {
   issueDate: DateString;
   dueDate: DateString;
   items: InvoiceItem[];
-  /** 円・整数 = items の amount 合計 */
+  /** 円・整数 = items の amount 合計(税込) */
   totalAmount: number;
+  /** 消費税合計(円・整数)。税フィールド導入前データは未設定 */
+  taxAmount?: number;
   status: InvoiceStatus;
   createdAt: string;
   updatedAt: string;
