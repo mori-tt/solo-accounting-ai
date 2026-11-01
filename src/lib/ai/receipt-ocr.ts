@@ -25,6 +25,11 @@ const IMAGE_MIME_TYPES = new Set([
 ]);
 const PDF_MIME_TYPE = "application/pdf";
 
+/** OCRへ送信可能な証憑のMIMEタイプかどうか */
+export function isOcrSupportedMimeType(mimeType: string): boolean {
+  return IMAGE_MIME_TYPES.has(mimeType) || mimeType === PDF_MIME_TYPE;
+}
+
 const OCR_INSTRUCTIONS = `あなたは証憑(レシート/領収書)のOCRエンジンです。
 画像またはPDFに写っている文字をすべて読み取り、見えたままのテキストをocrTextに出力してください。
 
@@ -205,6 +210,17 @@ export function createReceiptOcr(
     model:
       env.OPENAI_OCR_MODEL ?? env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL,
   });
+}
+
+/**
+ * OCRが利用可能かどうか。createReceiptOcr() !== null と同じ判定だが、
+ * クライアント構築や警告出力を伴わないためUIの有効/無効判定に使える。
+ * サーバーサイド専用。
+ */
+export function isReceiptOcrAvailable(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env.AI_OCR_PROVIDER === "openai" && Boolean(env.OPENAI_API_KEY);
 }
 
 /** ocrText生成に必要な証憑の参照情報(ドメインReceiptへの依存を避け構造だけ定義) */

@@ -7,6 +7,8 @@ import type { AIProvider, AIRequest } from "./provider";
 import {
   createOpenAIOcrCaller,
   createReceiptOcr,
+  isOcrSupportedMimeType,
+  isReceiptOcrAvailable,
   OpenAIReceiptOcr,
   ReceiptOcrResolver,
   type OcrCall,
@@ -77,6 +79,36 @@ describe("createReceiptOcr(プロバイダ選択)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(createReceiptOcr({ AI_OCR_PROVIDER: "tesseract" })).toBeNull();
     expect(warn).toHaveBeenCalledOnce();
+  });
+});
+
+describe("isReceiptOcrAvailable", () => {
+  it("createReceiptOcr()!==null と同じ条件でtrueを返す", () => {
+    expect(isReceiptOcrAvailable({})).toBe(false);
+    expect(isReceiptOcrAvailable({ AI_OCR_PROVIDER: "none" })).toBe(false);
+    expect(isReceiptOcrAvailable({ AI_OCR_PROVIDER: "tesseract" })).toBe(
+      false,
+    );
+    expect(isReceiptOcrAvailable({ AI_OCR_PROVIDER: "openai" })).toBe(false);
+    expect(
+      isReceiptOcrAvailable({
+        AI_OCR_PROVIDER: "openai",
+        OPENAI_API_KEY: "sk-test",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("isOcrSupportedMimeType", () => {
+  it("OpenAI対応の画像とPDFのみtrueを返す", () => {
+    expect(isOcrSupportedMimeType("image/jpeg")).toBe(true);
+    expect(isOcrSupportedMimeType("image/png")).toBe(true);
+    expect(isOcrSupportedMimeType("image/webp")).toBe(true);
+    expect(isOcrSupportedMimeType("image/gif")).toBe(true);
+    expect(isOcrSupportedMimeType("application/pdf")).toBe(true);
+    expect(isOcrSupportedMimeType("image/heic")).toBe(false);
+    expect(isOcrSupportedMimeType("image/heif")).toBe(false);
+    expect(isOcrSupportedMimeType("text/plain")).toBe(false);
   });
 });
 

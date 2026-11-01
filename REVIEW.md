@@ -16,6 +16,45 @@
 
 ## Log
 
+## 2026-11-02: 領収書OCRの画面配線(Issue #30)
+
+- Worktree: ocr-ui
+
+### 実装内容
+
+Issue #21 のOCR基盤(`AI_OCR_PROVIDER=openai|none`)を画面へ接続した。依存追加なし。
+
+- `src/lib/ai/receipt-ocr.ts`(出口のみ変更): `isReceiptOcrAvailable(env)`(`createReceiptOcr()!==null` と同判定だがクライアント構築・警告出力なし。UIの有効判定用)と `isOcrSupportedMimeType(mime)` を公開
+- `src/app/api/ai/receipt-ocr/route.ts` 新規: `/api/ai/suggestions` のRoute Handlerパターン踏襲(requireViewer・ApiError・businessId検証・`{ok,data|error}`エンベロープ)
+  - `GET ?businessId=` → `{ available }`。OCR設定可否のみ返す(鍵・内容は含まない)
+  - `POST { businessId, receiptId }` → businessId内のreceiptを解決し(storagePathはクライアントから受け取らず登録済みレコード由来のみ。他businessIdはNOT_FOUND)、`ReceiptOcrResolver` で Storage取得→OCR→receipt_extraction を実行し `{ amount, date, vendor, confidence, reason, issues }` を返す。60秒総合タイムアウト
+  - aiSuggestionsドキュメントは作成しない読み取り系(フォーム自動入力専用)。OCR未設定は `error.code="OCR_UNAVAILABLE"`、非対応MIME/ファイル未取得/サイズ超過/タイムアウト等は固定文言へ正規化(OCRテキスト・SDKエラーを返さない・ログにも出さない)
+- `src/lib/api-client.ts`: `ReceiptOcrResult`・`fetchReceiptOcrAvailability`・`runReceiptOcr`
+- `src/app/(app)/receipts/receipts-screen.tsx`:
+  - 「領収書から登録」フォーム(日付/金額/勘定科目/取引先/摘要)。`transactionSchema`で検証し、`createTransaction`(支出・下書き)→`linkReceipt`で紐付けまで行う。確定は必ずユーザーの保存操作
+  - 「OCRで自動入力」ボタン(unprocessed・editor以上): POST `/api/ai/receipt-ocr` の抽出値でフォームをプリフィル。`issues`があれば警告で明示し確認を促す
+  - OCR未設定時(`available=false`・問い合わせ失敗も同扱い)はボタンを無効化し「OCRが未設定…」を明示。失敗しても領収書機能自体は止めない
+  - 証憑抽出提案の採用 → `decideAiSuggestion` 後に抽出値を登録フォームへコピー(保存は別操作)。紐付先取引宛の提案(科目・摘要)は採用時に `updateTransaction` で確定フィールドへ反映(ADR-0005の2ステップ)
+  - linked状態の行に「科目をAI提案」(`runAiSuggestion`の`account_suggestion`。抽出/登録済み取引の値をinputに使用)
+  - 取引宛提案も `targetType:"transaction"` で取得し、紐付先idで行に表示(証憑宛と併せて新しい順)
+
+### 実行したテスト
+
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(24ファイル300件、skip 10)
+- `pnpm build` — 合格(`/api/ai/receipt-ocr` が動的ルートとして登録)
+
+### 未解決事項・次の担当者への注意事項
+
+- OCR実行経路は提案ドキュメントを作成しないため `run_ai` 監査も残らない。監査が必要なら既存 `POST /api/ai/suggestions`(kind=receipt_extraction)経由にするか、本ルートでもauditLogsを書く検討が必要
+- OCR route はIssue指定どおり `requireViewer`(書き込みなしの読み取り系)。外部APIコストの乱用が懸念される場合は `requireEditor` への引き上げを検討
+- 「領収書から登録」は createTransaction→linkReceipt の2リクエスト。link失敗時は孤立した下書き取引が残る(取引一覧から紐付/削除で回収可能)
+- HEIC/HEIFはアップロード可能だがOCR非対応のまま(事前にINVALID_INPUTで案内。Issue #21と同じ制約)
+- 抽出フローの型は `ReceiptExtractionPayload` をそのまま利用。`ReceiptOcrResult` は自信度・根拠・issuesを追加した応答shape(api-client.ts)
+
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 
 - Worktree: ai-ui-integration
