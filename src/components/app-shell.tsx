@@ -28,6 +28,9 @@ const NAV_ITEMS = [
   { href: "/projects", label: "案件" },
   { href: "/invoices", label: "請求・入金" },
   { href: "/reports/monthly", label: "月次レポート" },
+  { href: "/reports/journal", label: "仕訳帳" },
+  { href: "/reports/ledger", label: "総勘定元帳" },
+  { href: "/reports/trial-balance", label: "試算表" },
   { href: "/closing", label: "決算チェック" },
   { href: "/settings", label: "設定" },
 ] as const;

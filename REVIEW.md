@@ -46,6 +46,31 @@ Issue #21 のOCR基盤(`AI_OCR_PROVIDER=openai|none`)を画面へ接続した。
 - 「領収書から登録」は createTransaction→linkReceipt の2リクエスト。link失敗時は孤立した下書き取引が残る(取引一覧から紐付/削除で回収可能)
 - HEIC/HEIFはアップロード可能だがOCR非対応のまま(事前にINVALID_INPUTで案内。Issue #21と同じ制約)
 - 抽出フローの型は `ReceiptExtractionPayload` をそのまま利用。`ReceiptOcrResult` は自信度・根拠・issuesを追加した応答shape(api-client.ts)
+## 2026-11-02: 仕訳帳・総勘定元帳・試算表レポート(Issue #32)
+- Worktree: ledger-reports
+- `src/lib/accounting/domain/ledger.ts`(新規): 帳簿ロジック。Transaction(1行=type+account+amount)を複式仕訳へ展開する
+  - `transactionToJournalEntry`: income=借方現金/貸方科目、expense=借方科目/貸方現金、transfer=借方科目(振替先)/貸方現金(振替元)。`CASH_ACCOUNT="cash"` を相手科目に使う
+  - `buildJournal`: 確定済み(confirmed/locked)のみ日付昇順。draftは月次集計と同様に除外
+  - `buildAccountLedger`: 科目別に繰越残高(期間開始前の転記)+明細行+残高推移。残高方向は全期間の貸借合計が大きい側(勘定体系マスタが無いため)
+  - `buildTrialBalance`: 科目別借方/貸方合計・残高、合計行と貸借一致フラグ
+- `src/app/(app)/reports/actions.ts`(新規・"use server"): `getJournalReport`/`getAccountLedgerReport`/`getTrialBalanceReport`。`requireViewer`+`getStore().listTransactionsInRange`+domain関数の月次レポート同型。集計は保存しない。変更範囲の制約上 `src/lib/actions/` ではなく reports/ 配下に配置
+- 新規ページ: `reports/journal`(仕訳帳: 日付/借方科目/借方金額/貸方科目/貸方金額/摘要)、`reports/ledger`(総勘定元帳: 科目選択+繰越・期末残高+明細)、`reports/trial-balance`(試算表: 科目別貸借合計+合計行+貸借一致バッジ)。`useApiData`/`callApi`/`MonthNav` の既存パターン踏襲
+- `src/app/(app)/reports/account-label.ts`(新規): 帳簿用科目ラベル。`cash` は科目マスタ(accounts.ts)未登録の内部コードのため「現金」をここで補う
+- `src/components/app-shell.tsx`: ナビに仕訳帳/総勘定元帳/試算表を月次レポートの直下に追加
+### 設計上の判断
+- **transfer の仕訳展開**: Transaction は相手科目を持たない(1科目のみ)ため、「借方=account(振替先)/貸方=現金(振替元)」の一方向として展開。収支と同じ「現金相手」モデルに揃え、Issue記載の「借方=振替先/貸方=振替元」に現金=振替元を当てはめた。振替は収支を構成しない点は月次集計(transferを収支に含めない)と同じ扱い
+- **元帳の残高方向**: 勘定体系に借方/貸方の性質マスタが無いため、全期間の貸借合計が大きい側を残高方向とするヒューリスティック(収益科目→貸方、費用・現金→借方が普通になる)
+- **総勘定元帳のデータ範囲**: 繰越残高のため `0001-01-01`〜月末の全取引を読む(dashboardのallTxと同じ手法)
+- `pnpm install --frozen-lockfile` — 合格
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(25ファイル315件、skip 10。`domain/ledger.test.ts` 新規17件含む)
+- `pnpm build` — 合格(3新規ルートを含む全ルート生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。Emulator同時起動制約のため起動せず)
+- `domain/`(旧世代)と`services/`(新世代)の2系統併存のため、domain関数の入力は `Pick<TransactionEntity>` 型(`JournalTransaction`)として services 側 `Transaction` をそのまま受け取れるようにした。Entity型の統合整理は従前どおり別タスク
+- `cash` 勘定は科目マスタ(accounts.ts)に無いため帳簿画面側で「現金」ラベルを補っている。正式な科目体系の整備時にマスタ側へ移す余地あり
+- 振替の逆方向(他口座→現金)は現モデルでは表現できない。相手科目フィールドが将来追加された場合は `transactionToJournalEntry` の展開を見直すこと
+- E2E(`pnpm test:e2e`)は未実施。帳簿画面のE2Eカバレッジは別タスク
 ## 2026-11-02: UX/アクセシビリティ仕上げ(Issue #35)
 - Worktree: ux-a11y
 - 変更内容: ui.tsx プリミティブのアクセシビリティ強化と、対象画面のフォームエラー inline 化・モバイル用テーブル overflow 対応
@@ -101,6 +126,9 @@ Issue #21 のOCR基盤(`AI_OCR_PROVIDER=openai|none`)を画面へ接続した。
   コマンド一覧(test:rules・test:emulators 追記)/本番 Firebase 切替手順/
   デプロイ指針を整備。.env.example の変数一覧と整合
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm typecheck` — 合格
 - `pnpm test` — 合格(26ファイル314件、skip 10。env.test.ts 11件・rate-limit.test.ts 5件を新規追加)
 - `pnpm build` — 成功
 - Emulator・`next dev` は制約により未起動(Rules/E2E テストは未実施)
