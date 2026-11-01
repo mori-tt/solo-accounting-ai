@@ -175,6 +175,9 @@ importers:
       next:
         specifier: 16.4.3
         version: 16.4.3(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@20.19.43)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      openai:
+        specifier: 7.43.0
+        version: 7.43.0(google-auth-library@10.5.0(supports-color@7.2.0))(undici@8.12.3)(ws@8.22.0)(zod@4.6.7)
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -3984,6 +3987,33 @@ packages:
   open@6.4.0:
     resolution: {integrity: sha512-IFenVPgF70fSm1keSd2iDBIDIBZkroLeuffXq+wKTzTJlBpesFWojV9lb8mzOfaAzM1sr7HQHuO0vtV0zYekGg==}
     engines: {node: '>=8'}
+
+  openai@7.43.0:
+    resolution: {integrity: sha512-fBjKaDFG8AVfkGYoIo/E+xNRlNk7nx2nQ9GoQtXfePzPjg4QcT6nejkhXayJnEwSpFGfthOrAPI2KXj5yAqg9A==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      google-auth-library: '>=9.15.1 <11'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      google-auth-library:
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
 
   openapi3-ts@3.2.0:
     resolution: {integrity: sha512-/ykNWRV5Qs0Nwq7Pc0nJ78fgILvOT/60OxEmB3v7yQ8a8Bwcm43D4diaYazG/KBn6czA+52XYy931WFLMCUeSg==}
@@ -9270,6 +9300,13 @@ snapshots:
   open@6.4.0:
     dependencies:
       is-wsl: 1.1.0
+
+  openai@7.43.0(google-auth-library@10.5.0(supports-color@7.2.0))(undici@8.12.3)(ws@8.22.0)(zod@4.6.7):
+    optionalDependencies:
+      google-auth-library: 10.5.0(supports-color@7.2.0)
+      undici: 8.12.3
+      ws: 8.22.0
+      zod: 4.6.7
 
   openapi3-ts@3.2.0:
     dependencies:
