@@ -67,3 +67,17 @@
 - **Next.js 16の差分**: async request API必須、`middleware.ts`ではなく`proxy.ts`、cacheComponents前提の設計(use cache / Suspense)。新規コードを書く前に `node_modules/next/dist/docs/` を参照
 - **金額は整数円**: 実装時はdocs/ACCOUNTING_RULES.mdに従う
 - Playwrightはchromiumのみ設定済み。firefox/webkitが必要になったらprojectsに追加 + `playwright install`
+
+## 2026-10-31: main差分のQAレビュー
+
+- Worktree: qa-review
+- 変更内容: `main...mori-tt/qa-review` 差分(PR #1 foundation)をレビューし、
+  指摘を `REVIEW_SECURITY.md` / `REVIEW_ACCOUNTING.md` / `REVIEW_TEST.md` に記録
+- 変更ファイル: REVIEW_SECURITY.md, REVIEW_ACCOUNTING.md, REVIEW_TEST.md(新規)
+- Checks: レビューのみ(コード変更なし)。`@/` エイリアスの vitest 解決は実測確認済み
+- 備考:
+  - Blocker指摘なし。最高はHigh(Rules骨格未実装・Emulatorテスト不在・CIなし)
+  - `client.ts` の `emulatorsConnected` は HMR 後の二重 `connectFirestoreEmulator` で
+    FAILED_PRECONDITION になり得る(firestore 4.19.0 の `_setSettings` で確認)
+  - `parseEmulatorHost("localhost:")` は port 0 を返すバグあり
+  - `admin.ts` は projectId 未設定時に demo-* へ静かにフォールバックする
