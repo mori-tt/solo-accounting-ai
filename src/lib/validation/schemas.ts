@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { MAX_LIST_LIMIT } from "@/lib/ai/store";
+import { SUGGESTION_KINDS, SUGGESTION_STATUSES } from "@/lib/ai/types";
 
 /**
  * フォーム入力の検証スキーマ。
@@ -144,6 +146,47 @@ export const paymentSchema = z.object({
   amount: yenAmount,
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
+
+// ---------- AI提案 API(api/ai/suggestions) ----------
+
+export const aiTargetTypeSchema = z.enum([
+  "receipt",
+  "transaction",
+  "monthlySummary",
+]);
+export const aiSuggestionKindSchema = z.enum(SUGGESTION_KINDS);
+export const aiSuggestionStatusSchema = z.enum(SUGGESTION_STATUSES);
+
+/** POST /api/ai/suggestions(提案実行)のリクエストボディ */
+export const runSuggestionSchema = z.object({
+  businessId: z.string().min(1),
+  kind: aiSuggestionKindSchema,
+  target: z.object({
+    type: aiTargetTypeSchema,
+    id: z.string().min(1).max(200),
+  }),
+  input: z.record(z.string(), z.unknown()).optional(),
+});
+export type RunSuggestionInput = z.infer<typeof runSuggestionSchema>;
+
+/** PATCH /api/ai/suggestions/{id}(承認/却下)のリクエストボディ */
+export const decideSuggestionSchema = z.object({
+  businessId: z.string().min(1),
+  decision: z.enum(["accepted", "rejected"]),
+  rejectReason: z.string().max(500).optional(),
+});
+export type DecideSuggestionInput = z.infer<typeof decideSuggestionSchema>;
+
+/** GET /api/ai/suggestions(一覧)のクエリパラメータ */
+export const listSuggestionQuerySchema = z.object({
+  businessId: z.string().min(1),
+  targetType: aiTargetTypeSchema.optional(),
+  targetId: z.string().min(1).max(200).optional(),
+  kind: aiSuggestionKindSchema.optional(),
+  status: aiSuggestionStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_LIST_LIMIT).optional(),
+});
+export type ListSuggestionQuery = z.infer<typeof listSuggestionQuerySchema>;
 
 /** 安全側の検証。失敗時は issues を返す */
 export function parseForm<T>(

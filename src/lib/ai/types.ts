@@ -27,6 +27,15 @@ export type SuggestionTargetType =
   | "transaction"
   | "monthlySummary";
 
+/** kind が対象にする target.type。配線側でこの対応を検証する */
+export const KIND_TARGET_TYPE: Record<SuggestionKind, SuggestionTargetType> = {
+  receipt_extraction: "receipt",
+  account_suggestion: "transaction",
+  duplicate_detection: "transaction",
+  transaction_description: "transaction",
+  monthly_explanation: "monthlySummary",
+};
+
 export interface SuggestionTarget {
   type: SuggestionTargetType;
   /** 対象ドキュメントID。monthlySummaryの場合は "yyyyMM" */
