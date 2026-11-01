@@ -33,6 +33,7 @@ const NAV_ITEMS = [
   { href: "/reports/ledger", label: "総勘定元帳" },
   { href: "/reports/trial-balance", label: "試算表" },
   { href: "/closing", label: "決算チェック" },
+  { href: "/opening-balances", label: "期首残高" },
   { href: "/audit-log", label: "監査ログ" },
   { href: "/settings", label: "設定" },
   { href: "/backup", label: "バックアップ" },
