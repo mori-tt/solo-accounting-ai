@@ -4,6 +4,7 @@ import {
   buildJournal,
   buildTrialBalance,
   CASH_ACCOUNT,
+  computeCarryForwardBalances,
   OPENING_EQUITY_ACCOUNT,
   openingBalanceJournalEntries,
   transactionToJournalEntry,
@@ -361,5 +362,148 @@ describe("期首残高の帳簿反映", () => {
     expect(deposits?.balance).toBe(500_000);
     const equity = tb.rows.find((r) => r.account === OPENING_EQUITY_ACCOUNT);
     expect(equity?.balance).toBe(-700_000);
+  });
+});
+
+describe("computeCarryForwardBalances", () => {
+  it("期首残高が無い科目は全期間の仕訳を積み上げる", () => {
+    // 暦年2026を締める。売上+80,000・経費-30,000・預金への振替+50,000
+    const journal = buildJournal([
+      tx("t1", "income", "2026-02-01", 80_000),
+      tx("t2", "expense", "2026-03-01", 30_000, "rent"),
+      tx("t3", "transfer", "2026-04-01", 50_000, "deposits"),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [],
+      2026,
+      1,
+      [CASH_ACCOUNT, "deposits", "receivables"],
+    );
+    expect(balances).toEqual([
+      { accountCode: CASH_ACCOUNT, amount: 80_000 - 30_000 - 50_000 },
+      { accountCode: "deposits", amount: 50_000 },
+      { accountCode: "receivables", amount: 0 },
+    ]);
+  });
+
+  it("締める年度の期首残高を基点に当年度の仕訳だけを積み上げる", () => {
+    // 2026年度期首残高 現金200,000。2025年の取引は期首残高に含まれるため
+    // 積み上げ対象外(二重計上しない)
+    const journal = buildJournal([
+      tx("t0", "income", "2025-06-01", 999_999),
+      tx("t1", "income", "2026-02-01", 80_000),
+      tx("t2", "expense", "2026-03-01", 30_000, "rent"),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [{ fiscalYear: 2026, accountCode: CASH_ACCOUNT, amount: 200_000 }],
+      2026,
+      1,
+      [CASH_ACCOUNT],
+    );
+    expect(balances).toEqual([
+      { accountCode: CASH_ACCOUNT, amount: 200_000 + 80_000 - 30_000 },
+    ]);
+  });
+
+  it("締める年度に期首残高が無い科目は過去最終年度の残高を基点にする", () => {
+    // 2025年度の期首残高のみ登録・2026年度は未登録 → 2025年残高+それ以降の全仕訳
+    const journal = buildJournal([
+      tx("t1", "income", "2025-06-01", 50_000),
+      tx("t2", "income", "2026-02-01", 80_000),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [{ fiscalYear: 2025, accountCode: CASH_ACCOUNT, amount: 100_000 }],
+      2026,
+      1,
+      [CASH_ACCOUNT],
+    );
+    expect(balances).toEqual([
+      { accountCode: CASH_ACCOUNT, amount: 100_000 + 50_000 + 80_000 },
+    ]);
+  });
+
+  it("締める年度の期末より後の仕訳は含めない", () => {
+    const journal = buildJournal([
+      tx("t1", "income", "2026-12-31", 80_000),
+      tx("t2", "income", "2027-01-05", 20_000),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [],
+      2026,
+      1,
+      [CASH_ACCOUNT],
+    );
+    expect(balances).toEqual([{ accountCode: CASH_ACCOUNT, amount: 80_000 }]);
+  });
+
+  it("貸方超過の科目は負の残高で返す", () => {
+    const entries = [
+      entry("t1", "2026-05-01", OPENING_EQUITY_ACCOUNT, "payables", 40_000),
+    ];
+    const balances = computeCarryForwardBalances(
+      entries,
+      [],
+      2026,
+      1,
+      ["payables"],
+    );
+    expect(balances).toEqual([{ accountCode: "payables", amount: -40_000 }]);
+  });
+
+  it("対象科目の重複は1行にまとめ、対象外科目の仕訳は影響しない", () => {
+    const journal = buildJournal([
+      tx("t1", "expense", "2026-03-01", 30_000, "rent"),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [],
+      2026,
+      1,
+      ["deposits", CASH_ACCOUNT, "deposits"],
+    );
+    expect(balances).toEqual([
+      { accountCode: CASH_ACCOUNT, amount: -30_000 },
+      { accountCode: "deposits", amount: 0 },
+    ]);
+  });
+
+  it("4月始まりの事業は年度境界が4/1〜3/31になる", () => {
+    // 2025年度 = 2025-04-01〜2026-03-31。2026-04-01の取引は翌年度
+    const journal = buildJournal([
+      tx("t1", "income", "2025-04-01", 10_000),
+      tx("t2", "income", "2026-03-31", 20_000),
+      tx("t3", "income", "2026-04-01", 30_000),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [],
+      2025,
+      4,
+      [CASH_ACCOUNT],
+    );
+    expect(balances).toEqual([{ accountCode: CASH_ACCOUNT, amount: 30_000 }]);
+  });
+
+  it("期首残高の基点年度より前の仕訳を除外するかは開始月に従う", () => {
+    // 4月始まり事業で2025年度期首残高=500,000。2025-03-31の取引は
+    // 2025年度期首(2025-04-01)より前なので期首残高に含まれる扱いで除外
+    const journal = buildJournal([
+      tx("t0", "income", "2025-03-31", 999_999),
+      tx("t1", "income", "2025-05-01", 40_000),
+    ]);
+    const balances = computeCarryForwardBalances(
+      journal,
+      [{ fiscalYear: 2025, accountCode: CASH_ACCOUNT, amount: 500_000 }],
+      2025,
+      4,
+      [CASH_ACCOUNT],
+    );
+    expect(balances).toEqual([
+      { accountCode: CASH_ACCOUNT, amount: 540_000 },
+    ]);
   });
 });

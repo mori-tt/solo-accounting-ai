@@ -40,13 +40,28 @@ export function FilingScreen() {
   const fiscalYear =
     selectedYear ?? fiscalYearOf(todayDateString(), startMonth);
 
-  const [familySalaryInput, setFamilySalaryInput] = useState("");
+  // 専従者給与欄は family_salary 科目の年間合計を初期値として表示する。
+  // state には手入力の上書きのみを保持し(自動値に紐付け)、
+  // 空欄または自動値の変化(年度切替・再取得)で自動値へ戻る。
+  const [salaryOverride, setSalaryOverride] = useState<{
+    auto: number;
+    value: string;
+  } | null>(null);
   const [deductionInput, setDeductionInput] = useState("");
 
   const { data, initialLoading, error, reload } = useApiData(
     () => callApi(() => getFilingStatement(businessId ?? "", fiscalYear)),
     [businessId, fiscalYear],
   );
+
+  const autoFamilySalary = data?.statement.familyEmployeeSalary ?? 0;
+  const autoSalaryText = autoFamilySalary > 0 ? String(autoFamilySalary) : "";
+  const familySalaryInput =
+    salaryOverride !== null &&
+    salaryOverride.auto === autoFamilySalary &&
+    salaryOverride.value !== ""
+      ? salaryOverride.value
+      : autoSalaryText;
 
   const familySalary = parseYenInput(familySalaryInput);
   const deduction = parseYenInput(deductionInput);
@@ -108,7 +123,7 @@ export function FilingScreen() {
           <div className="w-44">
             <Field
               label="専従者給与(円)"
-              hint="青色事業専従者への給与額"
+              hint="専従者給与科目の年間合計を初期表示(上書き可)"
               error={familySalaryError}
             >
               <NumberInput
@@ -116,7 +131,12 @@ export function FilingScreen() {
                 min={0}
                 step={1}
                 placeholder="0"
-                onChange={(e) => setFamilySalaryInput(e.target.value)}
+                onChange={(e) =>
+                  setSalaryOverride({
+                    auto: autoFamilySalary,
+                    value: e.target.value,
+                  })
+                }
               />
             </Field>
           </div>
