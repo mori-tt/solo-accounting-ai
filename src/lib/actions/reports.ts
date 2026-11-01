@@ -6,13 +6,14 @@ import {
 } from "@/lib/accounting/services/monthlySummary";
 import { findUnpaidExpenses } from "@/lib/accounting/services/expenses";
 import { findUnpaidInvoices } from "@/lib/accounting/services/sales";
-import { monthKeyRange } from "@/lib/accounting/dates";
+import { monthKeyOf, monthKeyRange } from "@/lib/accounting/dates";
 import type { MonthlySummary, Transaction } from "@/lib/accounting/types";
 import { MAX_LIST_LIMIT } from "@/lib/ai/store";
 import { getAISuggestionService } from "@/lib/api/ai";
 import { run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
+import { countUnclosedMonths } from "@/lib/unclosed-months";
 import { monthKey, parseForm } from "@/lib/validation/schemas";
 
 export interface MonthlyReport {
@@ -80,6 +81,8 @@ export interface DashboardData {
   unpaidInvoiceCount: number;
   unpaidInvoiceAmount: number;
   overdueInvoiceCount: number;
+  /** 前月以前で締め済み期間に含まれない月の数(open期間の月+取引がある月) */
+  unclosedMonthCount: number;
   recentTransactions: Transaction[];
 }
 
@@ -95,15 +98,23 @@ export async function getDashboard(
     const store = getStore();
     const { startDate, endDate } = monthKeyRange(parsed.data);
 
-    const [monthTx, allTx, receipts, unpaidExpenses, unpaidInvoices, suggestions] =
-      await Promise.all([
-        store.listTransactionsInRange(businessId, startDate, endDate),
-        store.listTransactionsInRange(businessId, "0001-01-01", "9999-12-31"),
-        store.listReceipts(businessId, "unprocessed"),
-        findUnpaidExpenses(store, businessId, input.asOf),
-        findUnpaidInvoices(store, businessId, input.asOf),
-        getAISuggestionService().list(businessId, { limit: MAX_LIST_LIMIT }),
-      ]);
+    const [
+      monthTx,
+      allTx,
+      receipts,
+      unpaidExpenses,
+      unpaidInvoices,
+      suggestions,
+      periods,
+    ] = await Promise.all([
+      store.listTransactionsInRange(businessId, startDate, endDate),
+      store.listTransactionsInRange(businessId, "0001-01-01", "9999-12-31"),
+      store.listReceipts(businessId, "unprocessed"),
+      findUnpaidExpenses(store, businessId, input.asOf),
+      findUnpaidInvoices(store, businessId, input.asOf),
+      getAISuggestionService().list(businessId, { limit: MAX_LIST_LIMIT }),
+      store.listFiscalPeriods(businessId),
+    ]);
 
     const summary = computeMonthlySummary(
       parsed.data,
@@ -131,6 +142,11 @@ export async function getDashboard(
       unpaidInvoiceCount: unpaidInvoices.length,
       unpaidInvoiceAmount: unpaidInvoices.reduce((s, u) => s + u.remaining, 0),
       overdueInvoiceCount: unpaidInvoices.filter((u) => u.overdue).length,
+      unclosedMonthCount: countUnclosedMonths(
+        periods,
+        allTx.map((t) => monthKeyOf(t.date)),
+        parsed.data,
+      ),
       recentTransactions,
     };
   });

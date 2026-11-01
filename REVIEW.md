@@ -16,6 +16,29 @@
 
 ## Log
 
+## 2026-11-02: ダッシュボードのアラート通知とAI使用量表示(Issue #62)
+- Worktree: alerts-quota
+### 実装内容
+依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
+- `src/lib/api/rate-limit.ts`: `AI_RUN_LIMIT_PER_HOUR = 60` をexportし `aiRunRateLimiter` の limit に使用(APIが上限値を定数から返せるようにした)
+- `src/app/api/ai/usage/route.ts`(新規): `GET ?businessId=` → `requireViewer` 後 `{ remaining: aiRunRateLimiter.remaining(businessId), limit: AI_RUN_LIMIT_PER_HOUR }` を返す軽量API。既存Route Handlerパターン(ApiError/toErrorResponse・`{ok,data}`エンベロープ)踏襲。回数消費はしない
+- `src/lib/api-client.ts`: `AiUsage` 型と `fetchAiUsage(businessId)` を追加(requestJson経由)
+- `src/lib/unclosed-months.ts`(新規・純粋関数): `countUnclosedMonths(periods, transactionMonthKeys, currentMonthKey)`。「前月以前で未締めの月」= open期間がカバーする月 ∪ 取引が存在する月(いずれも前月以前) − closed期間内の月。締め単位は会計期間で月境界に揃うため月キー範囲で判定。取引も期間も無い月は締める対象が無いため除外
+- `src/lib/actions/reports.ts`: `DashboardData.unclosedMonthCount` 追加。`Promise.all` に `store.listFiscalPeriods` を1本追加し、取得済み `allTx` の月キーと合わせてカウント(viewer可の既存action内で完結)
+- `dashboard-screen.tsx`: 要対応カードに「未締めの月(前月以前)」項目追加(`AttentionItem` に `unit` propを追加し `Nヶ月` 表示、リンク先 `/closing`、allClear条件にも追加)。カード見出し右側に「今時間のAI提案 残りN回」Badge(0回時amber)。AI使用量は `useApiData(fetchAiUsage)` で本体とは独立して取得し、失敗・未取得時は何も表示しない(Alertではなく非表示フォールバック)
+- Issue指定のアラート(a)未入金・期限超過の請求書/(b)未処理領収書は既存の要対応カードに `/invoices`・`/receipts` 導線付きで実装済みだったため、不足していた(c)未締め月のみ追加
+- `src/lib/unclosed-months.test.ts`(新規): 7件。空・取引月のみ・当月除外・open期間月(前月で頭打ち)・closed期間除外・和集合・重複除去
+### 実行したテスト
+- `pnpm exec next typegen` — 成功(/api/ai/usage のroute型生成)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(38ファイル491件、skip 10)
+- `pnpm build` — 合格(`/api/ai/usage` が動的ルートとして登録)
+- Firebase Emulator tests — 未実施(Issue制約でEmulator禁止。firestore.rules変更なし)
+### 判断事項・次の担当者への注意事項
+- 「未締めの月」の定義: 締め単位が会計期間(年単位)しか存在しないため、月がclosed期間に含まれるかで判定した。open期間の月は取引有無に関わらず未締めとしてカウント(最大で期間長分)。取引があるが期間未作成の月も未締めに含める(期間作成→締めの導線が必要なため)
+- AI使用量はサーバー再起動でインメモリの消費数がリセットされる既知の性質(rate-limit.tsのコメントどおり最良努力制限)。表示値は参考値
+- `fetchAiUsage` はセッション切れ時の再取得リトライ(callApi相当)を持たない。補助表示のため失敗時は非表示のまま
 ## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
 - Worktree: custom-accounts
 ### 実装内容
