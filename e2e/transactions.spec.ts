@@ -72,3 +72,45 @@ test("取引を削除すると一覧から消える", async ({ page }) => {
   ).not.toBeVisible();
   await expect(page.getByText("取引はまだありません")).toBeVisible();
 });
+
+test("必須項目が空だと検証エラーが表示され登録されない", async ({ page }) => {
+  await page.goto("/transactions");
+  await page.getByRole("button", { name: "取引を登録" }).click();
+  const form = page.locator("form");
+  // 金額・勘定科目が未入力のまま送信する
+  await form.getByRole("button", { name: "下書きとして登録" }).click();
+
+  const alert = page
+    .getByRole("alert")
+    .filter({ hasText: "勘定科目を選択してください" });
+  await expect(alert).toContainText("金額は1円以上で入力してください");
+  // フォームは開いたままで、一覧には何も追加されない
+  await expect(
+    page.getByText("取引はまだありません"),
+  ).toBeVisible();
+});
+
+test("月送りと種別フィルタで一覧を絞り込める", async ({ page }) => {
+  await createTransactionDraft(page);
+  const row = page.getByRole("row", { name: /テスト商店/ });
+  await expect(row).toBeVisible();
+
+  // 前月に移ると対象外になり空表示、今月に戻すと再び見える
+  await page.getByRole("button", { name: "← 前月" }).click();
+  await expect(row).not.toBeVisible();
+  await expect(
+    page.getByText(/の取引はまだありません/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "翌月 →" }).click();
+  await expect(row).toBeVisible();
+
+  // 種別フィルタ: 「収入」では消え、「支出」では残る
+  const typeFilter = page.getByRole("combobox", { name: "種別で絞り込み" });
+  await typeFilter.selectOption({ label: "収入" });
+  await expect(row).not.toBeVisible();
+  await expect(
+    page.getByText("条件に一致する取引がありません"),
+  ).toBeVisible();
+  await typeFilter.selectOption({ label: "支出" });
+  await expect(row).toBeVisible();
+});
