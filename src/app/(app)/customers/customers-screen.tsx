@@ -19,7 +19,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
-  formIssuesMessage,
+  issuesByField,
   LoadingBlock,
   PageHeader,
   TextInput,
@@ -46,16 +46,18 @@ function CustomerForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [email, setEmail] = useState(initial?.email ?? "");
   const [address, setAddress] = useState(initial?.address ?? "");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = parseForm(customerSchema, { name, email, address });
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setError(undefined);
+    setFieldErrors({});
     try {
       await onSubmit({
         name: parsed.data.name,
@@ -70,7 +72,7 @@ function CustomerForm({
   return (
     <form onSubmit={submit} noValidate className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field label="顧客名">
+        <Field label="顧客名" error={fieldErrors.name}>
           <TextInput
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -78,7 +80,7 @@ function CustomerForm({
             required
           />
         </Field>
-        <Field label="メールアドレス">
+        <Field label="メールアドレス" error={fieldErrors.email}>
           <TextInput
             type="email"
             value={email}
@@ -86,7 +88,7 @@ function CustomerForm({
             placeholder="例: billing@example.co.jp"
           />
         </Field>
-        <Field label="住所">
+        <Field label="住所" error={fieldErrors.address}>
           <TextInput
             value={address}
             onChange={(e) => setAddress(e.target.value)}
@@ -94,6 +96,9 @@ function CustomerForm({
           />
         </Field>
       </div>
+      {fieldErrors._form && (
+        <Alert tone="error">{fieldErrors._form}</Alert>
+      )}
       {error && <Alert tone="error">{error}</Alert>}
       <div className="flex gap-2">
         <Button type="submit" loading={busy}>

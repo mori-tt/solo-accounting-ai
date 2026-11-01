@@ -56,7 +56,7 @@ function AttentionItem({
   return (
     <Link
       href={href}
-      className="flex items-center justify-between rounded-md border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800"
+      className="flex items-center justify-between rounded-md border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-indigo-500 dark:border-zinc-800 dark:hover:bg-zinc-800"
     >
       <span className="text-zinc-600 dark:text-zinc-300">{label}</span>
       <Badge tone={count === 0 ? "green" : danger ? "red" : "amber"}>
@@ -184,37 +184,39 @@ export function DashboardScreen() {
               description="取引一覧または経費登録から登録してください"
             />
           ) : (
-            <table className={tableClass}>
-              <thead>
-                <tr>
-                  <th>日付</th>
-                  <th>種別</th>
-                  <th>科目</th>
-                  <th className="text-right">金額</th>
-                  <th>状態</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recentTransactions.map((t) => (
-                  <tr key={t.id}>
-                    <td className="whitespace-nowrap">{t.date}</td>
-                    <td>{TYPE_LABELS[t.type] ?? t.type}</td>
-                    <td>{accountLabel(t.account)}</td>
-                    <td className="text-right">
-                      <Amount value={t.amount} />
-                    </td>
-                    <td>
-                      <StatusBadge kind="transaction" status={t.status} />
-                      {suggestionTargets.has(t.id) && (
-                        <span className="ml-1">
-                          <Badge tone="indigo">AI</Badge>
-                        </span>
-                      )}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className={tableClass}>
+                <thead>
+                  <tr>
+                    <th>日付</th>
+                    <th>種別</th>
+                    <th>科目</th>
+                    <th className="text-right">金額</th>
+                    <th>状態</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.recentTransactions.map((t) => (
+                    <tr key={t.id}>
+                      <td className="whitespace-nowrap">{t.date}</td>
+                      <td>{TYPE_LABELS[t.type] ?? t.type}</td>
+                      <td>{accountLabel(t.account)}</td>
+                      <td className="text-right">
+                        <Amount value={t.amount} />
+                      </td>
+                      <td>
+                        <StatusBadge kind="transaction" status={t.status} />
+                        {suggestionTargets.has(t.id) && (
+                          <span className="ml-1">
+                            <Badge tone="indigo">AI</Badge>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>

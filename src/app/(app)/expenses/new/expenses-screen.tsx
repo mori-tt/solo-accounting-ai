@@ -23,7 +23,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
-  formIssuesMessage,
+  issuesByField,
   LoadingBlock,
   NumberInput,
   PageHeader,
@@ -54,6 +54,7 @@ export function ExpensesScreen() {
   const [taxCategory, setTaxCategory] = useState<TaxCategory>("taxable");
   const [taxAmount, setTaxAmount] = useState("");
   const [paymentDueDate, setPaymentDueDate] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [doneMessage, setDoneMessage] = useState<string>();
@@ -79,11 +80,12 @@ export function ExpensesScreen() {
     };
     const parsed = parseForm(expenseSchema, input);
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setBusy(true);
     setError(undefined);
+    setFieldErrors({});
     setDoneMessage(undefined);
     try {
       await callApi(() =>
@@ -136,7 +138,7 @@ export function ExpensesScreen() {
         <Card className="mb-6">
           <form onSubmit={submit} noValidate className="flex flex-col gap-3">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Field label="日付">
+              <Field label="日付" error={fieldErrors.date}>
                 <TextInput
                   type="date"
                   value={date}
@@ -144,7 +146,7 @@ export function ExpensesScreen() {
                   required
                 />
               </Field>
-              <Field label="金額(円)">
+              <Field label="金額(円)" error={fieldErrors.amount}>
                 <NumberInput
                   value={amount}
                   min={1}
@@ -154,7 +156,7 @@ export function ExpensesScreen() {
                   required
                 />
               </Field>
-              <Field label="勘定科目">
+              <Field label="勘定科目" error={fieldErrors.account}>
                 <Select
                   value={account}
                   onChange={(e) => setAccount(e.target.value)}
@@ -168,7 +170,7 @@ export function ExpensesScreen() {
                   ))}
                 </Select>
               </Field>
-              <Field label="取引先">
+              <Field label="取引先" error={fieldErrors.counterparty}>
                 <TextInput
                   value={counterparty}
                   onChange={(e) => setCounterparty(e.target.value)}
@@ -177,7 +179,7 @@ export function ExpensesScreen() {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Field label="消費税区分">
+              <Field label="消費税区分" error={fieldErrors.taxCategory}>
                 <Select
                   value={taxCategory}
                   onChange={(e) =>
@@ -191,7 +193,7 @@ export function ExpensesScreen() {
                   ))}
                 </Select>
               </Field>
-              <Field label="消費税額(円・任意)">
+              <Field label="消費税額(円・任意)" error={fieldErrors.taxAmount}>
                 <NumberInput
                   value={taxAmount}
                   min={0}
@@ -202,6 +204,7 @@ export function ExpensesScreen() {
               <Field
                 label="支払期日(任意)"
                 hint="未払管理する場合に入力"
+                error={fieldErrors.paymentDueDate}
               >
                 <TextInput
                   type="date"
@@ -209,7 +212,7 @@ export function ExpensesScreen() {
                   onChange={(e) => setPaymentDueDate(e.target.value)}
                 />
               </Field>
-              <Field label="摘要">
+              <Field label="摘要" error={fieldErrors.description}>
                 <Textarea
                   rows={1}
                   value={description}
@@ -217,6 +220,9 @@ export function ExpensesScreen() {
                 />
               </Field>
             </div>
+            {fieldErrors._form && (
+              <Alert tone="error">{fieldErrors._form}</Alert>
+            )}
             {error && <Alert tone="error">{error}</Alert>}
             {doneMessage && <Alert tone="info">{doneMessage}</Alert>}
             <div>

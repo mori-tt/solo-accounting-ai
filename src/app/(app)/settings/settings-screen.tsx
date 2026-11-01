@@ -28,7 +28,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
-  formIssuesMessage,
+  issuesByField,
   LoadingBlock,
   NumberInput,
   PageHeader,
@@ -61,6 +61,7 @@ function BusinessSettingsCard() {
   const [taxMode, setTaxMode] = useState<TaxMode>(
     (business?.taxMode as TaxMode) ?? "exempt",
   );
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,11 +74,12 @@ function BusinessSettingsCard() {
       taxMode,
     });
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setBusy(true);
     setError(undefined);
+    setFieldErrors({});
     setSaved(false);
     try {
       await callApi(() =>
@@ -98,14 +100,17 @@ function BusinessSettingsCard() {
       {isOwner ? (
         <form onSubmit={submit} noValidate className="flex flex-col gap-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="事業名">
+            <Field label="事業名" error={fieldErrors.name}>
               <TextInput
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
               />
             </Field>
-            <Field label="会計年度の開始月">
+            <Field
+              label="会計年度の開始月"
+              error={fieldErrors.fiscalYearStartMonth}
+            >
               <NumberInput
                 value={startMonth}
                 min={1}
@@ -115,7 +120,7 @@ function BusinessSettingsCard() {
                 required
               />
             </Field>
-            <Field label="消費税の課税方式">
+            <Field label="消費税の課税方式" error={fieldErrors.taxMode}>
               <Select
                 value={taxMode}
                 onChange={(e) => setTaxMode(e.target.value as TaxMode)}
@@ -128,6 +133,9 @@ function BusinessSettingsCard() {
               </Select>
             </Field>
           </div>
+          {fieldErrors._form && (
+            <Alert tone="error">{fieldErrors._form}</Alert>
+          )}
           {error && <Alert tone="error">{error}</Alert>}
           {saved && <Alert tone="info">保存しました</Alert>}
           <div>
@@ -164,6 +172,7 @@ function MembersCard() {
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"editor" | "viewer">("editor");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
@@ -177,11 +186,12 @@ function MembersCard() {
     e.preventDefault();
     const parsed = parseForm(memberInviteSchema, { email, role });
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setBusy(true);
     setError(undefined);
+    setFieldErrors({});
     try {
       await callApi(() => inviteMember(businessId ?? "", parsed.data));
       setEmail("");
@@ -223,58 +233,61 @@ function MembersCard() {
       ) : !data || data.length === 0 ? (
         <EmptyState title="メンバーがまだいません" />
       ) : (
-        <table className={tableClass}>
-          <thead>
-            <tr>
-              <th>UID</th>
-              <th>ロール</th>
-              {isOwner && <th></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((m) => (
-              <tr key={m.uid}>
-                <td className="font-mono text-xs">
-                  {m.uid}
-                  {m.uid === user?.uid && (
-                    <span className="ml-2 text-zinc-400">(あなた)</span>
-                  )}
-                </td>
-                <td>
-                  {isOwner && m.role !== "owner" && m.uid !== user?.uid ? (
-                    <Select
-                      className="w-28"
-                      value={m.role}
-                      onChange={(e) =>
-                        void changeRole(
-                          m.uid,
-                          e.target.value as "editor" | "viewer",
-                        )
-                      }
-                    >
-                      <option value="editor">編集者</option>
-                      <option value="viewer">閲覧者</option>
-                    </Select>
-                  ) : (
-                    <StatusBadge kind="role" status={m.role} />
-                  )}
-                </td>
-                {isOwner && (
-                  <td>
-                    {m.uid !== user?.uid && m.role !== "owner" && (
-                      <Button
-                        variant="danger"
-                        onClick={() => setRemoveTarget(m.uid)}
-                      >
-                        削除
-                      </Button>
+        <div className="overflow-x-auto">
+          <table className={tableClass}>
+            <thead>
+              <tr>
+                <th>UID</th>
+                <th>ロール</th>
+                {isOwner && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((m) => (
+                <tr key={m.uid}>
+                  <td className="font-mono text-xs">
+                    {m.uid}
+                    {m.uid === user?.uid && (
+                      <span className="ml-2 text-zinc-400">(あなた)</span>
                     )}
                   </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <td>
+                    {isOwner && m.role !== "owner" && m.uid !== user?.uid ? (
+                      <Select
+                        className="w-28"
+                        aria-label="ロール変更"
+                        value={m.role}
+                        onChange={(e) =>
+                          void changeRole(
+                            m.uid,
+                            e.target.value as "editor" | "viewer",
+                          )
+                        }
+                      >
+                        <option value="editor">編集者</option>
+                        <option value="viewer">閲覧者</option>
+                      </Select>
+                    ) : (
+                      <StatusBadge kind="role" status={m.role} />
+                    )}
+                  </td>
+                  {isOwner && (
+                    <td>
+                      {m.uid !== user?.uid && m.role !== "owner" && (
+                        <Button
+                          variant="danger"
+                          onClick={() => setRemoveTarget(m.uid)}
+                        >
+                          削除
+                        </Button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {error && (
@@ -290,7 +303,10 @@ function MembersCard() {
           className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800"
         >
           <div className="flex flex-wrap items-end gap-2">
-            <Field label="メンバー招待(メールアドレス)">
+            <Field
+              label="メンバー招待(メールアドレス)"
+              error={fieldErrors.email}
+            >
               <TextInput
                 type="email"
                 className="w-64"
@@ -300,7 +316,7 @@ function MembersCard() {
                 required
               />
             </Field>
-            <Field label="ロール">
+            <Field label="ロール" error={fieldErrors.role}>
               <Select
                 value={role}
                 onChange={(e) =>
@@ -315,6 +331,11 @@ function MembersCard() {
               招待する
             </Button>
           </div>
+          {fieldErrors._form && (
+            <Alert tone="error" className="mt-3">
+              {fieldErrors._form}
+            </Alert>
+          )}
         </form>
       )}
 
@@ -339,6 +360,7 @@ function NewBusinessCard() {
   const [name, setName] = useState("");
   const [startMonth, setStartMonth] = useState("1");
   const [taxMode, setTaxMode] = useState<TaxMode>("exempt");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
@@ -350,11 +372,12 @@ function NewBusinessCard() {
       taxMode,
     });
     if (!parsed.success) {
-      setError(formIssuesMessage(parsed.issues));
+      setFieldErrors(issuesByField(parsed.issues));
       return;
     }
     setBusy(true);
     setError(undefined);
+    setFieldErrors({});
     try {
       const created = await callApi(() =>
         createBusiness({
@@ -376,7 +399,7 @@ function NewBusinessCard() {
       <h2 className="mb-3 text-sm font-semibold">新しい事業を作成</h2>
       <form onSubmit={submit} noValidate className="flex flex-col gap-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="事業名">
+          <Field label="事業名" error={fieldErrors.name}>
             <TextInput
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -384,7 +407,10 @@ function NewBusinessCard() {
               required
             />
           </Field>
-          <Field label="会計年度の開始月">
+          <Field
+            label="会計年度の開始月"
+            error={fieldErrors.fiscalYearStartMonth}
+          >
             <NumberInput
               value={startMonth}
               min={1}
@@ -394,7 +420,7 @@ function NewBusinessCard() {
               required
             />
           </Field>
-          <Field label="消費税の課税方式">
+          <Field label="消費税の課税方式" error={fieldErrors.taxMode}>
             <Select
               value={taxMode}
               onChange={(e) => setTaxMode(e.target.value as TaxMode)}
@@ -407,6 +433,9 @@ function NewBusinessCard() {
             </Select>
           </Field>
         </div>
+        {fieldErrors._form && (
+          <Alert tone="error">{fieldErrors._form}</Alert>
+        )}
         {error && <Alert tone="error">{error}</Alert>}
         <div>
           <Button type="submit" loading={busy}>

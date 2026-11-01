@@ -17,13 +17,9 @@
 ## Log
 
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
-
 - Worktree: ocr-ui
-
 ### 実装内容
-
 Issue #21 のOCR基盤(`AI_OCR_PROVIDER=openai|none`)を画面へ接続した。依存追加なし。
-
 - `src/lib/ai/receipt-ocr.ts`(出口のみ変更): `isReceiptOcrAvailable(env)`(`createReceiptOcr()!==null` と同判定だがクライアント構築・警告出力なし。UIの有効判定用)と `isOcrSupportedMimeType(mime)` を公開
 - `src/app/api/ai/receipt-ocr/route.ts` 新規: `/api/ai/suggestions` のRoute Handlerパターン踏襲(requireViewer・ApiError・businessId検証・`{ok,data|error}`エンベロープ)
   - `GET ?businessId=` → `{ available }`。OCR設定可否のみ返す(鍵・内容は含まない)
@@ -37,23 +33,77 @@ Issue #21 のOCR基盤(`AI_OCR_PROVIDER=openai|none`)を画面へ接続した。
   - 証憑抽出提案の採用 → `decideAiSuggestion` 後に抽出値を登録フォームへコピー(保存は別操作)。紐付先取引宛の提案(科目・摘要)は採用時に `updateTransaction` で確定フィールドへ反映(ADR-0005の2ステップ)
   - linked状態の行に「科目をAI提案」(`runAiSuggestion`の`account_suggestion`。抽出/登録済み取引の値をinputに使用)
   - 取引宛提案も `targetType:"transaction"` で取得し、紐付先idで行に表示(証憑宛と併せて新しい順)
-
 ### 実行したテスト
-
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm exec next typegen` — 成功
 - `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(24ファイル300件、skip 10)
 - `pnpm build` — 合格(`/api/ai/receipt-ocr` が動的ルートとして登録)
-
 ### 未解決事項・次の担当者への注意事項
-
 - OCR実行経路は提案ドキュメントを作成しないため `run_ai` 監査も残らない。監査が必要なら既存 `POST /api/ai/suggestions`(kind=receipt_extraction)経由にするか、本ルートでもauditLogsを書く検討が必要
 - OCR route はIssue指定どおり `requireViewer`(書き込みなしの読み取り系)。外部APIコストの乱用が懸念される場合は `requireEditor` への引き上げを検討
 - 「領収書から登録」は createTransaction→linkReceipt の2リクエスト。link失敗時は孤立した下書き取引が残る(取引一覧から紐付/削除で回収可能)
 - HEIC/HEIFはアップロード可能だがOCR非対応のまま(事前にINVALID_INPUTで案内。Issue #21と同じ制約)
 - 抽出フローの型は `ReceiptExtractionPayload` をそのまま利用。`ReceiptOcrResult` は自信度・根拠・issuesを追加した応答shape(api-client.ts)
+## 2026-11-02: UX/アクセシビリティ仕上げ(Issue #35)
+- Worktree: ux-a11y
+- 変更内容: ui.tsx プリミティブのアクセシビリティ強化と、対象画面のフォームエラー inline 化・モバイル用テーブル overflow 対応
+- 変更ファイル:
+  - `src/components/ui.tsx`
+    - `Button`: focus-visible アウトライン、disabled 時の `aria-disabled` + `disabled:opacity-60` で視覚統一、loading 時 `aria-busy`
+    - `Field`: `<label>` 包み込みから `<label htmlFor>` + 子コントロールへの `useId` ベース id 注入へ変更。error 時 `aria-invalid`、error/hint を `aria-describedby` で参照(子が既に id/aria-describedby を持つ場合は尊重・連結)
+    - `inputClass` 系(TextInput/NumberInput/Select/Textarea): disabled 視覚 + `aria-invalid:` 時の赤枠/赤リング。`FileInput` に focus-visible アウトライン + disabled 視覚
+    - `issuesByField` 新設: `parseForm` の issues("path: message")をフィールドマップへ変換(パス無しは `_form`)
+    - `ConfirmDialog`: `aria-label` → `aria-labelledby`(見出し参照)に変更、開時にキャンセルボタンへ autoFocus
+    - `tableClass`: `th` を whitespace-nowrap に
+  - `src/app/login/login-screen.tsx`: email/password をフィールド下エラー化(認証エラーは Alert 維持)、モード切替に `aria-pressed` + focus-visible
+  - `src/app/(app)/settings/settings-screen.tsx`: 事業情報/新規事業/メンバー招待フォームをフィールド下エラー化、members テーブルに overflow-x-auto、ロール変更 Select に aria-label
+  - `src/app/(app)/customers/customers-screen.tsx`、`projects/projects-screen.tsx`、`expenses/new/expenses-screen.tsx`: 各登録/編集フォームをフィールド下エラー化(projects 編集時の手動チェックも fieldErrors に統一)
+  - `src/app/(app)/dashboard/dashboard-screen.tsx`: 最近の取引テーブルを overflow-x-auto 化、要対応リンクに focus-visible アウトライン
+  - `src/app/(app)/closing/closing-screen.tsx`: チェックリスト5テーブルを overflow-x-auto 化
+  - `src/components/ui.test.tsx` 新規: Field の htmlFor 関連付け/aria-invalid/aria-describedby/hint/既存 id 尊重 + issuesByField を6件検証
+- Checks:
+  - `pnpm install --frozen-lockfile` — 成功
+  - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存・対象外ファイル)
+  - `pnpm exec next typegen` / `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(25ファイル304件、skip 10)
+  - `pnpm build` — 合格
+- 備考:
+  - 破壊的操作の ConfirmDialog は対象画面では既に徹底済み(settings メンバー削除、closing 期間締め)のため変更不要。expenses の「支払済にする」はデータ喪失を伴わない状態更新のため確認ダイアログ対象外と判断
+  - `Field` の子は全箇所で単一コントロールのため cloneElement 注入で問題なし。app-shell/transactions 等の対象外ファイルからも同じ Field を利用しており、そちらにも htmlFor 関連付けが波及(ファイル自体は未変更)
+  - `formIssuesMessage` は対象外ファイル(app-shell/transaction-form/invoices-screen)が現役利用のため export を維持
+  - `aria-disabled` はネイティブ `disabled` と併記(冗長だが issue 要件・一貫性のため)。loading 中は disabled と併せて付与
+  - Emulator 系チェック(test:rules/test:emulators)は本タスクの指定チェック範囲外のため未実施
+## 2026-11-02: 本番ハードニング(Issue #34)
+- Worktree: prod-hardening
+- `src/lib/env.ts`(新規): 起動時env検証。必須 `NEXT_PUBLIC_FIREBASE_*` が
+  空なら `EnvValidationError`(不足キー名を列挙した明確なメッセージ)。
+  本番(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR!=true`)で Emulator host 環境変数が
+  残っていたら console.warn で警告(起動は継続)。
+  `src/lib/firebase/client.ts` の `getFirebaseApp()` から
+  `assertFirebaseClientEnvOnce()` として呼ぶ(検証は1回のみ・失敗時はメモ化しない)
+- エラー境界: `src/app/error.tsx` / `src/app/not-found.tsx` /
+  `src/app/global-error.tsx` を新設(日本語メッセージ・再試行導線)。
+  既存 `src/app/(app)/error.tsx` を拡張(console.error による診断ログ・
+  本番サーバーエラーの digest 表示・ダッシュボードへの復帰導線)
+- `/api/ai/*` への簡易レート制限: `src/lib/api/rate-limit.ts`(新規)。
+  インメモリ Map の固定ウィンドウ方式・businessId単位
+  (サーバーレスではインスタンス単位の最良努力とコメント明記)。
+  提案生成 POST=60回/時、一覧 GET・承認/却下 PATCH=240回/時。
+  超過時は `RateLimitError`→HTTP 429 + `{ok:false,error:{code:"RATE_LIMITED"}}` + Retry-After ヘッダ
+- APIエラーレスポンス統一: `toErrorResponse()` を `src/lib/api/result.ts` に追加し、
+  全 Route Handler(api/ai/*・api/receipts/*・api/session)で共用する形に整理。
+  `/api/session` は `error` が文字列だった非準拠レスポンスを `{code,message}` 形式に修正。
+  あわせて INTERNAL を 400→500 に修正、receipts POST で NOT_FOUND→404 が抜けていたのを統一
+- `ApiError.code` に `RATE_LIMITED` を追加
+- README: 前提(Node 26+/pnpm/JDK 21+)/環境変数・Emulator セットアップ/
+  コマンド一覧(test:rules・test:emulators 追記)/本番 Firebase 切替手順/
+  デプロイ指針を整備。.env.example の変数一覧と整合
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm test` — 合格(26ファイル314件、skip 10。env.test.ts 11件・rate-limit.test.ts 5件を新規追加)
+- `pnpm build` — 成功
+- Emulator・`next dev` は制約により未起動(Rules/E2E テストは未実施)
 
 ## 2026-11-02: AI提案のUI接続(Issue #20)
 
