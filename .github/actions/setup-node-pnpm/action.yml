@@ -1,0 +1,24 @@
+name: Setup Node.js and pnpm
+description: >-
+  Node.js 20 + pnpm(package.json の packageManager バージョン)をセットアップし、
+  pnpm store をキャッシュして依存関係をインストールする。
+
+runs:
+  using: composite
+  steps:
+    # version 未指定: package.json の packageManager フィールド(pnpm@12.16.1)から解決される
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        run_install: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        # pnpm store ディレクトリをキャッシュ(pnpm-lock.yaml をキーに使用)
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
