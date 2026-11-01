@@ -16,6 +16,36 @@
 
 ## Log
 
+## 2026-11-02: 年次集計・消費税区分・決算書帳票(Issue #42)
+- Worktree: tax-filing
+- `pnpm install --frozen-lockfile` — 成功。依存追加なし
+### 実装内容
+- `src/lib/accounting/domain/yearly.ts`(新規): `buildYearlyReport`(会計年度開始月から12か月の月別収支推移+科目別年間合計。fiscal.ts の `fiscalPeriodRange` で期間決定、confirmed/locked の income/expense のみ・月次集計と同じ除外条件)と `buildConsumptionTaxSummary`(区分別集計。課税は税率別に標準/軽減を分割、未分類バケット付き。取引自身の taxCategory を優先し無ければ紐付く Expense の区分をフォールバック使用。課税は税込金額からの内税推定 `computeTaxAmount`、支出側は Expense.taxAmount の申告額を優先。`filingAmounts` は `computeConsumptionTaxFiling` への税率別入力)
+- `src/lib/accounting/domain/filing.ts`(新規): `buildIncomeStatement`(accountTotals → 収入金額/売上原価(科目コード `purchases` のみ)/経費/差引金額)、`computeNetIncome`(差引金額 − 専従者給与 − 青色申告特別控除 = 所得金額。控除上限65万円・所得を上限に切り詰め・0未満不可)、`BLUE_RETURN_DEDUCTION_MAX`。summary.ts の既存関数は未変更
+- `src/lib/accounting/types.ts`: `Transaction` に任意フィールド `taxCategory`/`taxRate` を追加(未設定=税導入前データの後方互換)
+- `src/lib/validation/schemas.ts`: `taxCategorySchema` を切り出し(expenseSchema 側も共有化)。`transactionSchema` に `taxCategory`/`taxRate` を `.nullable().optional()` で追加 + 税率は課税のみの refine
+- `src/lib/accounting/services/transactions.ts`: `normalizeTransactionTax` 新設(課税の税率省略→standard、課税以外への税率付与→INVALID_INPUT)。`registerTransaction` が正規化後の値を保存
+- `src/lib/actions/transactions.ts`: create/update に税フィールドを配線。**更新セマンティクスは `undefined`(省略)=既存値保持・`null`=クリア**(receipts-screen 等の税フィールドを送らない既存呼び出しで区分が消えないようにするため。フォームは必ず値か null を送る)。区分が課税でなくなった場合は保持中の税率を落としてから正規化
+- `src/app/(app)/transactions/transaction-form.tsx`: 「消費税区分」select を追加(未指定/課税10%/課税軽減8%/非課税/不課税(対象外)/免税)。課税は税率込みの1セレクトに畳み込み、送信時に `taxCategory+taxRate` へ展開。transactions-screen 本体は無変更
+- `src/app/(app)/reports/actions.ts`: `getYearlyReport`(年度範囲の取引+経費を読み、年次集計・区分別消費税集計・申告レベル概算を返す。`requireViewer`+`getStore`、年度1900..2200検証。簡易課税は事業区分未設定のため taxFiling=null)と `getFilingStatement`(事業名+IncomeStatement)を追加。集計は保存しない
+- 新規ページ: `reports/yearly`(年度ナビ・月別収支推移表・科目別年間合計表・消費税区分別集計表・申告概算)、`reports/filing`(収支内訳書様式レイアウト: 収入金額/売上原価/経費/差引金額 + 専従者給与・青色申告特別控除の入力欄(0〜65万検証) + 所得金額。`@media print` でナビ/入力欄を隠す印刷対応、`filing-sheet.tsx` を帳票部品として分離)。共通の `reports/year-nav.tsx` を新設。いずれも `useApp`/`useApiData`/`PageHeader` の既存レポートパターン踏襲
+- `src/components/app-shell.tsx`: ナビに「年次レポート」(`/reports/yearly`)と「決算書(収支内訳書)」(`/reports/filing`)を1行ずつ追加
+### 実行したテスト
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(31ファイル390件、skip 10。`domain/yearly.test.ts`・`domain/filing.test.ts` 新規 + `services/transactions.test.ts` に税正規化6件追加)
+- `pnpm build` — 合格(`/reports/yearly`・`/reports/filing` が静的路由として生成)
+- Firebase Emulator tests — 未実施(タスク指定により Emulator 起動禁止。firestore.rules 未変更)
+### 変更範囲について(重要な判断)
+- Issue の変更範囲指定は「reports新規ページ/domain新規ファイル/transactionsフォーム/app-shellナビ/queries.ts・api-client.ts」だが、**税区分を永続化するため Transaction 型・zodスキーマ・service正規化・Server Action への配線(types.ts/schemas.ts/services/transactions.ts/actions/transactions.ts)が必須のため拡張した**。クライアントクエリ層(queries.ts/api-client.ts)はレポートが Server Action 経由のため変更不要で未変更
+- settings画面・csv.ts・accounts.ts・firestore.rules は未変更。`validTransaction` の rules はフィールド追加を制限しないため rules 変更不要
+### 未解決事項・次の担当者への注意事項
+- 取引の税区分は税込金額の内税計算による推定表示。Expense のような実消費税額フィールドは取引側に持たないため、申告概算は概算値である旨を帳票上で明示すべき余白あり
+- 売上原価の判定は科目コード `purchases` のみ(accounts.ts の勘定体系が限定的なため)。勘定体系拡張時は振り分け定数の見直しが必要
+- 簡易課税のみなし仕入率(事業区分)は Business に設定項目がなく未対応のため、yearly の申告概算では null を返し画面側で非表示にしている
+- 「決算書」は収支内訳書(一般用)様式風レイアウトで、青色申告決算書(不動産/農業用)や e-Tax 連携は対象外
+- 領収書→取引更新経路(updateTransaction の税フィールド省略)は既存値保持セマンティクスで保護済みだが、将来の呼び出し元追加時に同セマンティクスが伝わるよう schemas.ts コメントで明記した
+
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
 ### 実装内容

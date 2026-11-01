@@ -31,6 +31,8 @@ const NAV_ITEMS = [
   { href: "/reports/journal", label: "仕訳帳" },
   { href: "/reports/ledger", label: "総勘定元帳" },
   { href: "/reports/trial-balance", label: "試算表" },
+  { href: "/reports/yearly", label: "年次レポート" },
+  { href: "/reports/filing", label: "決算書(収支内訳書)" },
   { href: "/closing", label: "決算チェック" },
   { href: "/settings", label: "設定" },
 ] as const;

@@ -49,6 +49,10 @@ export interface Transaction {
   description: string;
   receiptIds: string[];
   status: TransactionStatus;
+  /** 消費税区分。未設定は区分未分類(税フィールド導入前データの後方互換) */
+  taxCategory?: TaxCategory;
+  /** 税率区分。taxCategory=taxable のときのみ有効(省略時 standard) */
+  taxRate?: ConsumptionTaxRate;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
