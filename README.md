@@ -36,7 +36,7 @@ Emulator接続の設定になっている。そのまま `pnpm dev` で動く。
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm test` | Vitest(単体テスト) |
 | `pnpm test:watch` | Vitest ウォッチモード |
-| `pnpm test:e2e` | Playwright E2E(dev serverを自動起動) |
+| `pnpm test:e2e` | Playwright E2E。Auth/Firestore/Storage Emulator を `emulators:exec` で自動起動し、dev serverも自動起動(port 3000)。JDK 21+ 必須 |
 | `pnpm emulators` | Firebase Emulator Suite 起動(UI: http://localhost:4000) |
 
 Firestore/Storage の Emulator には **JDK 21以上** が必要(firebase-tools 15系)。
@@ -54,7 +54,11 @@ Emulator起動中に `pnpm dev` を使うと、アプリは自動でEmulatorに�
 - `pnpm typecheck` は `LayoutProps` 等のグローバル型に依存する。
   初回は `pnpm exec next typegen` で生成するか `pnpm dev` / `pnpm build`
   を一度実行してから行うこと(生成物は `.next/` 配下でgit管理外)。
-- E2Eは `pnpm test:e2e`。dev serverを自動起動する(port 3000)。
+- E2Eは `pnpm test:e2e`。`firebase emulators:exec` が auth/firestore/storage
+  Emulator を起動し、Playwright が dev server を自動起動する(port 3000)。
+  Emulator は実行ごとに初期化されるため、各テストは一意のメールアドレスで
+  新規ユーザーを作成してデータを分離している(e2e/helpers.ts 参照)。
+  実行には `JAVA_HOME=/opt/homebrew/opt/openjdk@21` 等の JDK 21+ が必要。
 
 ## Directory
 

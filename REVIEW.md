@@ -56,6 +56,141 @@
 - worktree 作成直後は `pnpm install` 後に `pnpm exec next typegen` も必要(`.next` 未生成だと `LayoutProps` 未解決で typecheck が落ちる)
 - `Field` コンポーネントの `error` prop は未使用のまま(エラーはフォーム単位の Alert に集約する現行方針を維持)
 
+## 2026-11-02: GitHub Actions CI の構築
+
+- Worktree: ci-setup
+
+### 実装内容
+
+- `.github/workflows/ci.yml`: `push`(main)と `pull_request` で起動。`lint` / `typecheck` / `vitest` / `build` / `test:rules` の5ジョブを並列実行。`permissions: contents: read`、同一 ref の古い実行を `concurrency` でキャンセル
+- `.github/actions/setup-node-pnpm/action.yml`: 全ジョブ共通の複合アクション
+  - `pnpm/action-setup@v4`(version 未指定 → package.json の `packageManager: pnpm@12.16.1` から解決)
+  - `actions/setup-node@v4`(Node 20、`cache: pnpm` で pnpm store をキャッシュ)
+  - `pnpm install --frozen-lockfile`
+- `typecheck` ジョブ: tsconfig が `.next/types` を include するため `pnpm exec next typegen` で生成型を作ってから `pnpm typecheck`
+- `test-rules` ジョブ: `actions/setup-java@v4`(distribution: temurin, java-version: 21)で JDK 21 を導入後、`pnpm test:rules`(devDependency の firebase-tools 経由で `emulators:exec --only firestore,storage`)
+
+### 実行した検証
+
+- `actionlint .github/workflows/ci.yml` — 合格
+- YAML パース(ci.yml / action.yml) — 合格
+- `pnpm exec next typegen` — 合格(`.next/types` 生成を確認)
+- ワークフロー自体の実行は未検証。PR 作成後に GitHub Actions 上で確認すること
+
+### 備考
+
+- 変更は `.github/` 配下のみ。package.json の変更不要(scripts・packageManager は既存のまま利用)
+- Emulator JAR(`~/.cache/firebase/emulators`)のキャッシュは未実装。初回実行でダウンロードされるため、起動が遅い場合は `actions/cache` で追加可能
+- `test:e2e`(Playwright)は要件外のため未追加。必要なら `playwright install --with-deps` を伴う別ジョブとして追加する
+
+## 2026-11-02: コアフローのE2Eテスト整備
+
+- Worktree: e2e-core-flows
+
+### 実装内容
+
+- `package.json`: `test:e2e` を `firebase emulators:exec --only auth,firestore,storage --project demo-solo-accounting-ai 'playwright test'` に変更。REVIEW_TEST.md T3 対応 — 従来は Emulator 非起動のまま E2E を実行しており、認証・Server Action 経路が未検証だった。Emulator は実行ごとにメモリ上で初期化されるためテストデータは各実行でクリーン
+- `playwright.config.ts`: `expect.timeout` を 20s、`actionTimeout` 15s、`navigationTimeout` 45s に設定(dev server の初回 Turbopack コンパイルと Server Action 往復を考慮)
+- `e2e/helpers.ts`: E2E共通ヘルパー。`signUp`/`signIn`/`createFirstBusiness`/`signUpAndCreateBusiness`/`signOut`/`createTransactionDraft`/`uniqueEmail`/`datePlusDays`。テスト間の干渉を避けるため、各テストが一意のメールアドレスで新規ユーザーを作成し、専用の事業を作る設計(businessId で自然に分離される)
+- `e2e/fixtures/receipt.png`: 領収書アップロード用の 1x1 PNG
+- 新規 spec(既存 `home.spec.ts` は維持):
+  - `auth.spec.ts`: 新規登録→事業作成→ログアウト→再ログイン(事業引継ぎ)、誤パスワードのエラー表示、未ログイン時の /login リダイレクト
+  - `transactions.spec.ts`: 下書き登録→行展開→確定、状態フィルタ、編集(金額変更)、削除(ConfirmDialog)
+  - `expenses.spec.ts`: 経費登録→一覧表示(未払/下書き)→取引一覧で確定→経費側へ反映、未払→支払済
+  - `sales.spec.ts`: 顧客→案件→請求書作成(下書き)→発行→入金消込→入金済み、顧客未登録時の導線表示
+  - `receipts.spec.ts`: PNG アップロード→未処理→取引へ紐付け→紐付済み、アーカイブ→確認ダイアログ→アーカイブ済み
+  - `closing.spec.ts`: 期間作成→下書きで締め不可→確定→締め実行→取引 locked 化(編集/削除ボタン消失)、月次レポートの科目別内訳と集計保存
+
+### セレクタ上の注意(次の担当者向け)
+
+- `<select>` は `getByLabel` ではなく `getByRole("combobox", { name })` で取ること。`Field` は `<label>` で control を包む構造のため、label テキストに option 群が混入し `exact` 一致が失敗する
+- 金額表示は `formatYen`(ja-JP currency)で全角 `￥`(U+FFE5)になる。アサーションは `￥12,000` のように全角円記号で書く
+- 取引一覧で行展開すると、編集フォーム内 input の value が展開行のアクセシブル名に混入し `getByRole("row", {name})` が複数解決になる。値でなくテキストで絞る場合は `locator("tbody tr", {hasText})` を使う
+- オンボーディングが表示された時点でセッションCookieは設定済み(`/api/session` POST 完了後に signed_in になる)ため、直後に Server Action を呼んでも安全
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(18ファイル213件、skip 7)
+- `pnpm build` — 合格
+- `pnpm test:e2e` — 合格(chromium 15件、約9秒。`JAVA_HOME=/opt/homebrew/opt/openjdk@21` で実行)
+- `pnpm test:rules` — 合格(2ファイル62件)
+
+### 未解決事項・次の担当者への注意事項
+
+- E2E は chromium のみ。firefox/webkit 追加時は projects へ追記 + `playwright install`
+- Emulator 起動には JDK 21+ が必要(PATH が JDK17 なら `JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm test:e2e`)
+- 各テストは毎回 signup→事業作成を UI 経由で行うため多少のオーバーヘッドがある(15件で約9秒)。遅くなったら Emulator REST API 経由のユーザー作成に切替え可能だが、現状は実フローで検証できる利点を優先した
+- カバーしていない領域: 設定画面(メンバー招待・事業設定)、AI提案カードの操作、事業切替(複数事業)、viewer ロールの読み取り専用 UI
+
+## 2026-11-02: 実LLMプロバイダ(OpenAI)の実装
+
+- Worktree: ai-llm-provider
+
+### 実装内容
+
+- `openai@7.43.0` を `pnpm add`(選択理由は備考)。SDK利用コードは `src/lib/ai/` 内に閉じ込め、依存追加の `package.json`/`pnpm-lock.yaml` 変更はこのレーンのみ
+- `src/lib/ai/prompts.ts` 新規: 5種類の `SuggestionKind` ごとのタスク文・Structured Outputs用JSON Schema(strictサブセットのみ使用)・`sanitizeInput`(allowlist外フィールドの除去・文字列切り詰め・`duplicate_detection`取引の id/amount/date 射影・`monthly_explanation`の数値+yearMonthのみ射影・件数/文字数上限)で送信データを最小化
+- `src/lib/ai/llm-provider.ts` 新規:
+  - `LLMProvider implements AIProvider`: 注入された `LLMCaller` でJSON生成→`JSON.parse`して返却(形の検証は既存 schemas.ts に委譲)。caller例外は `provider_error`、非JSON出力は `invalid_response` の `AIProcessingError` に正規化し、SDKの生エラーメッセージ(証憑内容を含み得る)は伝播させない
+  - `createOpenAICaller`: OpenAI Responses API(`json_schema`/`strict: true`、`store: false` でOpenAI側にレスポンスを保存させない)を呼ぶcaller
+  - `createAIProvider`: 環境変数で選択。`AI_LLM_PROVIDER=openai` かつ `OPENAI_API_KEY` 設定時のみLLMProvider(`OPENAI_MODEL`でモデル上書き可、既定 `gpt-5-mini`)。未設定・`heuristic`・未知値・キー欠落は `HeuristicAIProvider` へフォールバック(固定文言のwarnのみ、鍵・入力値は出力しない)
+  - `assertServerSide`: `typeof window !== "undefined"` で例外。APIキーは非`NEXT_PUBLIC_`環境変数経由のためサーバーのみで読める。`server-only`パッケージはroute handler/vitest等の非RSCコンテキストでindex.js(throw)に解決されるため不採用
+- `src/lib/ai/llm-provider.test.ts` 新規(`@vitest-environment node`): ファクトリの分岐・フォールバック、エラー正規化、サニタイズのPII除去、`AISuggestionService`経由で `run_ai` がauditLogsに記録されること(監査要件は既存service.tsの`appendAudit`で担保)を確認
+- 環境変数: `AI_LLM_PROVIDER` / `OPENAI_API_KEY` / `OPENAI_MODEL`(`.env.example`は変更対象外のため本ファイルに記録)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件は既存のreceipts-screen `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(19ファイル229件、skip 7。新規テスト13件)
+- `pnpm build` — 合格(全ルートstatic/dynamic生成)
+- Firebase Emulator tests — 未実施(JDK 21+不在の環境制約。rules変更なしのため実害なし)
+
+### 備考
+
+- SDK選択理由: `openai` はランタイム依存ゼロ(2026-11-02時点 v7.43.0)。`@anthropic-ai/sdk` は3依存(standardwebhooks等)、`@google/genai` は `google-auth-library`/`protobufjs` を含み最小依存要件に反するため不採用。バージョンは7日ルールに従い2026-10-22公開の 7.43.0(最新7.47.0は公開2日前で回避)
+- AI呼出のauditLogs記録は `AISuggestionService.execute` の `appendAudit("run_ai")` が既に担保しており、provider側は対象識別情報以外を記録しない設計を維持(個人情報・証憑内容のログ出力なし)
+- `createAIProvider` はまだどこからも呼ばれない(サーバーアクション/Route Handler側の接続は別タスク)。接続側では `AISuggestionService({ store: new FirestoreSuggestionStore(db), provider: createAIProvider() })` の形を想定
+- `store: false` は単発のステートレス呼出し前提。将来 `previous_response_id` 等の会話継続が必要になった場合は再検討
+## 2026-11-02: 消費税計算エンジンの実装
+
+- Worktree: tax-calc-engine
+
+### 実装内容
+
+- `src/lib/accounting/domain/tax.ts` 新規: 消費税計算の純粋関数群。Firebase非依存・副作用なしで service 層(AccountingService / services/*)から直接呼べる
+  - 端数処理はBusiness統一ルールに従い常に切り捨て。税率・みなし仕入率は既約分数(10%: 税抜1/10・税込1/11、8%: 2/25・2/27)で保持し、浮動小数点を介さない整数演算で算出(ADR-0002の構造的誤差排除)
+  - `computeTaxAmount(amount, {basis, rate})`: 税込/税抜いずれの基準でも標準10%・軽減8%の税額を算出。0円許容・負額/小数/非安全整数を拒否、乗算オーバーフローも INVALID_AMOUNT
+  - `computeNetAmount` / `sumTaxAmounts`(明細ごと切り捨て→合算)
+  - `isTaxableCategory` / `maxPossibleTaxAmount` / `assertTaxAmountConsistent`
+  - `computeConsumptionTaxPayable(mode, totals, {businessClass})`: taxMode 別の納付額。exempt→0、standard→outputTax−inputTax(負数=還付相当)、simple→みなし仕入率(第1〜6種=90〜40%)で控除額を切り捨て算出。simpleはbusinessClass必須、他方式では指定拒否
+- `src/lib/accounting/domain/types.ts`: `TaxMode` 型(exempt/simple/standard)を追加(FIRESTORE_SCHEMAのbusinesses.taxMode)
+- `src/lib/accounting/domain/validate.ts`: `validateExpenseInput` の税額チェックを「taxAmount ≤ amount」の粗い上限から `assertTaxAmountConsistent` へ置き換え(前回未解決事項の解消)。非課税・免税・不課税は税額0固定、課税仕入は税抜10%相当を上限とする
+- `src/lib/accounting/index.ts`: `./domain/tax` を export 追加
+- `src/lib/accounting/domain/tax.test.ts`: 25件(税率別・税込/税抜・境界端数・0円・不正入力・税区分別整合・3方式の納付額・みなし仕入切捨て)
+
+### 設計上の判断
+
+- `assertTaxAmountConsistent` の課税上限は `floor(amount×10%)`(税抜標準税率)。税込解釈(×10/110)より厳しくないが、Businessの会計方式(税込/税抜)を入力検証層が知らないため「いずれの解釈でもあり得る最大値」を採用。厳密な税込基準の検証はBusiness設定を引き回すようになった段階で絞る
+- 本則課税の還付(控除超過)は負数の taxPayable で表現し、0でクランプしない(還付申告の根拠額になるため)
+- `services/`(新世代)は別のTaxCategory表記(snake_case)を使うため本エンジンとは未接続。接続は表記統一と合わせて別タスク
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格(`pnpm build` による型生成後)
+- `pnpm test` — 合格(19ファイル238件、skip 7)
+- `pnpm build` — 合格(全ルート static prerender)
+- Firebase Emulator tests — 該当なし(rules変更なし、ドメイン層のみ)
+
+### 未解決事項・次の担当者への注意事項
+
+- 消費税の申告レベルの厳密計算(課税標準額の千円未満切捨て、国税6.3%/地方税2.2%の内訳、軽減税率の按分)は未実装。確定申告対応時に拡張する
+- `domain/`(旧世代)と`services/`+トップレベル`*.ts`(新世代)の2系統が併存したまま。TaxCategory表記(camelCase/snake_case)やEntity型が二重定義されており、統合整理は別タスク
+- `validateExpenseInput` は旧世代 `AccountingService` 経路のバリデーションであり、新世代 `services/expenses.ts` 側の税額チェック(現状 nonNegative のみ)への適用は未対応
+
 ## 2026-11-02: `.next` symlink 除去と main のビルド破壊修復
 
 - Worktree: fix-next-symlink

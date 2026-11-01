@@ -7,6 +7,8 @@ export type TransactionStatus = "draft" | "confirmed" | "locked";
 
 export type TaxCategory = "taxable" | "nonTaxable" | "exempt" | "outOfScope";
 
+export type TaxMode = "exempt" | "simple" | "standard";
+
 export type ReceiptStatus = "unprocessed" | "linked" | "archived";
 
 export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue";
