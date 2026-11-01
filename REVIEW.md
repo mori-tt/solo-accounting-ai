@@ -16,6 +16,33 @@
 
 ## Log
 
+## 2026-11-02: GitHub Actions CI の構築
+
+- Worktree: ci-setup
+
+### 実装内容
+
+- `.github/workflows/ci.yml`: `push`(main)と `pull_request` で起動。`lint` / `typecheck` / `vitest` / `build` / `test:rules` の5ジョブを並列実行。`permissions: contents: read`、同一 ref の古い実行を `concurrency` でキャンセル
+- `.github/actions/setup-node-pnpm/action.yml`: 全ジョブ共通の複合アクション
+  - `pnpm/action-setup@v4`(version 未指定 → package.json の `packageManager: pnpm@12.16.1` から解決)
+  - `actions/setup-node@v4`(Node 20、`cache: pnpm` で pnpm store をキャッシュ)
+  - `pnpm install --frozen-lockfile`
+- `typecheck` ジョブ: tsconfig が `.next/types` を include するため `pnpm exec next typegen` で生成型を作ってから `pnpm typecheck`
+- `test-rules` ジョブ: `actions/setup-java@v4`(distribution: temurin, java-version: 21)で JDK 21 を導入後、`pnpm test:rules`(devDependency の firebase-tools 経由で `emulators:exec --only firestore,storage`)
+
+### 実行した検証
+
+- `actionlint .github/workflows/ci.yml` — 合格
+- YAML パース(ci.yml / action.yml) — 合格
+- `pnpm exec next typegen` — 合格(`.next/types` 生成を確認)
+- ワークフロー自体の実行は未検証。PR 作成後に GitHub Actions 上で確認すること
+
+### 備考
+
+- 変更は `.github/` 配下のみ。package.json の変更不要(scripts・packageManager は既存のまま利用)
+- Emulator JAR(`~/.cache/firebase/emulators`)のキャッシュは未実装。初回実行でダウンロードされるため、起動が遅い場合は `actions/cache` で追加可能
+- `test:e2e`(Playwright)は要件外のため未追加。必要なら `playwright install --with-deps` を伴う別ジョブとして追加する
+
 ## 2026-11-02: コアフローのE2Eテスト整備
 
 - Worktree: e2e-core-flows
