@@ -67,6 +67,7 @@ receipts(証憑ファイル)
 | ownerUid | string | 作成者 |
 | fiscalYearStartMonth | number | 会計年度開始月(1-12) |
 | taxMode | string | `exempt` / `simple` / `standard` 消費税課税方式 |
+| openingBalances | array | 期首残高 `{ fiscalYear, accountCode, amount }[]`。amountは円・整数、借方残高を正・貸方残高を負とする。任意 |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
 

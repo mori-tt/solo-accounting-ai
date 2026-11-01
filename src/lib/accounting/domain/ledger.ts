@@ -13,6 +13,9 @@ import type { TransactionEntity } from "./types";
 /** 取引の資金側の相手科目として使う現金勘定コード(科目マスタ外の内部コード) */
 export const CASH_ACCOUNT = "cash";
 
+/** 期首残高の相手科目として使う資本(元入金)勘定コード(科目マスタ外の内部コード) */
+export const OPENING_EQUITY_ACCOUNT = "opening_equity";
+
 /** 仕訳展開に必要な取引項目 */
 export type JournalTransaction = Pick<
   TransactionEntity,
@@ -88,6 +91,55 @@ export function buildJournal(
         compareISODate(a.date, b.date) ||
         a.transactionId.localeCompare(b.transactionId),
     );
+}
+
+/**
+ * 期首残高設定を繰越用の仮想仕訳へ展開する。
+ * 各残高は資本勘定(OPENING_EQUITY_ACCOUNT)を相手科目とする
+ * 貸借一致の仕訳になるため、仕訳列にそのまま連結しても
+ * 総勘定元帳・試算表の貸借一致が保たれる。
+ * - amount > 0(借方残高・資産): 借方=accountCode / 貸方=元入金
+ * - amount < 0(貸方残高・負債): 借方=元入金 / 貸方=accountCode
+ *
+ * date には「繰越を反映させたい期間より前」の日付を指定する
+ * (会計年度の期首残高なら前年度末)。期首当日より前の日付なら
+ * どの月の帳簿でも明細行ではなく繰越残高側に集約される。
+ * amount = 0 や対象年度でないレコードは出力しない。
+ */
+export function openingBalanceJournalEntries(
+  balances: readonly {
+    fiscalYear: number;
+    accountCode: string;
+    amount: number;
+  }[],
+  fiscalYear: number,
+  date: ISODate,
+): JournalEntry[] {
+  assertISODate(date, "date");
+  return balances
+    .filter(
+      (b) =>
+        b.fiscalYear === fiscalYear && b.amount !== 0 && b.accountCode !== "",
+    )
+    .sort((a, b) => a.accountCode.localeCompare(b.accountCode))
+    .map((b) => {
+      const amount = Math.abs(b.amount);
+      const debit: JournalLine =
+        b.amount > 0
+          ? { account: b.accountCode, debit: amount, credit: 0 }
+          : { account: OPENING_EQUITY_ACCOUNT, debit: amount, credit: 0 };
+      const credit: JournalLine =
+        b.amount > 0
+          ? { account: OPENING_EQUITY_ACCOUNT, debit: 0, credit: amount }
+          : { account: b.accountCode, debit: 0, credit: amount };
+      return {
+        transactionId: `opening-${fiscalYear}-${b.accountCode}`,
+        date,
+        description: "期首残高",
+        counterparty: "",
+        lines: [debit, credit] as const,
+      };
+    });
 }
 
 /** 総勘定元帳の明細行 */

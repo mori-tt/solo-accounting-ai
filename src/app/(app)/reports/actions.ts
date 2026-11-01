@@ -4,6 +4,7 @@ import {
   buildAccountLedger,
   buildJournal,
   buildTrialBalance,
+  openingBalanceJournalEntries,
   type AccountLedger,
   type JournalEntry,
   type TrialBalance,
@@ -23,7 +24,11 @@ import {
   computeConsumptionTaxFiling,
   type ConsumptionTaxFiling,
 } from "@/lib/accounting/domain/tax";
-import { monthKeyRange } from "@/lib/accounting/dates";
+import {
+  fiscalPeriodBounds,
+  fiscalPeriodOf,
+  monthKeyRange,
+} from "@/lib/accounting/dates";
 import type { TaxMode } from "@/lib/accounting/types";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
@@ -38,6 +43,26 @@ import { monthKey, parseForm } from "@/lib/validation/schemas";
 
 export interface JournalReport {
   entries: JournalEntry[];
+}
+
+/**
+ * 指定日付を含む会計年度の期首残高を繰越用の仮想仕訳へ展開する。
+ * 転記日は前会計年度の末日とし、当年度のどの月の帳簿でも
+ * 明細行ではなく繰越残高側に集約されるようにする。
+ */
+async function openingEntriesFor(
+  businessId: string,
+  dateInFiscalYear: string,
+): Promise<JournalEntry[]> {
+  const business = await getStore().getBusiness(businessId);
+  const startMonth = business?.fiscalYearStartMonth ?? 1;
+  const { fiscalYear } = fiscalPeriodOf(dateInFiscalYear, startMonth);
+  const carryoverDate = fiscalPeriodBounds(fiscalYear - 1, startMonth).endDate;
+  return openingBalanceJournalEntries(
+    business?.openingBalances ?? [],
+    fiscalYear,
+    carryoverDate,
+  );
 }
 
 /** 仕訳帳。月内の確定済み取引を複式仕訳へ展開し日付順で返す。 */
@@ -90,7 +115,11 @@ export async function getAccountLedgerReport(
       "0001-01-01",
       endDate,
     );
-    const entries = buildJournal(transactions);
+    // 期首残高の仮想仕訳を末尾に連結し、繰越残高へ反映する
+    const entries = [
+      ...buildJournal(transactions),
+      ...(await openingEntriesFor(businessId, startDate)),
+    ];
 
     const accountSet = new Set<string>();
     for (const e of entries) {
@@ -127,7 +156,10 @@ export async function getTrialBalanceReport(
       startDate,
       endDate,
     );
-    return buildTrialBalance(buildJournal(transactions));
+    return buildTrialBalance([
+      ...buildJournal(transactions),
+      ...(await openingEntriesFor(businessId, startDate)),
+    ]);
   });
 }
 
