@@ -16,9 +16,34 @@
 
 ## Log
 
+## 2026-11-02: 取引のCSVエクスポート/インポート(Issue #31)
+- Worktree: csv-io
+### 実装内容
+取引一覧画面へのCSV出力・CSV取込機能。依存追加なしの自前CSV実装。
+- `src/lib/csv.ts`(新規): 汎用CSV部と取引マッピング部
+  - `serializeCsv`: RFC 4180 系(`,` `"` 改行をクォート、`"`→`""`、行末CRLF)
+  - `parseCsv`: クォート内改行・`""`・CRLF/LF/CR受理、先頭BOM除去、末尾改行で空行を作らない
+  - `decodeCsvBytes`: BOM検出(UTF-8/UTF-16LE/BE)+ UTF-8厳格デコード失敗時のShift_JISフォールバック(TextDecoder標準機能)
+  - 取引向け: `TRANSACTION_CSV_HEADER`(日付/種別/科目コード/科目名/取引先/摘要/金額/状態)、`buildTransactionsCsv`、`transactionToCsvRow`、`parseTransactionsCsv`
+  - インポート検証: 先頭行に既知列名が2つ以上あればヘッダーとして列名で対応付け(列順入れ替え・余分列を許容、必須は日付/種別/科目コード/金額)。なければエクスポート列順で位置読み。行ごとにエラー配列+`TransactionInput`を返す。科目コードはACCOUNT_OPTIONS照合、日付は`dateString`スキーマ、金額は全角数字・円記号・桁区切りを正規化して正の整数円のみ。最終確認としてサーバーと同一の`transactionSchema`で再検証
+- `src/app/(app)/transactions/transaction-csv-import.tsx`(新規): ファイル選択→パース→プレビュー表(行番号・解釈値・行別エラー)→「N件を登録」で行ごとに `createTransaction` を逐次呼ぶ取込パネル。エラー行は登録対象から自動除外。行ごとに `crypto.randomUUID()` の冪等キーを確定時点で採番し、失敗行の再登録・通信断での重複を防ぐ。登録済み行は対象外なので部分失敗後の再実行が安全。Shift_JIS等で読んだ場合はファイル名にエンコーディングを表示
+- `transactions-screen.tsx`: PageHeaderに「CSV出力」(全ロール、表示中の月範囲をBOM付UTF-8で `transactions-YYYYMM.csv` ダウンロード)と「CSV取込」ボタン(canEdit=viewer以外のみ)を追加。0件月はヘッダーのみ出力=取込テンプレートとしても使える
+- `src/lib/csv.test.ts`(新規): 26件。生成/パース/ラウンドトリップ、BOM・UTF-16・Shift_JIS検出、エクスポート列・ラベル、ヘッダー名マッピング、行別バリデーションエラー、空行/列不足/必須列欠如
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(25ファイル324件、skip 10)
+- `pnpm build` — 合格
+### 未解決事項・次の担当者への注意事項
+- インポート登録はクライアントから行ごとに `createTransaction` を逐次呼ぶ方式(既存経路踏襲)。締め期間違反等のサーバー側エラーは行単位で「失敗」として残り、再登録ボタンでリトライ可能(冪等キーは行ごとに固定済み)。全行を1トランザクションにするバルクAPIは要件外のため未実装
+- 取込は常に draft 作成のため CSV の「状態」列は読まない。「科目名」列も参照せず科目コードが正(科目名と不一致でも警告は出さない)
+- Shift_JIS判定は「UTF-8厳格デコード失敗→Shift_JIS」のヒューリスティック。SJISとしても不正なバイト列は U+FFFD になる(行エラーとして可視化される)
+- エクスポートは画面の種別/状態フィルタに関わらず表示月範囲の全取引を出力する(「月範囲の取引」の解釈)
+- `pnpm test:rules` / `pnpm test:emulators` / E2E は未実施(firestore.rules・storage.rules への変更なし、UI新規要素のE2E未カバーは既存画面と同じ扱い)
 ## 2026-11-02: 仕訳帳・総勘定元帳・試算表レポート(Issue #32)
 - Worktree: ledger-reports
-### 実装内容
 - `src/lib/accounting/domain/ledger.ts`(新規): 帳簿ロジック。Transaction(1行=type+account+amount)を複式仕訳へ展開する
   - `transactionToJournalEntry`: income=借方現金/貸方科目、expense=借方科目/貸方現金、transfer=借方科目(振替先)/貸方現金(振替元)。`CASH_ACCOUNT="cash"` を相手科目に使う
   - `buildJournal`: 確定済み(confirmed/locked)のみ日付昇順。draftは月次集計と同様に除外
@@ -32,14 +57,11 @@
 - **transfer の仕訳展開**: Transaction は相手科目を持たない(1科目のみ)ため、「借方=account(振替先)/貸方=現金(振替元)」の一方向として展開。収支と同じ「現金相手」モデルに揃え、Issue記載の「借方=振替先/貸方=振替元」に現金=振替元を当てはめた。振替は収支を構成しない点は月次集計(transferを収支に含めない)と同じ扱い
 - **元帳の残高方向**: 勘定体系に借方/貸方の性質マスタが無いため、全期間の貸借合計が大きい側を残高方向とするヒューリスティック(収益科目→貸方、費用・現金→借方が普通になる)
 - **総勘定元帳のデータ範囲**: 繰越残高のため `0001-01-01`〜月末の全取引を読む(dashboardのallTxと同じ手法)
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 合格
-- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(25ファイル315件、skip 10。`domain/ledger.test.ts` 新規17件含む)
 - `pnpm build` — 合格(3新規ルートを含む全ルート生成)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。Emulator同時起動制約のため起動せず)
-### 未解決事項・次の担当者への注意事項
 - `domain/`(旧世代)と`services/`(新世代)の2系統併存のため、domain関数の入力は `Pick<TransactionEntity>` 型(`JournalTransaction`)として services 側 `Transaction` をそのまま受け取れるようにした。Entity型の統合整理は従前どおり別タスク
 - `cash` 勘定は科目マスタ(accounts.ts)に無いため帳簿画面側で「現金」ラベルを補っている。正式な科目体系の整備時にマスタ側へ移す余地あり
 - 振替の逆方向(他口座→現金)は現モデルでは表現できない。相手科目フィールドが将来追加された場合は `transactionToJournalEntry` の展開を見直すこと
