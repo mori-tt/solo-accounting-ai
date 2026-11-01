@@ -10,6 +10,7 @@ import {
   getStorage,
   type FirebaseStorage,
 } from "firebase/storage";
+import { assertFirebaseClientEnvOnce } from "@/lib/env";
 import {
   EMULATOR_DEFAULTS,
   getFirebaseConfig,
@@ -54,6 +55,8 @@ function connectEmulators(app: FirebaseApp): void {
 }
 
 export function getFirebaseApp(): FirebaseApp {
+  // 必須envの未設定をSDK内部エラーではなく明示的なメッセージで失敗させる
+  assertFirebaseClientEnvOnce();
   const existing = getApps()[0];
   const app = existing ?? initializeApp(getFirebaseConfig());
   if (shouldUseEmulator()) {
