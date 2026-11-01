@@ -10,11 +10,27 @@ import {
   type TrialBalance,
 } from "@/lib/accounting/domain/ledger";
 import {
+  buildConsumptionTaxSummary,
+  buildYearlyReport,
+  type ConsumptionTaxSummary,
+  type YearlyReport,
+} from "@/lib/accounting/domain/yearly";
+import {
+  buildIncomeStatement,
+  type IncomeStatement,
+} from "@/lib/accounting/domain/filing";
+import { fiscalPeriodRange } from "@/lib/accounting/domain/fiscal";
+import {
+  computeConsumptionTaxFiling,
+  type ConsumptionTaxFiling,
+} from "@/lib/accounting/domain/tax";
+import {
   fiscalPeriodBounds,
   fiscalPeriodOf,
   monthKeyRange,
 } from "@/lib/accounting/dates";
-import { fail, run, type ActionResult } from "@/lib/api/result";
+import type { TaxMode } from "@/lib/accounting/types";
+import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
 import { monthKey, parseForm } from "@/lib/validation/schemas";
@@ -144,5 +160,116 @@ export async function getTrialBalanceReport(
       ...buildJournal(transactions),
       ...(await openingEntriesFor(businessId, startDate)),
     ]);
+  });
+}
+
+function validFiscalYear(value: number): boolean {
+  return Number.isInteger(value) && value >= 1900 && value <= 2200;
+}
+
+export interface YearlyReportData {
+  fiscalYear: number;
+  /** 事業の会計年度開始月 */
+  fiscalYearStartMonth: number;
+  /** 事業の消費税課税方式 */
+  taxMode: TaxMode;
+  report: YearlyReport;
+  tax: ConsumptionTaxSummary;
+  /**
+   * 申告レベルの消費税概算。簡易課税は事業区分(みなし仕入率)が
+   * 未設定のため null(概算を出さない)。免税事業者は納付額0の結果。
+   */
+  taxFiling: ConsumptionTaxFiling | null;
+}
+
+/**
+ * 年次レポート。会計年度範囲の確定済み取引から
+ * 月別推移・科目別年間合計・消費税区分別集計をその場で組み立てる。
+ */
+export async function getYearlyReport(
+  businessId: string,
+  fiscalYear: number,
+): Promise<ActionResult<YearlyReportData>> {
+  if (!validFiscalYear(fiscalYear)) {
+    return fail("INVALID_INPUT", "年度が不正です");
+  }
+  return run(async () => {
+    await requireViewer(businessId);
+    const store = getStore();
+    const business = await store.getBusiness(businessId);
+    if (!business) {
+      throw new ApiError("NOT_FOUND", "事業が見つかりません");
+    }
+    const { startDate, endDate } = fiscalPeriodRange(
+      fiscalYear,
+      business.fiscalYearStartMonth,
+    );
+    const [transactions, expenses] = await Promise.all([
+      store.listTransactionsInRange(businessId, startDate, endDate),
+      store.listExpenses(businessId),
+    ]);
+    const report = buildYearlyReport(
+      transactions,
+      fiscalYear,
+      business.fiscalYearStartMonth,
+    );
+    const tax = buildConsumptionTaxSummary(transactions, expenses);
+    const taxFiling =
+      business.taxMode === "simple"
+        ? null
+        : computeConsumptionTaxFiling(business.taxMode, tax.filingAmounts);
+    return {
+      fiscalYear,
+      fiscalYearStartMonth: business.fiscalYearStartMonth,
+      taxMode: business.taxMode,
+      report,
+      tax,
+      taxFiling,
+    };
+  });
+}
+
+export interface FilingStatementData {
+  businessName: string;
+  statement: IncomeStatement;
+}
+
+/**
+ * 決算書(収支内訳書様式)用の年間収支。
+ * 科目別年間合計を収支内訳書の部(収入金額/売上原価/経費)に振り分ける。
+ */
+export async function getFilingStatement(
+  businessId: string,
+  fiscalYear: number,
+): Promise<ActionResult<FilingStatementData>> {
+  if (!validFiscalYear(fiscalYear)) {
+    return fail("INVALID_INPUT", "年度が不正です");
+  }
+  return run(async () => {
+    await requireViewer(businessId);
+    const store = getStore();
+    const business = await store.getBusiness(businessId);
+    if (!business) {
+      throw new ApiError("NOT_FOUND", "事業が見つかりません");
+    }
+    const { startDate, endDate } = fiscalPeriodRange(
+      fiscalYear,
+      business.fiscalYearStartMonth,
+    );
+    const transactions = await store.listTransactionsInRange(
+      businessId,
+      startDate,
+      endDate,
+    );
+    return {
+      businessName: business.name,
+      statement: buildIncomeStatement(
+        buildYearlyReport(
+          transactions,
+          fiscalYear,
+          business.fiscalYearStartMonth,
+        ),
+      ),
+    };
   });
 }

@@ -3,7 +3,12 @@ import { DomainError } from "../errors";
 import { assertYenAmount } from "../money";
 import type { AccountingStore } from "../store/types";
 import { docPath } from "../store/types";
-import type { Transaction, TransactionType } from "../types";
+import type { ConsumptionTaxRate } from "../domain/tax";
+import type {
+  TaxCategory,
+  Transaction,
+  TransactionType,
+} from "../types";
 import {
   assertDateInOpenPeriod,
   auditsFor,
@@ -18,6 +23,57 @@ const TRANSACTION_TYPES: readonly TransactionType[] = [
   "transfer",
 ];
 
+const TAX_CATEGORIES: readonly TaxCategory[] = [
+  "taxable",
+  "non_taxable",
+  "exempt",
+  "out_of_scope",
+];
+
+const TAX_RATES: readonly ConsumptionTaxRate[] = ["standard", "reduced"];
+
+/**
+ * 取引の消費税区分を検証し、保存用に正規化する。
+ * 課税取引で税率未指定なら standard(10%)とみなす。
+ * 課税以外の区分に税率は付けられない。
+ */
+export function normalizeTransactionTax(
+  taxCategory: TaxCategory | undefined,
+  taxRate: ConsumptionTaxRate | undefined,
+): { taxCategory?: TaxCategory; taxRate?: ConsumptionTaxRate } {
+  if (taxCategory !== undefined && !TAX_CATEGORIES.includes(taxCategory)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `invalid taxCategory: ${String(taxCategory)}`,
+    );
+  }
+  if (taxRate !== undefined && !TAX_RATES.includes(taxRate)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `invalid taxRate: ${String(taxRate)}`,
+    );
+  }
+  if (taxCategory === undefined) {
+    if (taxRate !== undefined) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "taxRate requires taxCategory=taxable",
+      );
+    }
+    return {};
+  }
+  if (taxCategory !== "taxable") {
+    if (taxRate !== undefined) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "taxRate requires taxCategory=taxable",
+      );
+    }
+    return { taxCategory };
+  }
+  return { taxCategory, taxRate: taxRate ?? "standard" };
+}
+
 export interface RegisterTransactionInput {
   id?: string;
   /** リトライ安全のため必須。同じキーでの再実行は既存結果を返す */
@@ -31,6 +87,10 @@ export interface RegisterTransactionInput {
   account: string;
   counterparty?: string;
   description?: string;
+  /** 消費税区分(任意)。省略時は未分類 */
+  taxCategory?: TaxCategory;
+  /** 税率区分。taxCategory=taxable のときのみ有効(省略時 standard) */
+  taxRate?: ConsumptionTaxRate;
 }
 
 /**
@@ -54,6 +114,7 @@ export async function registerTransaction(
   if (!input.account) {
     throw new DomainError("INVALID_INPUT", "account is required");
   }
+  const tax = normalizeTransactionTax(input.taxCategory, input.taxRate);
 
   const id = input.id ?? newId();
   const at = nowOf(actor);
@@ -84,6 +145,8 @@ export async function registerTransaction(
         description: input.description ?? "",
         receiptIds: [],
         status: "draft",
+        taxCategory: tax.taxCategory,
+        taxRate: tax.taxRate,
         createdBy: actor.uid,
         createdAt: at,
         updatedAt: at,

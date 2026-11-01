@@ -2,6 +2,7 @@
 
 import {
   confirmTransaction,
+  normalizeTransactionTax,
   registerTransaction,
 } from "@/lib/accounting/services/transactions";
 import {
@@ -59,6 +60,8 @@ export async function createTransaction(
         account: parsed.data.account,
         counterparty: parsed.data.counterparty,
         description: parsed.data.description,
+        taxCategory: parsed.data.taxCategory ?? undefined,
+        taxRate: parsed.data.taxRate ?? undefined,
       },
     );
     return transaction;
@@ -92,6 +95,19 @@ export async function updateTransaction(
       }
       const periods = await tx.listFiscalPeriods(businessId);
       assertDateInOpenPeriod(parsed.data.date, periods);
+      // 税区分: 省略は既存値を保持、nullはクリア(フォームは必ず値かnullを送る)
+      const taxCategory =
+        parsed.data.taxCategory === undefined
+          ? current.taxCategory
+          : (parsed.data.taxCategory ?? undefined);
+      const taxRate =
+        parsed.data.taxRate === undefined
+          ? current.taxRate
+          : (parsed.data.taxRate ?? undefined);
+      const tax = normalizeTransactionTax(
+        taxCategory,
+        taxCategory === "taxable" ? taxRate : undefined,
+      );
 
       const next: Transaction = {
         ...current,
@@ -101,6 +117,8 @@ export async function updateTransaction(
         account: parsed.data.account,
         counterparty: parsed.data.counterparty ?? "",
         description: parsed.data.description ?? "",
+        taxCategory: tax.taxCategory,
+        taxRate: tax.taxRate,
         updatedAt: new Date().toISOString(),
       };
       return {

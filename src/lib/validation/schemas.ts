@@ -140,14 +140,32 @@ export const customAccountsSchema = z
   .array(customAccountItemSchema)
   .max(50, "カスタム科目は50件までです");
 
-export const transactionSchema = z.object({
-  type: z.enum(["income", "expense", "transfer"]),
-  date: dateString,
-  amount: yenAmount,
-  account: z.string().min(1, "勘定科目を選択してください"),
-  counterparty: optionalText,
-  description: optionalText,
-});
+export const taxCategorySchema = z.enum([
+  "taxable",
+  "non_taxable",
+  "exempt",
+  "out_of_scope",
+]);
+
+export const transactionSchema = z
+  .object({
+    type: z.enum(["income", "expense", "transfer"]),
+    date: dateString,
+    amount: yenAmount,
+    account: z.string().min(1, "勘定科目を選択してください"),
+    counterparty: optionalText,
+    description: optionalText,
+    /**
+     * 消費税区分/税率。更新時: 省略(undefined)=既存値を保持、
+     * null=クリア、値=設定。フォームは必ず値かnullを送る。
+     */
+    taxCategory: taxCategorySchema.nullable().optional(),
+    taxRate: z.enum(["standard", "reduced"]).nullable().optional(),
+  })
+  .refine((v) => v.taxRate == null || v.taxCategory === "taxable", {
+    message: "税率は課税取引の場合のみ指定できます",
+    path: ["taxRate"],
+  });
 export type TransactionInput = z.infer<typeof transactionSchema>;
 
 export const expenseSchema = z.object({
@@ -156,7 +174,7 @@ export const expenseSchema = z.object({
   account: z.string().min(1, "勘定科目を選択してください"),
   counterparty: optionalText,
   description: optionalText,
-  taxCategory: z.enum(["taxable", "non_taxable", "exempt", "out_of_scope"]),
+  taxCategory: taxCategorySchema,
   taxAmount: nonNegativeYen.optional(),
   paymentDueDate: z.union([dateString, z.literal("")]).optional(),
 });

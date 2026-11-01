@@ -3,6 +3,7 @@ import { MemoryStore } from "../store/memory";
 import { setupStore, testActor } from "../testing";
 import {
   confirmTransaction,
+  normalizeTransactionTax,
   registerTransaction,
 } from "./transactions";
 
@@ -129,6 +130,65 @@ describe("registerTransaction", () => {
       ...base,
     });
     expect(a.transaction.id).not.toBe(b.transaction.id);
+  });
+
+  it("消費税区分を保存し、課税の税率省略は standard になる", async () => {
+    const { store, businessId, actor } = await setupStore();
+    const { transaction } = await registerTransaction(
+      store,
+      businessId,
+      actor,
+      {
+        idempotencyKey: "tx-tax",
+        ...base,
+        taxCategory: "taxable",
+      },
+    );
+    expect(transaction.taxCategory).toBe("taxable");
+    expect(transaction.taxRate).toBe("standard");
+  });
+
+  it("税区分が未指定ならフィールドを持たない", async () => {
+    const { store, businessId, actor } = await setupStore();
+    const { transaction } = await registerTransaction(
+      store,
+      businessId,
+      actor,
+      { idempotencyKey: "tx-notax", ...base },
+    );
+    expect(transaction.taxCategory).toBeUndefined();
+    expect(transaction.taxRate).toBeUndefined();
+  });
+});
+
+describe("normalizeTransactionTax", () => {
+  it("課税以外の区分に税率を付けると拒否する", () => {
+    expect(() =>
+      normalizeTransactionTax("non_taxable", "reduced"),
+    ).toThrow(/taxRate requires taxCategory=taxable/);
+  });
+
+  it("区分未指定に税率だけ指定すると拒否する", () => {
+    expect(() =>
+      normalizeTransactionTax(undefined, "standard"),
+    ).toThrow(/taxRate requires taxCategory=taxable/);
+  });
+
+  it("非課税・免税・不課税は区分だけ返す", () => {
+    expect(normalizeTransactionTax("exempt", undefined)).toEqual({
+      taxCategory: "exempt",
+    });
+  });
+
+  it("課税で税率省略は standard に正規化する", () => {
+    expect(normalizeTransactionTax("taxable", undefined)).toEqual({
+      taxCategory: "taxable",
+      taxRate: "standard",
+    });
+    expect(normalizeTransactionTax("taxable", "reduced")).toEqual({
+      taxCategory: "taxable",
+      taxRate: "reduced",
+    });
   });
 });
 
