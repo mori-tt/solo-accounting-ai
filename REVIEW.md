@@ -16,6 +16,37 @@
 
 ## Log
 
+## 2026-11-02: 実LLMプロバイダ(OpenAI)の実装
+
+- Worktree: ai-llm-provider
+
+### 実装内容
+
+- `openai@7.43.0` を `pnpm add`(選択理由は備考)。SDK利用コードは `src/lib/ai/` 内に閉じ込め、依存追加の `package.json`/`pnpm-lock.yaml` 変更はこのレーンのみ
+- `src/lib/ai/prompts.ts` 新規: 5種類の `SuggestionKind` ごとのタスク文・Structured Outputs用JSON Schema(strictサブセットのみ使用)・`sanitizeInput`(allowlist外フィールドの除去・文字列切り詰め・`duplicate_detection`取引の id/amount/date 射影・`monthly_explanation`の数値+yearMonthのみ射影・件数/文字数上限)で送信データを最小化
+- `src/lib/ai/llm-provider.ts` 新規:
+  - `LLMProvider implements AIProvider`: 注入された `LLMCaller` でJSON生成→`JSON.parse`して返却(形の検証は既存 schemas.ts に委譲)。caller例外は `provider_error`、非JSON出力は `invalid_response` の `AIProcessingError` に正規化し、SDKの生エラーメッセージ(証憑内容を含み得る)は伝播させない
+  - `createOpenAICaller`: OpenAI Responses API(`json_schema`/`strict: true`、`store: false` でOpenAI側にレスポンスを保存させない)を呼ぶcaller
+  - `createAIProvider`: 環境変数で選択。`AI_LLM_PROVIDER=openai` かつ `OPENAI_API_KEY` 設定時のみLLMProvider(`OPENAI_MODEL`でモデル上書き可、既定 `gpt-5-mini`)。未設定・`heuristic`・未知値・キー欠落は `HeuristicAIProvider` へフォールバック(固定文言のwarnのみ、鍵・入力値は出力しない)
+  - `assertServerSide`: `typeof window !== "undefined"` で例外。APIキーは非`NEXT_PUBLIC_`環境変数経由のためサーバーのみで読める。`server-only`パッケージはroute handler/vitest等の非RSCコンテキストでindex.js(throw)に解決されるため不採用
+- `src/lib/ai/llm-provider.test.ts` 新規(`@vitest-environment node`): ファクトリの分岐・フォールバック、エラー正規化、サニタイズのPII除去、`AISuggestionService`経由で `run_ai` がauditLogsに記録されること(監査要件は既存service.tsの`appendAudit`で担保)を確認
+- 環境変数: `AI_LLM_PROVIDER` / `OPENAI_API_KEY` / `OPENAI_MODEL`(`.env.example`は変更対象外のため本ファイルに記録)
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件は既存のreceipts-screen `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(19ファイル229件、skip 7。新規テスト13件)
+- `pnpm build` — 合格(全ルートstatic/dynamic生成)
+- Firebase Emulator tests — 未実施(JDK 21+不在の環境制約。rules変更なしのため実害なし)
+
+### 備考
+
+- SDK選択理由: `openai` はランタイム依存ゼロ(2026-11-02時点 v7.43.0)。`@anthropic-ai/sdk` は3依存(standardwebhooks等)、`@google/genai` は `google-auth-library`/`protobufjs` を含み最小依存要件に反するため不採用。バージョンは7日ルールに従い2026-10-22公開の 7.43.0(最新7.47.0は公開2日前で回避)
+- AI呼出のauditLogs記録は `AISuggestionService.execute` の `appendAudit("run_ai")` が既に担保しており、provider側は対象識別情報以外を記録しない設計を維持(個人情報・証憑内容のログ出力なし)
+- `createAIProvider` はまだどこからも呼ばれない(サーバーアクション/Route Handler側の接続は別タスク)。接続側では `AISuggestionService({ store: new FirestoreSuggestionStore(db), provider: createAIProvider() })` の形を想定
+- `store: false` は単発のステートレス呼出し前提。将来 `previous_response_id` 等の会話継続が必要になった場合は再検討
+
 ## 2026-11-02: `.next` symlink 除去と main のビルド破壊修復
 
 - Worktree: fix-next-symlink
