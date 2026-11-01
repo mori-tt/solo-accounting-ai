@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-solo-accounting-ai 'vitest run --config vitest.rules.config.mts'",
     "test:e2e": "playwright test",
+    "test:emulators": "firebase emulators:exec --only firestore --project demo-solo-accounting-ai 'pnpm vitest run tests/emulator'",
     "emulators": "firebase emulators:start"
   },
   "dependencies": {
