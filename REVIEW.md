@@ -16,6 +16,36 @@
 
 ## Log
 
+## 2026-11-02: 家事按分(科目別事業割合)(Issue #43)
+- Worktree: household-alloc
+### 実装内容
+経費科目ごとの事業割合(%)をBusinessに保存し、月次レポートで按分後金額を表示列として確認できるようにした。依存追加なし。
+- `src/lib/accounting/types.ts`: `Business.allocationRatios?: Record<accountCode, number(0-100)>` を追加(オプショナル。未設定科目は100%扱い)
+- `src/lib/accounting/domain/allocation.ts`(新規): 按分ドメインロジック
+  - `isAllocationRatio` / `assertAllocationRatio`: 0-100整数の割合検証
+  - `allocatedAmount(amountYen, ratioPercent)`: `floor(amount*ratio/100)` で円・整数。端数は切り捨て(ACCOUNTING_RULES.mdの初期版ルールに合わせ、経費を過大計上しない丸め)
+  - `allocationRatioFor(ratios, account)`: 未設定・範囲外の保存値は100%へフォールバック(表示側を壊さない)
+  - `applyAllocation(breakdown, ratios)` / `allocatedExpenseTotal`: 科目別集計へ按分後列を付与する表示用関数。`MonthlySummary.accountBreakdown` と同じ `{income,expense}` 構造を入力に取り、summary.ts等の既存集計は変更していない
+- `src/lib/validation/schemas.ts`: `businessSchema` に `allocationRatios`(z.record(0-100整数))をオプション追加
+- `src/lib/actions/businesses.ts`: Issue指定どおり既存のbusiness更新actionを利用
+  - `MyBusiness` / `listMyBusinesses` で `allocationRatios` を返すようにした(画面側の読み取り経路)
+  - `updateBusinessSettings` は `allocationRatios` が指定された時のみ上書き。未指定(既存の設定画面)は現値を維持するため、設定画面・firestore.rulesの変更は不要(ownerUid不変ルールのみで追加フィールドを拒否しない)
+- `src/app/(app)/allocations/`(新規): 専用ページ(/settings配下ではない)。経費科目(ACCOUNT_OPTIONSのkind=expense)ごとに0-100を入力保存。未入力=未設定(100%)。UIに無い科目の保存済み割合は上書きしない(マージ保存)。ownerのみ編集可(流用するactionがowner必須のため)、非ownerは読み取り表示
+- `src/app/(app)/reports/monthly/monthly-report-screen.tsx`: `applyAllocation` で按分率・按分後支出列と「差引(按分後)」を追加。割合未設定時は従来表示のまま
+- `src/components/app-shell.tsx`: ナビに「家事按分」を1行追加
+- `docs/FIRESTORE_SCHEMA.md`: businessesに `allocationRatios` を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(30ファイル374件、skip 10。`domain/allocation.test.ts` 11件を新規追加)
+- `pnpm build` — 合格(`/allocations` が静的ルートとして登録)
+- Firebase Emulator テスト — 未実施(Issue制約でEmulator起動禁止。rules変更なしのため影響なしと判断)
+### 未解決事項・次の担当者への注意事項
+- 按分は表示専用で `monthlySummaries` 等の保存データには反映していない(Issueの「表示列追加レベル」指定どおり)。確定申告出力・決算書で按分額が必要になったら同じ `domain/allocation.ts` を再利用する
+- 割合編集はownerのみ(`updateBusinessSettings` 流用のため)。editorにも開放する場合はaction側の認可変更が必要
+- 按分ページは事業名等の既存値を `useApp().business` から同時送信する。別タブで事業設定を直後に変更した場合に古い値で上書きする可能性がある(設定画面と同じ既知の性質)
 ## 2026-11-02: 領収書OCRの画面配線(Issue #30)
 - Worktree: ocr-ui
 ### 実装内容

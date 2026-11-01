@@ -67,6 +67,7 @@ receipts(証憑ファイル)
 | ownerUid | string | 作成者 |
 | fiscalYearStartMonth | number | 会計年度開始月(1-12) |
 | taxMode | string | `exempt` / `simple` / `standard` 消費税課税方式 |
+| allocationRatios | map? | 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
 
