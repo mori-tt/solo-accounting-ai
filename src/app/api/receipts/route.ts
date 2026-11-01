@@ -2,7 +2,7 @@ import { registerReceipt } from "@/lib/accounting/services/receipts";
 import { ApiError, toActionError } from "@/lib/api/result";
 import { requireEditor } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
-import { getReceiptsBucket } from "@/lib/firebase/admin";
+import { getAdminBucket } from "@/lib/firebase/admin";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME = new Set([
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     const fileName = sanitizeFileName(file.name || "receipt");
     const storagePath = `receipts/${businessId}/${receiptId}/${fileName}`;
 
-    const bucket = getReceiptsBucket();
+    const bucket = getAdminBucket();
     await bucket
       .file(storagePath)
       .save(Buffer.from(await file.arrayBuffer()), {

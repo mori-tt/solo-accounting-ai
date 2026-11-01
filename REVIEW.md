@@ -16,6 +16,33 @@
 
 ## Log
 
+## 2026-11-02: `.next` symlink 除去と main のビルド破壊修復
+
+- Worktree: fix-next-symlink
+
+### 実装内容
+
+- `.next`(リポジトリルート): sharedDirectories 由来の絶対パス symlink が誤コミットされていたのを `git rm` で除去。GitHub公開リポジトリにローカルパスが残るのと、symlinkが自己ループで実ディレクトリを生成できず `next dev`/`build` が壊れるため
+- `.gitignore`: `/.next/` → `/.next`、`/.firebase/` → `/.firebase`。末尾スラッシュ付きパターンはディレクトリにしか効かず symlink(ファイル扱い)を無視できないため、`git add -A` で再混入し得た。`node_modules` は末尾スラッシュなしで元から安全
+- `orca.yaml`: `sharedDirectories` から `node_modules` と `.next` を除外。前回の環境メモ通り symlink 共有は Turbopack の root 解決と型生成物参照を壊し build/typecheck が失敗する。各 worktree は実体 `pnpm install` 前提。`.firebase` は残置(破壊実績なし)
+- `src/app/page.tsx` / `src/app/login/page.tsx`: 手解消ミスで `=======` マーカーだけが残ったままコミットされていたのを、`b8d3a06` の正規形(`/dashboard` リダイレクト版 / `LoginScreen`+`Suspense`版)へ復元
+- `src/app/api/receipts/route.ts` / `[receiptId]/route.ts`: `getReceiptsBucket` → `getAdminBucket`。`f38ba5b` の admin.ts リファクタと旧 import がマージ `fdf5e02` で混在していた
+- `src/app/layout.tsx`: `AuthProvider`(`@/lib/firebase/auth-provider`)→ `AppProvider`(`@/components/auth-provider`)へ `b8d3a06` 版に復元。全画面が使う `useApp` の Provider が未マウントで static export が全滅していた
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(18ファイル213件、skip 7)
+- `pnpm build` — 合格(全ルート static prerender)
+- Firebase Emulator tests — 未実施。この環境は JDK 17 のみで firebase-tools が JDK 21+ を要求し起動不可。rules 変更なしのため実害なし。JDK 21+ 導入後に `pnpm test:rules` / `pnpm test:emulators` で要確認
+
+### 未解決事項・次の担当者への注意事項
+
+- `src/lib/firebase/auth-provider.tsx`(`AuthProvider`/`useAuth`)と `src/app/auth-status.tsx` は現状どこからも参照されない死コード。削除は別タスクが安全
+- main 上で同様の誤マージが他ファイルに潜んでいないかは未検証(マーカー grep と全チェック通過で実害は潰したが、意味論的な取り違えは残り得る)
+- 今後作成される worktree には `node_modules` が無いため、作成直後に `pnpm install --frozen-lockfile` が必要。`.env.local` は `.worktreeinclude` で複製されるが未存在なら別途用意する
+
 ## 2026-11-01: Firestore設計の確定(AI提案コレクション化)
 
 - Worktree: firebase-security
