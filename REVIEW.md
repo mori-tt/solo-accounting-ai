@@ -16,6 +16,34 @@
 
 ## Log
 
+## 2026-11-02: 入金消込の取引紐付け強化(Issue #65)
+- Worktree: payment-matching
+### 実装内容
+請求書の入金記録時に対応する収入取引(売上取引)を選択して消込を記録し、消込状態を一覧で可視化。`Payment.transactionId` は既存フィールドをそのまま使用(types.ts変更不要)。依存追加なし。
+- `src/lib/payment-matching.ts`(新規): 純粋関数3本。`rankPaymentLinkCandidates`(同顧客=counterparty一致を先頭・日付降順、既紐付取引をexcludeIdsで除外)、`invoicePaymentProgress`(draft以外で 未入金/一部入金/入金済 を導出)、`invoiceSettlement`(paymentsのtransactionId有無で matched/unmatched 判定)
+- `src/lib/validation/schemas.ts`: `paymentSchema` に `transactionId`(任意・最大200文字)を追加。クライアント/サーバー両側で同じスキーマ検証が効く
+- `src/lib/actions/sales.ts`:
+  - `InvoiceRow` に `payments: Payment[]`(日付昇順)を追加し、`listInvoiceRows` は入金をinvoiceId別にグルーピングして返す(入金額集計は同リストから算出)
+  - `listPaymentLinkCandidates` 新設(viewer可)。請求書の `issueDate〜asOf` の `type=income` 取引を取得し、他の入金に紐付済みの取引を除いた候補を `rankPaymentLinkCandidates` で返す。顧客は `counterparty === customer.name` で判定(TransactionにcustomerIdは無いため)
+  - `registerPaymentAction`: `transactionId` を受け取り、存在チェック+`type==="income"` チェックを行ってから `registerPayment` へ渡す(サービス層は既存フィールド対応済みで無変更)
+- `src/app/(app)/invoices/invoices-screen.tsx`:
+  - `PaymentForm` に「対応する収入取引(任意)」Selectを追加。同顧客グループ/その他(同期間)のoptgroupで候補表示。選択時に `transactionId` を送信。候補取得失敗時はヒントを出し紐付けなしで登録可能。フォーム上部に既存入金履歴も表示
+  - 一覧の状態列に導出バッジを追加: `未入金`(gray)/`一部入金`(amber)/`未消込`(amber)/`消込済`(sky)。入金済は従来の StatusBadge「入金済み」が担う
+  - 「入金履歴(n)」トグルで入金一覧を展開(viewer含む全ロール可)。消込済み入金は `取引を参照` リンクで `/transactions` へ遷移可能。履歴パネルと入金フォームは排他で開く
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功。依存追加なし
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(38ファイル491件、skip 10。payment-matching.test.ts 8件追加)
+- `pnpm build` — 合格
+- Emulator系(`test:rules`/`test:emulators`)・`next dev` — 未実施(Issue制約で禁止。rules・サーバー書き込み経路の変更もなし)
+### 設計上の判断・備考
+- 「同期間」は請求書の発行日〜当日(asOf)の範囲と解釈(発行後〜入金遅延までをカバー)。発行前の前受金取引は候補に出ない(必要なら範囲拡張は別Issue)
+- 「同顧客」は `counterparty === customer.name` の完全一致(TransactionにcustomerIdフィールドが無いため)。不一致の取引も「その他」グループに残し、表記ゆれの取引を選べるようにした
+- 既に他の入金へ紐付いた取引は候補から除外するが、サーバー側では一意性を強制していない(1取引が複数請求の一括入金を兼ねる実態があり得るため寛容)
+- 「取引側からの参照リンク」は請求書側→取引一覧(`/transactions`)へのリンクで実現。取引画面は変更範囲外のため取引詳細へのディープリンクや取引側からの逆リンクは未対応(URLパラメータ対応は別タスク)
+- transactionId検証(存在+income)はaction層で実施。チェックと書込みは非アトミックだが紐付けは参照情報のため許容(消込の一意性競合も同様)
+- ダッシュボード連携はIssue範囲外(別タスク)
 ## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
 - Worktree: custom-accounts
 ### 実装内容
