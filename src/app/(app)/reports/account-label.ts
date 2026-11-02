@@ -5,6 +5,7 @@ import { openingAccountLabel } from "@/lib/opening-balance-accounts";
 /**
  * 帳簿画面用の科目ラベル解決。
  * 現金・元入金・期首残高用資産コードなど科目マスタ外のコードをここで補う。
+ * 預り金(源泉所得税)は科目マスタ(accounts.ts)側で解決される。
  * カスタム科目は useAccounts 経由で解決される。
  */
 export function useBookAccountLabel(): (code: string) => string {

@@ -17,8 +17,10 @@ import type {
   Quote,
   Receipt,
   ReceiptStatus,
+  RecurringInvoiceTemplate,
   RecurringTemplate,
   Transaction,
+  WithholdingRecord,
 } from "../types";
 import type {
   AccountingReader,
@@ -200,6 +202,27 @@ export class MemoryStore implements AccountingStore {
     );
   }
 
+  getRecurringInvoiceTemplate(
+    businessId: string,
+    id: string,
+  ): Promise<RecurringInvoiceTemplate | undefined> {
+    return this.get<RecurringInvoiceTemplate>(
+      businessId,
+      "recurringInvoiceTemplates",
+      id,
+    );
+  }
+
+  listRecurringInvoiceTemplates(
+    businessId: string,
+  ): Promise<RecurringInvoiceTemplate[]> {
+    return this.list<RecurringInvoiceTemplate>(
+      businessId,
+      "recurringInvoiceTemplates",
+      () => true,
+    );
+  }
+
   getFixedAsset(
     businessId: string,
     id: string,
@@ -256,6 +279,27 @@ export class MemoryStore implements AccountingStore {
       businessId,
       "payments",
       (p) => p.invoiceId === invoiceId,
+    );
+  }
+
+  getWithholdingRecord(
+    businessId: string,
+    transactionId: string,
+  ): Promise<WithholdingRecord | undefined> {
+    return this.get<WithholdingRecord>(
+      businessId,
+      "withholdingRecords",
+      transactionId,
+    );
+  }
+
+  listWithholdingRecords(
+    businessId: string,
+  ): Promise<WithholdingRecord[]> {
+    return this.list<WithholdingRecord>(
+      businessId,
+      "withholdingRecords",
+      () => true,
     );
   }
 

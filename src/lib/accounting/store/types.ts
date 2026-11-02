@@ -17,8 +17,10 @@ import type {
   Quote,
   Receipt,
   ReceiptStatus,
+  RecurringInvoiceTemplate,
   RecurringTemplate,
   Transaction,
+  WithholdingRecord,
 } from "../types";
 
 /**
@@ -40,10 +42,12 @@ export type CollectionName =
   | "billPayments"
   | "monthlySummaries"
   | "recurringTemplates"
+  | "recurringInvoiceTemplates"
   | "fixedAssets"
   | "inventoryItems"
   | "inventoryCounts"
   | "fiscalPeriods"
+  | "withholdingRecords"
   | "auditLogs"
   | "idempotencyKeys";
 
@@ -94,6 +98,13 @@ export interface AccountingReader {
   listRecurringTemplates(
     businessId: string,
   ): Promise<RecurringTemplate[]>;
+  getRecurringInvoiceTemplate(
+    businessId: string,
+    id: string,
+  ): Promise<RecurringInvoiceTemplate | undefined>;
+  listRecurringInvoiceTemplates(
+    businessId: string,
+  ): Promise<RecurringInvoiceTemplate[]>;
   getFixedAsset(
     businessId: string,
     id: string,
@@ -118,6 +129,15 @@ export interface AccountingReader {
     businessId: string,
     invoiceId: string,
   ): Promise<Payment[]>;
+  /** 取引に紐付く源泉徴収記録(ドキュメントID = transactionId) */
+  getWithholdingRecord(
+    businessId: string,
+    transactionId: string,
+  ): Promise<WithholdingRecord | undefined>;
+  listWithholdingRecords(
+    businessId: string,
+  ): Promise<WithholdingRecord[]>;
+
   getBill(businessId: string, id: string): Promise<Bill | undefined>;
   listBills(businessId: string): Promise<Bill[]>;
   getBillPayment(

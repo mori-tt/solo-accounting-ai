@@ -148,6 +148,7 @@ export function formatInvoiceNumber(seq: number): string {
  * 正規化済み明細と合計を返す。税額算出は invoice-tax 経由で
  * domain/tax のエンジンを使う(再実装しない)。
  * 見積・請求で同じ明細形式を共有するため services 間で再利用する。
+ * 定期請求書テンプレートの明細検証にも使う(recurring-invoices.ts)。
  */
 export function normalizeInvoiceItems(items: InvoiceItem[]): {
   items: InvoiceItem[];

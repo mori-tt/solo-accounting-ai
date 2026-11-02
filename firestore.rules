@@ -249,6 +249,51 @@ service cloud.firestore {
             && exists(receiptDoc(businessId, d.receiptId)));
       }
 
+      // ---------- withholdingRecords ----------
+      // 源泉徴収記録。ドキュメントID=取引IDで支出取引と1:1に紐付く
+      // (記録の存在自体が源泉徴収の対象フラグ)。自身は日付を持たないため
+      // 締め済み期間・locked保護はリンク先取引から導出する
+      match /withholdingRecords/{recordId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validWithholdingRecord(request.resource.data)
+          // transactionIdをdoc IDと一致させる(参照のなりすまし・
+          // 別取引への記録付け替えを防ぐ)
+          && request.resource.data.transactionId == recordId
+          && request.resource.data.createdBy == request.auth.uid
+          && withholdingTxOpen(businessId, recordId);
+        allow update: if canEdit(businessId)
+          && validWithholdingRecord(request.resource.data)
+          && unaffected(['transactionId', 'createdBy', 'createdAt'])
+          && withholdingTxOpen(businessId, recordId);
+        // 取引削除と同一バッチで消される。リンク先がlocked・締め済み期間
+        // なら拒否。取引が既に無い孤児レコードは整理できるよう許可する
+        allow delete: if canEdit(businessId)
+          && (!exists(txDoc(businessId, recordId))
+            || withholdingTxOpen(businessId, recordId));
+      }
+
+      function validWithholdingRecord(d) {
+        return d.transactionId is string
+          && d.category in ['service_fee', 'salary']
+          && d.paymentAmount is int
+          && d.paymentAmount > 0
+          && d.taxAmount is int
+          && d.taxAmount >= 0
+          && d.calculation in ['auto', 'manual']
+          && (!('note' in d) || d.note is string);
+      }
+
+      // リンク先取引(recordId=transactionId)が実在し、expense型で、
+      // lockedでも締め済み期間でもないこと
+      function withholdingTxOpen(businessId, recordId) {
+        return exists(txDoc(businessId, recordId))
+          && get(txDoc(businessId, recordId)).data.get('type', '') == 'expense'
+          && !txLocked(businessId, recordId)
+          && !inClosedPeriod(businessId,
+              get(txDoc(businessId, recordId)).data.get('date', ''));
+      }
+
       // ---------- receipts ----------
       match /receipts/{receiptId} {
         allow get, list: if isMember(businessId);
@@ -521,6 +566,43 @@ service cloud.firestore {
           && d.dayOfMonth >= 1
           && d.dayOfMonth <= 31
           && d.active is bool
+          && (!('lastGeneratedMonth' in d) || d.lastGeneratedMonth is string);
+      }
+
+      // ---------- recurringInvoiceTemplates ----------
+      // 定期請求書テンプレート。期日到来分はサーバー処理でドラフト請求書へ
+      // 展開される(invoicesコレクション。連番はbusiness.invoiceCounterを進める)
+      match /recurringInvoiceTemplates/{templateId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validRecurringInvoiceTemplate(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && validRecurringInvoiceTemplate(request.resource.data)
+          && unaffected(['createdBy', 'createdAt']);
+        allow delete: if isOwner(businessId);
+      }
+
+      function validRecurringInvoiceTemplate(d) {
+        return d.name is string
+          && d.customerId is string
+          && (!('projectId' in d) || d.projectId is string)
+          && d.items is list
+          && d.intervalMonths is int
+          && d.intervalMonths >= 1
+          && d.intervalMonths <= 36
+          && d.dayOfMonth is int
+          && d.dayOfMonth >= 1
+          && d.dayOfMonth <= 31
+          && dateString(d.startDate)
+          && (!('endDate' in d) || dateString(d.endDate))
+          && (!('maxOccurrences' in d)
+            || (d.maxOccurrences is int && d.maxOccurrences >= 1))
+          && d.dueDays is int
+          && d.dueDays >= 0
+          && d.dueDays <= 366
+          && d.active is bool
+          && (!('generatedCount' in d) || d.generatedCount is int)
           && (!('lastGeneratedMonth' in d) || d.lastGeneratedMonth is string);
       }
 

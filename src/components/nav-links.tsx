@@ -29,6 +29,7 @@ const NAV_GROUPS = [
       { href: "/projects", label: "案件" },
       { href: "/quotes", label: "見積" },
       { href: "/invoices", label: "請求・入金" },
+      { href: "/recurring-invoices", label: "定期請求書" },
     ],
   },
   {
@@ -44,6 +45,7 @@ const NAV_GROUPS = [
       { href: "/reports/trial-balance", label: "試算表" },
       { href: "/reports/yearly", label: "年次レポート" },
       { href: "/reports/filing", label: "決算書(収支内訳書)" },
+      { href: "/withholding", label: "源泉徴収" },
     ],
   },
   {

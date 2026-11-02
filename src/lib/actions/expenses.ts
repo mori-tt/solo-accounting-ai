@@ -68,6 +68,7 @@ export async function createExpense(
       taxAmount: parsed.data.taxAmount,
       paymentDueDate:
         parsed.data.paymentDueDate === "" ? undefined : parsed.data.paymentDueDate,
+      withholding: parsed.data.withholding,
     });
     return { transaction: result.transaction, expense: result.expense };
   });

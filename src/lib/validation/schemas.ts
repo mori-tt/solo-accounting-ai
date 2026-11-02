@@ -173,6 +173,32 @@ export const taxCategorySchema = z.enum([
   "out_of_scope",
 ]);
 
+/** 源泉徴収の支払区分。service_fee=報酬・料金(支払調書)、salary=給与(源泉徴収票) */
+export const withholdingCategorySchema = z.enum(["service_fee", "salary"]);
+
+/**
+ * 源泉徴収記録の入力。対象はexpense型取引。
+ * paymentAmount は対象支払額(取引額以下)、taxAmount は manual 時の税額。
+ * auto は区分の税率(service_fee=10.21%)で自動計算する。
+ */
+export const withholdingSchema = z
+  .object({
+    category: withholdingCategorySchema,
+    /** 源泉徴収の対象となる支払金額(円・整数・正数) */
+    paymentAmount: yenAmount,
+    /** 税額の求め方。auto=税率で自動計算、manual=税額を手入力 */
+    calculation: z.enum(["auto", "manual"]),
+    /** manual時の源泉徴収税額(円・整数・0以上)。auto時は無視される */
+    taxAmount: nonNegativeYen.optional(),
+    /** 支払調書の細目欄に使うメモ(任意) */
+    note: optionalText,
+  })
+  .refine((v) => v.calculation !== "manual" || v.taxAmount !== undefined, {
+    message: "手入力の場合は源泉徴収税額を入力してください",
+    path: ["taxAmount"],
+  });
+export type WithholdingFormInput = z.infer<typeof withholdingSchema>;
+
 export const transactionSchema = z
   .object({
     type: z.enum(["income", "expense", "transfer"]),
@@ -190,11 +216,23 @@ export const transactionSchema = z
      */
     taxCategory: taxCategorySchema.nullable().optional(),
     taxRate: z.enum(["standard", "reduced"]).nullable().optional(),
+    /**
+     * 源泉徴収記録。更新時: 省略(undefined)=既存値を保持、
+     * null=解除、値=登録/更新。type=expense の場合のみ有効。
+     */
+    withholding: withholdingSchema.nullable().optional(),
   })
   .refine((v) => v.taxRate == null || v.taxCategory === "taxable", {
     message: "税率は課税取引の場合のみ指定できます",
     path: ["taxRate"],
-  });
+  })
+  .refine(
+    (v) => !v.withholding || v.type === "expense",
+    {
+      message: "源泉徴収は支出取引のみ設定できます",
+      path: ["withholding"],
+    },
+  );
 export type TransactionInput = z.infer<typeof transactionSchema>;
 
 /** 取引検索の入力。queryは摘要・取引先・科目・金額への横断検索文字列 */
@@ -235,6 +273,8 @@ export const expenseSchema = z.object({
   taxCategory: taxCategorySchema,
   taxAmount: nonNegativeYen.optional(),
   paymentDueDate: z.union([dateString, z.literal("")]).optional(),
+  /** 源泉徴収の記録(任意)。外注費・報酬・専従者給与の源泉税を記録する */
+  withholding: withholdingSchema.optional(),
 });
 export type ExpenseInput = z.infer<typeof expenseSchema>;
 
@@ -366,6 +406,67 @@ export const recurringTemplateUpdateSchema = recurringTemplateSchema.extend({
 });
 export type RecurringTemplateUpdateInput = z.infer<
   typeof recurringTemplateUpdateSchema
+>;
+
+/** 定期請求書テンプレート。間隔は月単位、終了条件は終了日または回数 */
+const recurringInvoiceTemplateBase = z.object({
+  name: z.string().min(1, "テンプレート名を入力してください").max(200),
+  customerId: z.string().min(1, "顧客を選択してください").max(200),
+  /** 空文字は未指定扱い */
+  projectId: z.string().max(200).optional(),
+  items: z
+    .array(invoiceItemSchema)
+    .min(1, "明細を1行以上入力してください")
+    .max(100, "明細は100行以内で入力してください"),
+  intervalMonths: z
+    .number({ error: "生成間隔は数値で入力してください" })
+    .int("生成間隔は整数で入力してください")
+    .min(1, "生成間隔は1〜36か月で入力してください")
+    .max(36, "生成間隔は1〜36か月で入力してください"),
+  dayOfMonth: z
+    .number({ error: "毎月の日付は数値で入力してください" })
+    .int("1〜31の整数で入力してください")
+    .min(1, "1〜31で入力してください")
+    .max(31, "1〜31で入力してください"),
+  startDate: dateString,
+  /** 空文字は未指定扱い */
+  endDate: z.union([dateString, z.literal("")]).optional(),
+  maxOccurrences: z
+    .number({ error: "生成回数は数値で入力してください" })
+    .int("生成回数は整数で入力してください")
+    .min(1, "生成回数は1以上で入力してください")
+    .max(999, "生成回数は999以下で入力してください")
+    .optional(),
+  dueDays: z
+    .number({ error: "支払期日は数値で入力してください" })
+    .int("支払期日は整数で入力してください")
+    .min(0, "支払期日は0〜366日で入力してください")
+    .max(366, "支払期日は0〜366日で入力してください"),
+});
+
+const endDateNotBeforeStart = <T extends { startDate: string; endDate?: string }>(
+  schema: z.ZodType<T>,
+) =>
+  schema.refine(
+    (v) => v.endDate === undefined || v.endDate === "" || v.endDate >= v.startDate,
+    {
+      message: "終了日は開始日以降の日付にしてください",
+      path: ["endDate"],
+    },
+  );
+
+export const recurringInvoiceTemplateSchema = endDateNotBeforeStart(
+  recurringInvoiceTemplateBase,
+);
+export type RecurringInvoiceTemplateInput = z.infer<
+  typeof recurringInvoiceTemplateSchema
+>;
+
+export const recurringInvoiceTemplateUpdateSchema = endDateNotBeforeStart(
+  recurringInvoiceTemplateBase.extend({ active: z.boolean() }),
+);
+export type RecurringInvoiceTemplateUpdateInput = z.infer<
+  typeof recurringInvoiceTemplateUpdateSchema
 >;
 
 export const depreciationMethodSchema = z.enum([

@@ -17,6 +17,14 @@ export const CASH_ACCOUNT = "cash";
 /** 期首残高の相手科目として使う資本(元入金)勘定コード(科目マスタ外の内部コード) */
 export const OPENING_EQUITY_ACCOUNT = "opening_equity";
 
+/**
+ * 源泉徴収税額の預り先として使う預り金勘定コード(科目マスタ外の内部コード)。
+ * 源泉徴収対象の支出取引は、支払額から源泉税相当分を差し引いた
+ * 現金貸方と、預り金貸方の2行に分離して仕訳展開する。
+ * 納付時はこの科目を相手勘定とする振替取引(借方=預り金)で残高を減らす。
+ */
+export const WITHHOLDING_ACCOUNT = "withholding_payable";
+
 /** 仕訳展開に必要な取引項目 */
 export type JournalTransaction = Pick<
   TransactionEntity,
@@ -39,13 +47,17 @@ export interface JournalLine {
   credit: number;
 }
 
-/** 取引1件から展開した仕訳。lines[0]が借方行、lines[1]が貸方行 */
+/**
+ * 取引1件から展開した仕訳。lines[0]が借方行、以降が貸方行。
+ * 通常は借方1行+貸方1行の2行。源泉徴収対象の支出は貸方が
+ * 現金(差引支払額)と預り金(源泉税額)の2行になり計3行。
+ */
 export interface JournalEntry {
   transactionId: string;
   date: ISODate;
   description: string;
   counterparty: string;
-  lines: readonly [JournalLine, JournalLine];
+  lines: readonly JournalLine[];
 }
 
 /**
@@ -60,6 +72,7 @@ export interface JournalEntry {
  */
 export function transactionToJournalEntry(
   transaction: JournalTransaction,
+  withholdingTaxAmount = 0,
 ): JournalEntry {
   const debit: JournalLine =
     transaction.type === "income"
@@ -69,24 +82,48 @@ export function transactionToJournalEntry(
     transaction.type === "income"
       ? { account: transaction.account, debit: 0, credit: transaction.amount }
       : { account: CASH_ACCOUNT, debit: 0, credit: transaction.amount };
+  const lines: JournalLine[] = [debit, credit];
+  // 源泉徴収対象の支出: 支払額のうち源泉税相当分は現金ではなく
+  // 預り金(未納付の源泉所得税)へ振り替えるため、貸方行を分離する。
+  // 貸借一致は保たれる(借方=支払総額 = 現金差引額 + 預り金)
+  if (
+    transaction.type === "expense" &&
+    Number.isInteger(withholdingTaxAmount) &&
+    withholdingTaxAmount > 0 &&
+    withholdingTaxAmount <= transaction.amount
+  ) {
+    credit.credit = transaction.amount - withholdingTaxAmount;
+    lines.push({
+      account: WITHHOLDING_ACCOUNT,
+      debit: 0,
+      credit: withholdingTaxAmount,
+    });
+  }
   return {
     transactionId: transaction.id,
     date: transaction.date,
     description: transaction.description,
     counterparty: transaction.counterparty,
-    lines: [debit, credit],
+    lines,
   };
 }
 
-/** 確定済み取引を日付昇順の仕訳帳へ展開する(同日はtransactionId順) */
+/**
+ * 確定済み取引を日付昇順の仕訳帳へ展開する(同日はtransactionId順)。
+ * withholdingTaxByTx は transactionId → 源泉徴収税額 のマップ
+ * (withholdingRecords から組み立てる。省略時は全件0として2行仕訳)。
+ */
 export function buildJournal(
   transactions: readonly JournalTransaction[],
+  withholdingTaxByTx?: ReadonlyMap<string, number>,
 ): JournalEntry[] {
   return transactions
     .filter(
       (t) => t.status === "confirmed" || t.status === "locked",
     )
-    .map(transactionToJournalEntry)
+    .map((t) =>
+      transactionToJournalEntry(t, withholdingTaxByTx?.get(t.id) ?? 0),
+    )
     .sort(
       (a, b) =>
         compareISODate(a.date, b.date) ||

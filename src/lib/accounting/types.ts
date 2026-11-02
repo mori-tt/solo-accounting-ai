@@ -112,6 +112,37 @@ export interface Expense {
   paidAt?: DateString;
 }
 
+/** 源泉徴収の支払区分。service_fee=報酬・料金等(支払調書)、salary=給与(源泉徴収票) */
+export type WithholdingCategory = "service_fee" | "salary";
+
+/** 源泉徴収税額の求め方。auto=税率で自動計算、manual=手入力 */
+export type WithholdingCalculation = "auto" | "manual";
+
+/**
+ * 源泉徴収の記録。expense型Transactionに1対1で紐付く
+ * (ドキュメントID = transactionId で一意性を構造保証する)。
+ * レコードの存在自体が「源泉徴収対象」フラグを兼ねる。
+ */
+export interface WithholdingRecord {
+  /** ドキュメントID = transactionId */
+  id: string;
+  /** 対象取引(expense型のみ) */
+  transactionId: string;
+  /** 支払区分 */
+  category: WithholdingCategory;
+  /** 源泉徴収の対象となった支払金額(円・整数・正数) */
+  paymentAmount: number;
+  /** 源泉徴収税額(円・整数・0以上) */
+  taxAmount: number;
+  /** taxAmount の求め方(自動計算か手入力かの記録) */
+  calculation: WithholdingCalculation;
+  /** 支払調書の細目欄に使うメモ(任意) */
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Receipt {
   id: string;
   storagePath: string;
@@ -276,6 +307,40 @@ export interface RecurringTemplate {
   dayOfMonth: number;
   active: boolean;
   /** 最後に取引を生成した月(yyyyMM)。未生成は未設定 */
+  lastGeneratedMonth?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 定期請求書テンプレート。間隔・開始日・終了条件(終了日または回数)を持ち、
+ * 期日の来た月にドラフト請求書を自動生成する。
+ * 定期取引(recurringTemplates)とは別コレクションで、生成物は invoices。
+ */
+export interface RecurringInvoiceTemplate {
+  id: string;
+  name: string;
+  customerId: string;
+  projectId?: string;
+  /** 請求明細。登録時に正規化済み(amount=quantity*unitPrice・taxRate/taxAmount付与) */
+  items: InvoiceItem[];
+  /** 生成間隔(月・1-36)。1=毎月、3=3か月ごと、12=毎年。startDateの月が起点 */
+  intervalMonths: number;
+  /** 各生成月の発行日(1-31)。その月に存在しない日は末日へ調整される */
+  dayOfMonth: number;
+  /** この日以降の発行日のみ生成対象とする開始日 YYYY-MM-DD */
+  startDate: DateString;
+  /** この日を超える発行日は生成しない終了日 YYYY-MM-DD(任意) */
+  endDate?: DateString;
+  /** 生成する請求書の上限回数(任意)。generatedCount が達したら生成しない */
+  maxOccurrences?: number;
+  /** 支払期日 = 発行日 + dueDays 日後(0-366) */
+  dueDays: number;
+  active: boolean;
+  /** これまでに生成した請求書の累計数 */
+  generatedCount: number;
+  /** 最後に生成処理を行った月(yyyyMM)。未処理は未設定 */
   lastGeneratedMonth?: string;
   createdBy: string;
   createdAt: string;

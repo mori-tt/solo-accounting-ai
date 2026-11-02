@@ -204,6 +204,32 @@ export function recurringTemplate(extra: Record<string, unknown> = {}) {
   };
 }
 
+export function recurringInvoiceTemplate(
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    name: "顧問料",
+    customerId: "cust-1",
+    items: [
+      {
+        description: "顧問料(月額)",
+        quantity: 1,
+        unitPrice: 50000,
+        amount: 50000,
+        taxRate: "standard",
+        taxAmount: 4545,
+      },
+    ],
+    intervalMonths: 1,
+    dayOfMonth: 25,
+    startDate: "2026-01-01",
+    dueDays: 30,
+    active: true,
+    generatedCount: 0,
+    ...extra,
+  };
+}
+
 export function inventoryItem(extra: Record<string, unknown> = {}) {
   return {
     name: "商品A",
@@ -279,5 +305,21 @@ export function fiscalPeriod(status: "open" | "closed" = "open") {
     endDate: "2026-12-31",
     status,
     ...(closed ? { closedBy: OWNER } : {}),
+  };
+}
+
+/** 源泉徴収記録。ドキュメントID=transactionId の1:1付属データ */
+export function withholdingRecord(extra: Record<string, unknown> = {}) {
+  return {
+    transactionId: "w-tx",
+    category: "service_fee",
+    paymentAmount: 100000,
+    taxAmount: 10210,
+    calculation: "auto",
+    note: "原稿料",
+    createdBy: "seed",
+    createdAt: "2026-10-15T00:00:00.000Z",
+    updatedAt: "2026-10-15T00:00:00.000Z",
+    ...extra,
   };
 }

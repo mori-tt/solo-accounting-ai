@@ -39,6 +39,9 @@ export const ACCOUNT_OPTIONS: readonly AccountOption[] = [
   { code: "family_salary", label: "専従者給与", kind: "expense" },
   { code: "misc_expense", label: "雑費", kind: "expense" },
   { code: "depreciation", label: "減価償却費", kind: "expense" },
+  // 源泉徴収税の預り金・納付用(振替取引で残高を減らす負債科目。
+  // ledger.ts の WITHHOLDING_ACCOUNT と同じコード)
+  { code: "withholding_payable", label: "預り金(源泉所得税)", kind: "any" },
   { code: "transfer", label: "振替・口座間移動", kind: "any" },
   { code: "other", label: "その他", kind: "any" },
 ] as const;

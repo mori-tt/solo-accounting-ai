@@ -24,6 +24,7 @@ businesses/{businessId}/customers/{customerId}
 businesses/{businessId}/projects/{projectId}
 businesses/{businessId}/transactions/{transactionId}
 businesses/{businessId}/expenses/{expenseId}
+businesses/{businessId}/withholdingRecords/{transactionId}
 businesses/{businessId}/receipts/{receiptId}
 businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/quotes/{quoteId}
@@ -32,6 +33,7 @@ businesses/{businessId}/bills/{billId}
 businesses/{businessId}/billPayments/{billPaymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
 businesses/{businessId}/recurringTemplates/{templateId}
+businesses/{businessId}/recurringInvoiceTemplates/{templateId}
 businesses/{businessId}/fixedAssets/{assetId}
 businesses/{businessId}/inventoryItems/{itemId}
 businesses/{businessId}/inventoryCounts/fy{fiscalYear}
@@ -130,6 +132,26 @@ receipts(証憑ファイル)
 | taxAmount | number | 消費税額(円・整数・0以上)。非課税・免税・不課税は0固定 |
 | paymentDueDate | string? | YYYY-MM-DD(未払管理) |
 | paidAt | string? | YYYY-MM-DD(支払済み日付) |
+
+### businesses/{businessId}/withholdingRecords/{transactionId}
+
+源泉徴収記録。`type=expense` のTransactionと1対1で紐付き、
+ドキュメントIDは取引IDと同一(記録の存在自体が源泉徴収の対象フラグ)。
+取引の登録・編集・削除と同一コミットで同期され、締め済み期間の保護は
+リンク先取引の `status`/`date` から導出される(自身は日付を持たない)。
+仕訳展開では `taxAmount` を貸方の預り金(源泉所得税)行として分離する。
+
+| Field | Type | Note |
+|---|---|---|
+| transactionId | string | リンク先の支出取引(ドキュメントIDと同一) |
+| category | string | `service_fee`(報酬・料金等) / `salary`(給与)。支払調書はservice_fee、源泉徴収票はsalary+専従者給与科目が対象 |
+| paymentAmount | number | 源泉徴収の対象となる支払金額(円・整数・正数)。取引額以下 |
+| taxAmount | number | 源泉徴収税額(円・整数・0以上) |
+| calculation | string | `auto`(区分の税率で自動計算) / `manual`(手入力)。税額の由来を保持 |
+| note | string? | 支払調書の細目欄に使うメモ |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
 
 ### businesses/{businessId}/receipts/{receiptId}
 
@@ -285,6 +307,37 @@ invoice.quoteId と quote.convertedInvoiceId を相互参照する)。
 | dayOfMonth | number | 毎月の生成日(1-31)。その月に存在しない日は末日へ調整 |
 | active | boolean | 無効化は削除ではなく `false` |
 | lastGeneratedMonth | string? | 最後に生成した月(yyyyMM) |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/recurringInvoiceTemplates/{templateId}
+
+定期請求書テンプレート。「今月分を生成」操作で、期日の来たテンプレートから
+指定月の請求書(`status=draft`)を一括作成する。生成物は `invoices` で、
+請求書番号は既存の連番(`businesses.invoiceCounter`)から採番する。
+スケジュールは `startDate` の月を起点に `intervalMonths` ごとの月の
+`dayOfMonth` 日(その月に存在しない日は末日へ調整)を発行日とし、
+`endDate`・`maxOccurrences` で終了条件を指定する。
+生成済み管理は `lastGeneratedMonth`・`generatedCount` で行い、
+同じ月の再生成はしない。生成される請求書IDは
+`recurring-invoice-{templateId}-{yyyyMM}` で決定的。
+
+| Field | Type | Note |
+|---|---|---|
+| name | string | テンプレート名 |
+| customerId | string | 請求先顧客 |
+| projectId | string? | 紐付く案件 |
+| items | array | invoicesと同形式 [{ description, quantity, unitPrice, amount, taxRate, taxAmount }]。登録時に正規化済み |
+| intervalMonths | number | 生成間隔(月・1-36)。1=毎月、3=3か月ごと、12=毎年 |
+| dayOfMonth | number | 各生成月の発行日(1-31)。その月に存在しない日は末日へ調整 |
+| startDate | string | YYYY-MM-DD。この日以降の発行日のみ生成対象 |
+| endDate | string? | YYYY-MM-DD。この日を超える発行日は生成しない |
+| maxOccurrences | number? | 生成回数の上限(1-999)。generatedCountが達したら生成しない |
+| dueDays | number | 支払期日=発行日+N日後(0-366) |
+| active | boolean | 無効化は削除ではなく `false` |
+| generatedCount | number | これまでに生成した請求書の累計数 |
+| lastGeneratedMonth | string? | 最後に生成処理を行った月(yyyyMM) |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
