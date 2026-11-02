@@ -1,6 +1,7 @@
 "use server";
 
 import { listAuditLogsRaw, listMembers } from "@/lib/api/queries";
+import { actionReadRateLimiter } from "@/lib/api/rate-limit";
 import { run, type ActionResult } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 
@@ -25,7 +26,8 @@ export async function listAuditLogs(
   businessId: string,
 ): Promise<ActionResult<AuditLogRow[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const [logs, members] = await Promise.all([
       listAuditLogsRaw(businessId),
       // 名前解決に失敗してもログ自体は表示する

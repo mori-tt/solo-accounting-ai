@@ -3,6 +3,10 @@
 import { auditsFor } from "@/lib/accounting/services/common";
 import type { Business, CustomAccount } from "@/lib/accounting/types";
 import { ACCOUNT_OPTIONS } from "@/lib/accounts";
+import {
+  actionBulkRateLimiter,
+  actionReadRateLimiter,
+} from "@/lib/api/rate-limit";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -19,7 +23,8 @@ export async function listUsedAccountCodes(
   businessId: string,
 ): Promise<ActionResult<string[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const transactions = await getStore().listTransactionsInRange(
       businessId,
       "0001-01-01",
@@ -74,6 +79,8 @@ export async function saveCustomAccounts(
 
   return run(async () => {
     const actor = await requireEditor(businessId);
+    // 科目削除時に全取引をスキャンする可能性があるため bulk 枠で制限する
+    actionBulkRateLimiter.consume(businessId);
     const store = getStore();
     const { value } = await store.transact(businessId, {}, async (tx) => {
       const current = await tx.getBusiness(businessId);
