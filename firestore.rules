@@ -539,6 +539,43 @@ service cloud.firestore {
           && (!('lastGeneratedMonth' in d) || d.lastGeneratedMonth is string);
       }
 
+      // ---------- recurringInvoiceTemplates ----------
+      // 定期請求書テンプレート。期日到来分はサーバー処理でドラフト請求書へ
+      // 展開される(invoicesコレクション。連番はbusiness.invoiceCounterを進める)
+      match /recurringInvoiceTemplates/{templateId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validRecurringInvoiceTemplate(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && validRecurringInvoiceTemplate(request.resource.data)
+          && unaffected(['createdBy', 'createdAt']);
+        allow delete: if isOwner(businessId);
+      }
+
+      function validRecurringInvoiceTemplate(d) {
+        return d.name is string
+          && d.customerId is string
+          && (!('projectId' in d) || d.projectId is string)
+          && d.items is list
+          && d.intervalMonths is int
+          && d.intervalMonths >= 1
+          && d.intervalMonths <= 36
+          && d.dayOfMonth is int
+          && d.dayOfMonth >= 1
+          && d.dayOfMonth <= 31
+          && dateString(d.startDate)
+          && (!('endDate' in d) || dateString(d.endDate))
+          && (!('maxOccurrences' in d)
+            || (d.maxOccurrences is int && d.maxOccurrences >= 1))
+          && d.dueDays is int
+          && d.dueDays >= 0
+          && d.dueDays <= 366
+          && d.active is bool
+          && (!('generatedCount' in d) || d.generatedCount is int)
+          && (!('lastGeneratedMonth' in d) || d.lastGeneratedMonth is string);
+      }
+
       // ---------- fixedAssets ----------
       // 固定資産台帳。償却費の取引生成はAdmin SDK経由(ルールは台帳データ自体を保護)
       match /fixedAssets/{assetId} {

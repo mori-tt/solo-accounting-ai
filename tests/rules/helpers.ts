@@ -191,6 +191,32 @@ export function recurringTemplate(extra: Record<string, unknown> = {}) {
   };
 }
 
+export function recurringInvoiceTemplate(
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    name: "顧問料",
+    customerId: "cust-1",
+    items: [
+      {
+        description: "顧問料(月額)",
+        quantity: 1,
+        unitPrice: 50000,
+        amount: 50000,
+        taxRate: "standard",
+        taxAmount: 4545,
+      },
+    ],
+    intervalMonths: 1,
+    dayOfMonth: 25,
+    startDate: "2026-01-01",
+    dueDays: 30,
+    active: true,
+    generatedCount: 0,
+    ...extra,
+  };
+}
+
 export function inventoryItem(extra: Record<string, unknown> = {}) {
   return {
     name: "商品A",

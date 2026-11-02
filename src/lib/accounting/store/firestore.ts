@@ -27,6 +27,7 @@ import type {
   Project,
   Receipt,
   ReceiptStatus,
+  RecurringInvoiceTemplate,
   RecurringTemplate,
   Transaction,
   WithholdingRecord,
@@ -246,6 +247,21 @@ class FirestoreAccountingReader implements AccountingReader {
     );
   }
 
+  getRecurringInvoiceTemplate(
+    businessId: string,
+    id: string,
+  ): Promise<RecurringInvoiceTemplate | undefined> {
+    return this.readDoc(businessId, "recurringInvoiceTemplates", id);
+  }
+
+  listRecurringInvoiceTemplates(
+    businessId: string,
+  ): Promise<RecurringInvoiceTemplate[]> {
+    return this.readQuery<RecurringInvoiceTemplate>(
+      this.col(businessId, "recurringInvoiceTemplates"),
+    );
+  }
+
   getFixedAsset(
     businessId: string,
     id: string,
@@ -427,6 +443,12 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listRecurringTemplates(businessId: string) {
     return this.reader.listRecurringTemplates(businessId);
+  }
+  getRecurringInvoiceTemplate(businessId: string, id: string) {
+    return this.reader.getRecurringInvoiceTemplate(businessId, id);
+  }
+  listRecurringInvoiceTemplates(businessId: string) {
+    return this.reader.listRecurringInvoiceTemplates(businessId);
   }
   getFixedAsset(businessId: string, id: string) {
     return this.reader.getFixedAsset(businessId, id);

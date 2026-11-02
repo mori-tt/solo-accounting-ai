@@ -16,6 +16,7 @@ import type {
   Project,
   Receipt,
   ReceiptStatus,
+  RecurringInvoiceTemplate,
   RecurringTemplate,
   Transaction,
   WithholdingRecord,
@@ -39,6 +40,7 @@ export type CollectionName =
   | "billPayments"
   | "monthlySummaries"
   | "recurringTemplates"
+  | "recurringInvoiceTemplates"
   | "fixedAssets"
   | "inventoryItems"
   | "inventoryCounts"
@@ -92,6 +94,13 @@ export interface AccountingReader {
   listRecurringTemplates(
     businessId: string,
   ): Promise<RecurringTemplate[]>;
+  getRecurringInvoiceTemplate(
+    businessId: string,
+    id: string,
+  ): Promise<RecurringInvoiceTemplate | undefined>;
+  listRecurringInvoiceTemplates(
+    businessId: string,
+  ): Promise<RecurringInvoiceTemplate[]>;
   getFixedAsset(
     businessId: string,
     id: string,

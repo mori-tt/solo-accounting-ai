@@ -376,6 +376,67 @@ export type RecurringTemplateUpdateInput = z.infer<
   typeof recurringTemplateUpdateSchema
 >;
 
+/** 定期請求書テンプレート。間隔は月単位、終了条件は終了日または回数 */
+const recurringInvoiceTemplateBase = z.object({
+  name: z.string().min(1, "テンプレート名を入力してください").max(200),
+  customerId: z.string().min(1, "顧客を選択してください").max(200),
+  /** 空文字は未指定扱い */
+  projectId: z.string().max(200).optional(),
+  items: z
+    .array(invoiceItemSchema)
+    .min(1, "明細を1行以上入力してください")
+    .max(100, "明細は100行以内で入力してください"),
+  intervalMonths: z
+    .number({ error: "生成間隔は数値で入力してください" })
+    .int("生成間隔は整数で入力してください")
+    .min(1, "生成間隔は1〜36か月で入力してください")
+    .max(36, "生成間隔は1〜36か月で入力してください"),
+  dayOfMonth: z
+    .number({ error: "毎月の日付は数値で入力してください" })
+    .int("1〜31の整数で入力してください")
+    .min(1, "1〜31で入力してください")
+    .max(31, "1〜31で入力してください"),
+  startDate: dateString,
+  /** 空文字は未指定扱い */
+  endDate: z.union([dateString, z.literal("")]).optional(),
+  maxOccurrences: z
+    .number({ error: "生成回数は数値で入力してください" })
+    .int("生成回数は整数で入力してください")
+    .min(1, "生成回数は1以上で入力してください")
+    .max(999, "生成回数は999以下で入力してください")
+    .optional(),
+  dueDays: z
+    .number({ error: "支払期日は数値で入力してください" })
+    .int("支払期日は整数で入力してください")
+    .min(0, "支払期日は0〜366日で入力してください")
+    .max(366, "支払期日は0〜366日で入力してください"),
+});
+
+const endDateNotBeforeStart = <T extends { startDate: string; endDate?: string }>(
+  schema: z.ZodType<T>,
+) =>
+  schema.refine(
+    (v) => v.endDate === undefined || v.endDate === "" || v.endDate >= v.startDate,
+    {
+      message: "終了日は開始日以降の日付にしてください",
+      path: ["endDate"],
+    },
+  );
+
+export const recurringInvoiceTemplateSchema = endDateNotBeforeStart(
+  recurringInvoiceTemplateBase,
+);
+export type RecurringInvoiceTemplateInput = z.infer<
+  typeof recurringInvoiceTemplateSchema
+>;
+
+export const recurringInvoiceTemplateUpdateSchema = endDateNotBeforeStart(
+  recurringInvoiceTemplateBase.extend({ active: z.boolean() }),
+);
+export type RecurringInvoiceTemplateUpdateInput = z.infer<
+  typeof recurringInvoiceTemplateUpdateSchema
+>;
+
 export const depreciationMethodSchema = z.enum([
   "straightLine",
   "decliningBalance",

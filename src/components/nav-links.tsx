@@ -28,6 +28,7 @@ const NAV_GROUPS = [
       { href: "/customers", label: "顧客" },
       { href: "/projects", label: "案件" },
       { href: "/invoices", label: "請求・入金" },
+      { href: "/recurring-invoices", label: "定期請求書" },
     ],
   },
   {

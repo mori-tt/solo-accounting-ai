@@ -63,6 +63,17 @@ export function formatDate({ year, month, day }: DateParts): DateString {
   return `${year}-${mm}-${dd}`;
 }
 
+/** date に days 日を加えた日付を返す(月・年またぎ可。負数で減算)。 */
+export function addDays(date: DateString, days: number): DateString {
+  const { year, month, day } = parseDate(date);
+  const d = new Date(Date.UTC(year, month - 1, day + days));
+  return formatDate({
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  });
+}
+
 /** 月次サマリのドキュメントIDとして使う `yyyyMM` キー。 */
 export function monthKeyOf(date: DateString): string {
   const { year, month } = parseDate(date);

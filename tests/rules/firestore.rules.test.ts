@@ -22,6 +22,7 @@ import {
   OUTSIDER,
   OWNER,
   receipt,
+  recurringInvoiceTemplate,
   recurringTemplate,
   seed,
   seedBusiness,
@@ -1021,6 +1022,128 @@ describe("recurringTemplates", () => {
 
   it("削除はownerのみ", async () => {
     await seed(testEnv, { [rPath(BIZ, "r1")]: recurringTemplate() });
+    await assertFails(asUser(testEnv, EDITOR).doc(rPath(BIZ, "r1")).delete());
+    await assertSucceeds(asUser(testEnv, OWNER).doc(rPath(BIZ, "r1")).delete());
+  });
+});
+
+describe("recurringInvoiceTemplates", () => {
+  const rPath = (biz: string, id: string) =>
+    `businesses/${biz}/recurringInvoiceTemplates/${id}`;
+
+  it("memberは読み取れる", async () => {
+    await seed(testEnv, { [rPath(BIZ, "r1")]: recurringInvoiceTemplate() });
+    await assertSucceeds(asUser(testEnv, VIEWER).doc(rPath(BIZ, "r1")).get());
+    await assertSucceeds(
+      asUser(testEnv, VIEWER)
+        .collection(`businesses/${BIZ}/recurringInvoiceTemplates`)
+        .get(),
+    );
+    await assertFails(asUser(testEnv, OUTSIDER).doc(rPath(BIZ, "r1")).get());
+  });
+
+  it("editorは作成できる、viewerは作成できない", async () => {
+    await assertSucceeds(
+      asUser(testEnv, EDITOR)
+        .doc(rPath(BIZ, "r1"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR }),
+    );
+    await assertFails(
+      asUser(testEnv, VIEWER)
+        .doc(rPath(BIZ, "r2"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: VIEWER }),
+    );
+  });
+
+  it("他人名義(createdBy不一致)では作成できない", async () => {
+    await assertFails(
+      asUser(testEnv, EDITOR)
+        .doc(rPath(BIZ, "r1"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: OWNER }),
+    );
+  });
+
+  it("不正なデータでは作成できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r1"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, dayOfMonth: 0 }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r2"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, intervalMonths: 0 }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r3"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, intervalMonths: 37 }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r4"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, startDate: "2026-1-1" }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r5"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, dueDays: -1 }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r6"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, maxOccurrences: 0 }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r7"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, active: "yes" }),
+    );
+    await assertFails(
+      editor
+        .doc(rPath(BIZ, "r8"))
+        .set({ ...recurringInvoiceTemplate(), createdBy: EDITOR, items: "明細" }),
+    );
+  });
+
+  it("editorは更新・無効化できる", async () => {
+    await seed(testEnv, { [rPath(BIZ, "r1")]: recurringInvoiceTemplate() });
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor.doc(rPath(BIZ, "r1")).update({ dayOfMonth: 1 }),
+    );
+    await assertSucceeds(
+      editor.doc(rPath(BIZ, "r1")).update({ active: false }),
+    );
+    // 生成済み管理フィールドの更新(lastGeneratedMonth/generatedCount)
+    await assertSucceeds(
+      editor
+        .doc(rPath(BIZ, "r1"))
+        .update({ lastGeneratedMonth: "202610", generatedCount: 3 }),
+    );
+  });
+
+  it("createdBy/createdAtは更新で変更できない", async () => {
+    await seed(testEnv, { [rPath(BIZ, "r1")]: recurringInvoiceTemplate() });
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor.doc(rPath(BIZ, "r1")).update({ createdBy: EDITOR }),
+    );
+    await assertFails(
+      editor.doc(rPath(BIZ, "r1")).update({ createdAt: "x" }),
+    );
+  });
+
+  it("viewerは更新・削除できない", async () => {
+    await seed(testEnv, { [rPath(BIZ, "r1")]: recurringInvoiceTemplate() });
+    const viewer = asUser(testEnv, VIEWER);
+    await assertFails(viewer.doc(rPath(BIZ, "r1")).update({ active: false }));
+    await assertFails(viewer.doc(rPath(BIZ, "r1")).delete());
+  });
+
+  it("削除はownerのみ", async () => {
+    await seed(testEnv, { [rPath(BIZ, "r1")]: recurringInvoiceTemplate() });
     await assertFails(asUser(testEnv, EDITOR).doc(rPath(BIZ, "r1")).delete());
     await assertSucceeds(asUser(testEnv, OWNER).doc(rPath(BIZ, "r1")).delete());
   });
