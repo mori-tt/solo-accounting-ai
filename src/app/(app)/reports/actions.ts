@@ -16,6 +16,10 @@ import {
   type YearlyReport,
 } from "@/lib/accounting/domain/yearly";
 import {
+  buildYearComparison,
+  type YearComparison,
+} from "@/lib/accounting/domain/compare";
+import {
   buildIncomeStatement,
   type IncomeStatement,
 } from "@/lib/accounting/domain/filing";
@@ -259,6 +263,61 @@ export async function getYearlyReport(
       report,
       tax,
       taxFiling,
+    };
+  });
+}
+
+export interface YearComparisonData {
+  /** 選択した年度(比較の最終年) */
+  fiscalYear: number;
+  /** 事業の会計年度開始月 */
+  fiscalYearStartMonth: number;
+  /** fiscalYear-2 〜 fiscalYear の3年比較 */
+  comparison: YearComparison;
+}
+
+/** 複数年比較の対象年数(選択年度+前2年) */
+const COMPARISON_YEARS = 3;
+
+/**
+ * 複数年比較レポート。選択年度と前2年の年次集計を組み立て、
+ * 年間・月別の売上/経費/利益と対前年増減率を返す。
+ * 集計は保存せず確定済みTransactionからその場で組み立てる。
+ */
+export async function getYearComparisonReport(
+  businessId: string,
+  fiscalYear: number,
+): Promise<ActionResult<YearComparisonData>> {
+  if (!validFiscalYear(fiscalYear)) {
+    return fail("INVALID_INPUT", "年度が不正です");
+  }
+  return run(async () => {
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
+    const store = getStore();
+    const business = await store.getBusiness(businessId);
+    if (!business) {
+      throw new ApiError("NOT_FOUND", "事業が見つかりません");
+    }
+    const startMonth = business.fiscalYearStartMonth;
+    const years = Array.from({ length: COMPARISON_YEARS }, (_, i) =>
+      fiscalYear - (COMPARISON_YEARS - 1 - i),
+    );
+    // 最古年の期首〜選択年の期末までを1回で読み、各年の年次集計に振り分ける
+    // (buildYearlyReport は期間外の取引を自動で除外する)
+    const first = fiscalPeriodRange(years[0], startMonth);
+    const last = fiscalPeriodRange(years[years.length - 1], startMonth);
+    const transactions = await store.listTransactionsInRange(
+      businessId,
+      first.startDate,
+      last.endDate,
+    );
+    return {
+      fiscalYear,
+      fiscalYearStartMonth: startMonth,
+      comparison: buildYearComparison(
+        years.map((y) => buildYearlyReport(transactions, y, startMonth)),
+      ),
     };
   });
 }
