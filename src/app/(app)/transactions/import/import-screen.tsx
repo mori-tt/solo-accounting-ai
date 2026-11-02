@@ -1,14 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useApp } from "@/components/auth-provider";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
+import { useApiData } from "@/lib/hooks/use-api-data";
 import {
   createTransaction,
   listTransactions,
 } from "@/lib/actions/transactions";
+import { listAuditLogs } from "@/lib/actions/audit-logs";
+import { recordImportRun } from "@/lib/actions/imports";
 import { callApi } from "@/lib/api-client";
+import { describeAuditEntry, filterAuditLogs } from "@/lib/audit-log-view";
+import { formatDateTime } from "@/lib/format";
 import type { TransactionType } from "@/lib/accounting/types";
 import {
   findExistingMatches,
@@ -81,6 +86,17 @@ const MATCH_DAY_DIFF = 3;
 const linkClass =
   "text-indigo-600 hover:underline dark:text-indigo-400";
 
+/** 履歴セクションに表示するインポート実行の件数 */
+const HISTORY_SIZE = 20;
+
+/** ユーザーの表示名。名前が解決できない場合は uid の先頭 */
+function actorLabel(row: { actorUid: string; actorName: string | null }) {
+  if (row.actorName) return row.actorName;
+  return row.actorUid.length > 8
+    ? `${row.actorUid.slice(0, 8)}…`
+    : row.actorUid;
+}
+
 /** 銀行/カード明細CSV → 候補一覧 → 選択して一括登録(editor以上のみ) */
 export function BankImportScreen() {
   useBrowserOnly();
@@ -99,6 +115,24 @@ export function BankImportScreen() {
   const [defaultAccounts, setDefaultAccounts] = useState<
     Record<"income" | "expense", string>
   >({ expense: "misc_expense", income: "misc_income" });
+
+  // インポート履歴(監査ログ基盤の再利用)。viewerは画面自体が非表示だが
+  // フックは実行されるため、editor未満では取得しない
+  const { data: auditLogs, reload: reloadHistory } = useApiData(
+    () =>
+      businessId && canEdit
+        ? callApi(() => listAuditLogs(businessId))
+        : Promise.resolve([]),
+    [businessId, canEdit],
+  );
+  const history = useMemo(
+    () =>
+      filterAuditLogs(auditLogs ?? [], { action: "import" }).slice(
+        0,
+        HISTORY_SIZE,
+      ),
+    [auditLogs],
+  );
 
   const loadFile = async (file: File) => {
     setImportFinished(false);
@@ -258,7 +292,15 @@ export function BankImportScreen() {
       }
     }
     setImporting(false);
-    if (succeeded > 0) setImportFinished(true);
+    if (succeeded > 0) {
+      setImportFinished(true);
+      // 監査記録の失敗で取込結果を壊さないため、履歴の記録・再取得は握りつぶす
+      void callApi(() =>
+        recordImportRun(businessId, { kind: "bank-csv", count: succeeded }),
+      )
+        .catch(() => undefined)
+        .then(reloadHistory);
+    }
   };
 
   const counts = {
@@ -572,6 +614,43 @@ export function BankImportScreen() {
           )}
         </Card>
       )}
+
+      <Card className="mt-4 overflow-x-auto p-0">
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+          <h2 className="text-sm font-semibold">インポート履歴</h2>
+          <Link href="/audit-log" className={linkClass}>
+            監査ログで全履歴を見る
+          </Link>
+        </div>
+        {history.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-zinc-400">
+            インポート履歴はまだありません
+          </p>
+        ) : (
+          <table className={tableClass}>
+            <thead>
+              <tr>
+                <th>日時</th>
+                <th>ユーザー</th>
+                <th>概要</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((log) => (
+                <tr key={log.id}>
+                  <td className="whitespace-nowrap">
+                    {formatDateTime(log.createdAt)}
+                  </td>
+                  <td className="whitespace-nowrap">
+                    <span title={log.actorUid}>{actorLabel(log)}</span>
+                  </td>
+                  <td>{describeAuditEntry(log)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </div>
   );
 }

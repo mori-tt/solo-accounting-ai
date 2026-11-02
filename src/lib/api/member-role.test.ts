@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { roleAtLeast, toMemberRole } from "./member-role";
+import { effectiveOwnerUids, roleAtLeast, toMemberRole } from "./member-role";
 
 describe("toMemberRole", () => {
   it("有効なロールはそのまま返す", () => {
@@ -35,5 +35,41 @@ describe("roleAtLeast", () => {
     expect(roleAtLeast("viewer", "editor")).toBe(false);
     expect(roleAtLeast("viewer", "owner")).toBe(false);
     expect(roleAtLeast("editor", "owner")).toBe(false);
+  });
+});
+
+describe("effectiveOwnerUids", () => {
+  it("memberドキュメントのownerを列挙する", () => {
+    const roles = new Map([
+      ["a", "owner"],
+      ["b", "editor"],
+      ["c", "viewer"],
+    ]);
+    expect(effectiveOwnerUids(roles, undefined)).toEqual(new Set(["a"]));
+  });
+
+  it("memberドキュメントが無いownerUidはフォールバックでownerになる", () => {
+    const roles = new Map([["a", "editor"]]);
+    expect(effectiveOwnerUids(roles, "owner-x")).toEqual(new Set(["owner-x"]));
+  });
+
+  it("ownerUidに非ownerのmemberドキュメントがあるとフォールバックしない", () => {
+    // ownerUidユーザーのmemberドキュメントをviewerへ書き換えると
+    // owner権限を失う(requireMembershipと同じ判定)
+    const roles = new Map([
+      ["a", "owner"],
+      ["owner-x", "viewer"],
+    ]);
+    expect(effectiveOwnerUids(roles, "owner-x")).toEqual(new Set(["a"]));
+  });
+
+  it("ownerUidのroleが不正な値ならフォールバックする", () => {
+    const roles = new Map([["owner-x", "superadmin"]]);
+    expect(effectiveOwnerUids(roles, "owner-x")).toEqual(new Set(["owner-x"]));
+  });
+
+  it("ownerUid未指定・ownerメンバーなしなら空になる", () => {
+    const roles = new Map([["a", "viewer"]]);
+    expect(effectiveOwnerUids(roles, undefined).size).toBe(0);
   });
 });

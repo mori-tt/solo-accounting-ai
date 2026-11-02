@@ -72,6 +72,11 @@ receipts(証憑ファイル)
 | customAccounts | object[] | 任意・最大50件。`{ code, label, kind: income\|expense, parentCode?, disabled? }` カスタム勘定科目・補助科目 |
 | allocationRatios | map? | 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い |
 | openingBalances | array | 期首残高 `{ fiscalYear, accountCode, amount }[]`。amountは円・整数、借方残高を正・貸方残高を負とする。任意 |
+| lastBackupAt | Timestamp? | 最終バックアップ(エクスポート)日時。`/api/backup` GET成功時にサーバーが記録。未取得は未設定 |
+| invoiceRegistrationNumber | string? | 適格請求書発行事業者の登録番号(T+13桁)。未登録(免税事業者等)は未設定 |
+| issuerName | string? | 請求書の発行者名。未設定時は事業名を使う |
+| issuerAddress | string? | 請求書に記載する発行者住所 |
+| invoiceCounter | number? | 請求書番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
 
@@ -150,6 +155,7 @@ receipts(証憑ファイル)
 
 | Field | Type | Note |
 |---|---|---|
+| invoiceNumber | string? | 請求書番号(`INV-`+6桁連番・作成時に採番)。連番導入前データは未設定 |
 | customerId | string | |
 | projectId | string? | |
 | issueDate | string | YYYY-MM-DD |
@@ -273,12 +279,15 @@ periodIdは `fy{fiscalYear}`(会計年度開始年)で決定的に採番する�
 | Field | Type | Note |
 |---|---|---|
 | actorUid | string | |
-| action | string | `create` / `update` / `delete` / `close` / `run_ai` / `approve_ai` / `reject_ai` |
+| action | string | `create` / `update` / `delete` / `close` / `run_ai` / `approve_ai` / `reject_ai` / `import` |
 | targetPath | string | 対象ドキュメントのパス |
 | createdAt | Timestamp | |
 
 ※ 個人情報・証憑内容のスナップショットは保存しない。対象の識別情報のみ記録する。
 AI関連のactionは `run_ai` / `approve_ai` / `reject_ai` を使う。
+CSVインポート実行は `import` を使い、targetPath は実コレクションを持たない
+`businesses/{businessId}/imports/{kind}:{登録件数}` 形式の擬似パス
+(kind は `bank-csv` / `transactions-csv`)。ファイル名・明細内容は記録しない。
 
 ※ `transactions`/`receipts` の `aiSuggestion` mapフィールドは廃止済み(ADR-0005)。
 AI提案はすべて `aiSuggestions` コレクションで管理する。

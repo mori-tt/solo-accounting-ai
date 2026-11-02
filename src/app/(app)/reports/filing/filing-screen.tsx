@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
@@ -104,13 +105,21 @@ export function FilingScreen() {
           title="決算書(収支内訳書)"
           description="会計年度の年間収支を収支内訳書(一般用)の様式で確認・印刷できます"
           actions={
-            <Button
-              variant="secondary"
-              onClick={() => window.print()}
-              disabled={!data || !netIncome}
-            >
-              印刷する
-            </Button>
+            <>
+              <Link
+                href="/reports/consumption-tax"
+                className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
+              >
+                消費税 納付税額計算へ
+              </Link>
+              <Button
+                variant="secondary"
+                onClick={() => window.print()}
+                disabled={!data || !netIncome}
+              >
+                印刷する
+              </Button>
+            </>
           }
         />
 

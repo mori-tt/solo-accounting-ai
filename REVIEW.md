@@ -1594,3 +1594,231 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - Emulator向けrate-limitスキップは `FIREBASE_AUTH_EMULATOR_HOST` の有無で切るため、本番デプロイに同変数が混入すると制限が外れる。環境変数管理で emulator 用変数を本番へ混入させない運用前提(現状 `.env.development` のみ)
 - `postSession` 全失敗後も現状どおり `sessionReady=true` へ進みアプリは動作継続する(監視通知のみ強化)。完全なセッション不可時に明示エラー画面へ倒すかは別途検討
 - 旧オンボーディング(`app-shell.tsx` の `BusinessOnboarding` 簡易フォーム)と新5ステップウィザード(`/onboarding`)が併存。E2Eは両経路を別specで検証しているが、製品側でどちらに寄せるかは別タスク
+## 2026-11-02: ナビゲーションのグルーピング+検索結果から取引へのdeep link(Issue #98)
+- Worktree: nav-search-ux
+
+### ナビゲーションのグルーピング
+- `src/components/nav-links.tsx`(新規): app-shell.tsx からナビ定義を分離。24項目を用途別5セクション(ダッシュボード単独 + 記帳/売上・請求/レポート/決算・管理)にグルーピングし `<h2>` のセクション見出しを付与。各グループ内の項目順・リンク文言・アクティブ判定(`pathname.startsWith`)は変更前と同一。項目数が増えた分 `overflow-y-auto` を nav に追加し縦スクロールを担保
+- `src/components/app-shell.tsx`: NAV_ITEMS/NavLinks を nav-links.tsx へ移しただけ(既存ロジック改変なし)
+- `src/components/nav-links.test.tsx`(新規): グループ見出し表示・リンク24件・アクティブ/非アクティブのクラス付与・href の3件
+
+### 検索結果→取引のdeep link
+- `src/lib/format.ts`: `parseMonthKeyParam`(?month= の YYYYMM 検証。月01-12範囲外・桁数違い・null は undefined)と `transactionDeepLink`(`/transactions?month=YYYYMM&focus=<id>` 生成。id は encodeURIComponent)を追加。`src/lib/format.test.ts`(新規)で両関数+dateToMonthKey をカバー
+- `src/app/(app)/search/search-screen.tsx`: 結果行のリンクを `/transactions` 一律遷移から `transactionDeepLink(t)` へ変更(文言「取引一覧」→「詳細」)
+- `src/app/(app)/transactions/transactions-screen.tsx`:
+  - `TransactionsScreen` は useSearchParams で `?month`/`?focus` を読み、`month/focus` を key に持つ `TransactionsScreenInner` へ委譲。パラメータ変更時は再マウントで初期値を反映する設計(react-hooks/set-state-in-effect を踏まないためeffectによるsetStateを避けた)。再マウントに伴い useApiData の再取得が走る
+  - `monthKey` 初期値: 有効な `?month` があればそれ、なければ当月。`focusId` は `?focus` を初期値とし、月送り・種別/状態フィルタ変更・通知の「閉じる」で手動クリア
+  - 対象行は `id=transaction-<id>` で特定し `scrollIntoView({block:"center"})` で画面中央へスクロール、`focused` prop で初期展開+indigo強調(展開の手動解除は可)
+  - focus対象が表示月の一覧に無い場合は info Alert「指定された取引はN年M月の一覧に見つかりませんでした」を閉じるボタン付きで表示(削除済み・月指定誤り等)
+
+### 実行したチェック
+- `pnpm lint` — 合格(既存の img 警告1件のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(worktree作成直後は typegen が必要)
+- `pnpm test` — 合格(47ファイル549件、skip 10。新規 format.test.ts 7件・nav-links.test.tsx 3件)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路・Server Action の変更なし)
+
+- 未対応(範囲外): 未ログイン状態で deep link を踏むと AppShell の `next` パラメータが pathname のみ保持のためクエリが落ち、ログイン後は /transactions の当月へ着地する(従来仕様。クエリ保持は AppShell 側の改修が必要)
+- focus は locked 取引にも有効(閲覧のみ。操作ボタンは従来どおり非表示)
+- ナビ項目の追加・削除は nav-links.tsx の NAV_GROUPS のみを編集する
+## 2026-11-02: UX補助機能(キーボードショートカット+インポート履歴)(Issue #101)
+- Worktree: ux-extras
+### 実装内容
+キーボードショートカットと、CSVインポート実行の監査記録・履歴表示。依存追加なし。
+- `src/lib/hooks/use-keyboard-shortcuts.ts`(新規): `useKeyboardShortcuts({ enabled, canEdit })`。`g→d`=/dashboard、`g→t`=/transactions(前置キー `g` は1秒でタイムアウト)、`n`=`/transactions?new=1`(viewerはパラメータなしで一覧のみ)、`/`=/search遷移後にキーワード欄フォーカス(既に/searchなら直接フォーカス)、`?`=一覧ダイアログ開閉。input/textarea/select/contentEditable フォーカス中・修飾キー併用・defaultPrevented時は発動しない
+- `src/components/keyboard-shortcuts.tsx`(新規): フックのマウント専用クライアントコンポーネント。`status==="signed_in"` のみ有効化し、「?」でConfirmDialogと同パターン(portal+Escape+オーバーレイクリック)の一覧ダイアログを表示。定義は `KEYBOARD_SHORTCUTS` としてhook側に集約
+- `(app)/layout.tsx`: Suspense内に `<KeyboardShortcuts />` を1行追加(app-shell.tsxは未変更)
+- `/transactions?new=1`: transactions-screen で `useSearchParams` を読み登録フォームを開く。effect内setStateを避けるため `showForm = wantsNew || showFormState` に派生させ、閉じる系操作(閉じる/キャンセル/登録完了)で `router.replace("/transactions")` によりパラメータ除去。viewerは `canEdit` ガードで開かない
+- `/search` のキーワード TextInput に `data-shortcut="search-input"` を付与し、`/` ショートカット到着後のフォーカス対象に
+- `src/lib/actions/imports.ts`(新規): `recordImportRun(businessId, { kind, count })`。requireEditor後 `writeAuditLog` で action=`import`・targetPath=`businesses/{businessId}/imports/{kind}:{登録件数}` の擬似パスを記録
+- `src/lib/audit-log-view.ts`: action=`import`・対象種別=`imports` のラベル追加、`IMPORT_KINDS`(bank-csv=明細CSV/transactions-csv=取引CSV)・`isImportKind`・`parseImportDocId` 新設、`describeAuditEntry` に import 分岐(例:「明細CSVから12件を取込」)
+- 明細CSVインポート画面(`/transactions/import`): 「インポート履歴」セクション追加(`listAuditLogs`+`filterAuditLogs`+`describeAuditEntry` の監査ログ基盤を再利用。最新20件・日時/ユーザー/概要・監査ログへのリンク)。登録成功時に `recordImportRun` を fire-and-forget で記録して履歴を再取得
+- 取引一覧のCSV取込パネル(`TransactionCsvImport`)も kind=`transactions-csv` で同様に記録
+- 監査ログ画面: `import` のバッジ色追加。`docs/FIRESTORE_SCHEMA.md` の action 列挙に `import` と擬似パス形式を追記
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(46ファイル551件、skip 10。`keyboard-shortcuts.test.tsx` 8件 + `audit-log-view.test.ts` に import 系ケース追加)
+- Firebase Emulator tests — 未実施(firestore.rules変更なし。`import` actionはAdmin SDK経由のサーバー書き込みのみで、クライアントcreate権限の列挙追加は不要)
+### 判断事項・次の担当者への注意事項
+- `imports/{kind}:{count}` の targetPath は実コレクションではない擬似パス。「監査ログは識別情報のみ」方針を維持しつつ履歴に種別・件数を出すための表現(ファイル名・明細内容は記録しない)
+- `recordImportRun` の記録失敗はUIを壊さないよう握りつぶす(取込そのものは成功扱い)。記録漏れは履歴に出ないのみ
+- `n` のフォーム起動は `?new=1` パラメータ経由。手ブックマークでも開く。viewerには付与しない
+- 履歴は監査ログ全件取得→クライアント絞込(audit-log画面と同方針)。auditLogs肥大化時はサーバーサイドページングの検討対象(既存注記と同じ)
+- `KeyboardShortcuts` は Suspense 内配置のため画面フォールバック中はリスナー未マウント。`useApp` の status で signed_in 時のみ有効
+## 2026-11-02: バージョン表示(Issue #99 項目1)
+- Worktree: wiring-ops
+- Issue #85 で一元化済みの `src/lib/version.ts`(`APP_VERSION`)を UI へ配線する「version表示」項目への対応。Issue #99 の残項目(monitoring配線・dev dep監査・バックアップ鮮度アラート・Emulatorキャッシュ)は未着手
+- `src/components/legal-footer.tsx`: 法務リンク末尾に `v{APP_VERSION}` を `<span>` で追加。本フッターは login・legal・認証済み全画面((app)/layout)で共通描画されるため1箇所の変更で全表示面をカバー
+- `src/app/page.tsx`: LP フッターのコピーライト右に `v{APP_VERSION}` を追加(自前footerを持つため別途配線)
+- `src/app/(app)/settings/settings-screen.tsx`: アカウントカードの `<dl>` に「アプリバージョン」項目を追加(ユーザーが版数を確認する慣例的な場所)
+- `pnpm install --frozen-lockfile` — 成功(worktree新規のため)
+- `pnpm lint` — 合格(receipts の既存 `<img>` warning 1件のみ、本変更と無関係)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(fresh worktree では LayoutProps 等の生成型が無いため typegen 先行が必要)
+- Firebase Emulator tests — 実施せず(rules・データ書き込み経路の変更なし。加えて別worktreeの Emulator が port 8080/9199/4400 を占有中で AGENTS.md の1系統制約により起動不可)
+- 表示は `v1.0.0` 形式で統一。server component(LegalFooter・LP)と client component(settings)双方から import するが、version.ts は依存ゼロのため問題なし
+## 2026-11-02: 配線/運用の後始末(Issue #99 項目2-5)
+- Worktree: wiring-ops(項目1のversion表示は別コミットで対応済)
+### 監視配線(項目2)
+- `src/lib/api/result.ts`: `toActionError` の想定外エラー分岐(INTERNAL化する落口)で `captureException(e, { tags: { source: "api-error-path" } })` を呼ぶよう配線。Route Handler の `toErrorResponse` と Server Action の `run` の双方がこの関数へ集約されるため1箇所でカバー。ApiError/DomainError 等の想定内エラーは捕捉しない(ユーザー起因の失敗を監視通知しない)
+- `src/app/error.tsx`・`src/app/(app)/error.tsx`: `useEffect` 内の `console.error` を `captureException` へ置換。context は `tags.boundary`(root-error/app-error)と `extra.digest`(サーバーログ対応付け用識別子)のみで個人情報・証憑内容は含めない
+- monitoring層は process.env ポリフィル(クライアントでは空オブジェクト、env.ts のコメント参照)前提でクライアントバンドル入りしても安全。SENTRY_DSN 未設定時は構造化ログへフォールバックする従来動作のまま
+- `global-error.tsx` は Issue 指定の「error.tsx×2」外のため未変更(ルートレイアウト崩壊時の最終境界。今後の拡張候補)
+### dev dep 監査(項目3)
+- `pnpm ls @testing-library/dom` で direct devDependency だが import は全て `@testing-library/react` 経由と確認。pnpm は peer dependency を自動導入するため直接指定は不要と判断し `pnpm remove` で package.json/pnpm-lock.yaml から除去。除去後も lockfile 整合・全テスト合格(10.4.2 は react の peer として引き続き解決される)
+### バックアップ鮮度アラート(項目4)
+- `Business`/`MyBusiness` に `lastBackupAt?: string` を追加し `listMyBusinesses` で populate
+- `GET /api/backup`: エクスポート成功後に business doc へ `lastBackupAt: FieldValue.serverTimestamp()` を記録。ダウンロード本体を落とさないよう別 try/catch + captureException(feature: backup)でベストエフォート化
+- `src/lib/backup.ts`: `backupFreshness(lastBackupAt, now)` を追加。never(未取得/不正日付・安全側)/stale(30日超過)/fresh を返す純粋関数。`BACKUP_STALE_DAYS = 30`
+- ダッシュボード: `business` ロード済みかつ never/stale の場合に警告Alert+/backupリンクを表示(business未取得の一瞬に誤警告しないよう undefined は保留)。backup.test.ts に freshness テスト3件追加
+- `docs/FIRESTORE_SCHEMA.md`: businesses テーブルに lastBackupAt 行を追記
+### CI Emulator キャッシュ(項目5)
+- `.github/workflows/ci.yml` test-rules ジョブに `actions/cache@v4` で `~/.cache/firebase/emulators` をキャッシュ(key は pnpm-lock.yaml ハッシュ+restore-keys フォールバック)。Emulator JAR ダウンロード時間を CI から除去
+- `pnpm lint` — 合格(既存 `<img>` warning 1件のみ)
+- `pnpm test` — 合格(45ファイル542件、skip 10。backupFreshness +3)
+- Firebase Emulator tests — 未実施(rules・データ経路の rules 非依存変更のみ。別 worktree の Emulator が port 占有中で AGENTS.md の1系統制約により起動不可)
+- lastBackupAt は `*At` 接尾辞のため store 経由の書き込みでは `toStore` が Timestamp 化するが、今回は FieldValue.serverTimestamp() を直接書くため型不整合なし(FIRESTORE_SCHEMA.md も Timestamp で記載)
+- エクスポートJSONの business 部分には直前の lastBackupAt が含まれうるが、復元時は name/fiscalYearStartMonth/taxMode のみ適用されるため書き戻されない
+## 2026-11-02: 消費税申告用納付税額計算シート(Issue #95)
+- Worktree: consumption-tax-report
+- `src/app/(app)/reports/consumption-tax/` 新設(独立ページ。ナビはIssue制約で未変更のため、決算書画面から相互リンクで到達)
+  - `page.tsx`/`loading.tsx`: filing・yearly と同型(Suspense+`instant=false`/ScreenSkeleton)
+  - `consumption-tax-screen.tsx`: YearNav + 印刷ボタン + 簡易課税時のみ事業区分(第1〜6種・みなし仕入率)Select。集計入力はServer Actionから取得し、納付額算出は `computeConsumptionTaxFiling` を画面側で実行(事業区分変更を再取得なしで即時反映するため。決算書画面の computeNetIncome と同型パターン)
+  - `consumption-tax-sheet.tsx`: 帳票本体。課税資産の譲渡等の対価(税込)→課税標準額(千円未満切捨て)→消費税額(7.8%/6.24%)→仕入税額控除→差引税額→納付税額(国税・百円切捨て)+地方消費税(差引×22/78・百円切捨て)→納付合計、を第二表の手順どおり税率別内訳つきで出力。差引が負なら還付税額・譲渡割額(1円精度)の行に切替
+  - `consumption-tax-sheet.test.tsx`: 本則・簡易・還付の3ケースのレンダリングテスト(formatYen経由で期待値生成)
+- `src/app/(app)/reports/actions.ts`: `getConsumptionTaxFilingData` 追加(viewer権限・businessId検証)。fiscalPeriodRange の期間内の確定済み取引を `buildConsumptionTaxSummary` へ渡し、`filingAmounts`(税率別課税対価/仕入対価・税込)と `unclassifiedCount` を返す。集計の保存なし(手計算値の保存禁止ルール準拠)
+- `src/app/(app)/reports/filing/filing-screen.tsx`: PageHeader actions に `/reports/consumption-tax` への Link を追加(既存の印刷ボタンと並置、1行差分)
+### 挙動
+- taxMode=standard: そのまま計算シート表示。simple: 事業区分未選択時は選択を促す Alert(シート・印刷は出さない)、選択後に計算。exempt: 納付義務なしの Alert のみ(印刷不可)
+- taxCategory未設定の取引があれば警告Alert(課税対価に含まれず納付額が過小になる旨)
+- 印刷は既存 print-header パターン踏襲: PrintHeader(帳票名・対象期間・事業名・印刷日、print-only)+ print-sheet/print-table クラス。globals.css の共通ルールに載るため画面側に追加の `<style>` は不要
+- `pnpm lint` — 合格(0エラー。receipts-screen の img 警告1件は既存・本変更と無関係)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(LayoutProps は typegen 生成型のため install 直後は生成が必要)
+- `pnpm test` — 合格(46ファイル実行542件、skip 10。sheet テスト3件追加)
+- `pnpm build` — 合格(`/reports/consumption-tax` が static prerender ○ で生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。読み取り専用actionのみ追加)
+- みなし仕入率の事業区分は Business に保持されないため画面選択値を使う(年次レポートの概算が simple 時に null を返すのと同じ制約。確定データへの保存禁止ルールとも整合)。永続化が必要になれば settings 側の拡張が別タスク
+- 中間納付額の差引き・課税売上割合95%未満時の個別対応/一括比例配分・積上げ計算は未対応(エンジン側未実装の範囲)。帳票の注記に概算・転記用資料である旨を明記
+- types.ts・app-shell・nav・globals.css は Issue 指定どおり未変更
+## 2026-11-02: 適格請求書対応(Issue #94)
+- Worktree: invoice-compliance
+- `src/lib/accounting/types.ts`: `Business` に `invoiceRegistrationNumber`(T+13桁)・`issuerName`・`issuerAddress`・`invoiceCounter`(内部連番カウンタ)、`Invoice` に `invoiceNumber` を追加。いずれもオプショナルで既存データは後方互換
+- `src/lib/validation/schemas.ts`: `businessSchema` に3項目追加。登録番号は `/^T\d{13}$/`(空文字=未設定扱い)。`undefined` は現値維持で、発行項目のない画面(按分タブ・オンボーディング)からの保存で消えない設計
+- `src/lib/accounting/services/business.ts`: `registerBusiness` が発行者3項目を受理し、登録番号は `isInvoiceRegistrationNumber` でサービス層でも検証(zodとの多層防御)
+- `src/lib/accounting/services/sales.ts`: `registerInvoice` で請求書番号を `INV-`+6桁連番で採番。カウンタは事業ドキュメントの `invoiceCounter` を transact 内で読み→同一バッチで書き戻す方式(Firestoreトランザクションの read-before-write・競合リトライで原子的)。冪等リプレイは work 自体が走らないため番号を消費しない
+- `src/lib/actions/businesses.ts`: `MyBusiness` に3項目追加し `listMyBusinesses` でクライアントへ供給。`updateBusinessSettings` は `!== undefined` ガード(指定時のみ上書き・空文字はクリア)、`createBusiness` は `|| undefined` で正規化して通す
+- `src/app/(app)/settings/settings-screen.tsx`: 事業情報カードに「適格請求書(インボイス)発行情報」セクション(登録番号・発行者名・発行者住所)を追加。非オーナー表示側にも3項目のdl行を追加
+- `src/app/(app)/invoices/invoice-sheet.tsx`(新規): 適格請求書の記載事項を備えた帳票コンポーネント。発行者名(issuerNameまたは事業名)・住所・登録番号、請求書番号・発行日・支払期日、交付先(顧客名御中+住所)、税率別対象金額・消費税額の内訳表、軽減税率対象品目の※印。`print-sheet` クラスで画面プレビューと印刷を共用
+- `src/lib/accounting/invoice-tax.ts`: 税率区分ごとの合計金額・消費税額を返す `invoiceAmountsByRate` を追加(明細の保存済み taxAmount 優先・未保存は内税計算)
+- `src/app/(app)/invoices/invoices-screen.tsx`: 一覧の請求書番号列を `invoiceNumber ?? id` 表示に変更し、各行に「印刷プレビュー」リンクを追加。表示中は一覧を丸ごと帳票に差し替え、ツールバーのみ `no-print`(globals.css の印刷ルールで帳票のみ出力)
+- `docs/FIRESTORE_SCHEMA.md`: businesses/invoices に新規4フィールドを追記
+### 確認した穴の整理
+- 採番方式: 専用カウンタdoc案もあったが、rules非改変・store層非拡張で済む事業ドキュメント内カウンタを選択(transactが既に read-then-write をトランザクション化するため原子性は同等)
+- 採番タイミングは Issue 指定どおり「作成時」(draftに付番)。draftが発行されず残っても番号は消費済みとなり連番に欠番が生じうるが、番号の再利用はしない
+- バックアップ復元: `backupBusinessSchema` のホワイトリスト外のため `invoiceRegistrationNumber` 等と `invoiceCounter` は復元対象外。merge型復元で既存値は保持されるため連番の巻き戻りは発生しない。別事業のinvoiceを復元した場合に invoiceNumber 文字列が重複しうるが、既存のIDリマップ設計と同じく「参照は張り替えるが表示値はそのまま」の範囲(別タスク要検討)
+- 印刷時の画面制御: `window.print()` 前に一覧を非表示にするため、既存の「.no-print で囲む」規約に合わせ一覧自体を差し替える実装とした(reports系帳票の「帳票以外を no-print」と同型)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(作業前は `LayoutProps` の生成型欠落でtypecheck失敗。worktree直後は typegen が必要。AGENTS.md に追記推奨)
+- `pnpm lint` — 合格(新規warningなし。receipts-screen の `<img>` warning は既存)
+- `pnpm test` — 合格(46ファイル548件、skip 10。business.test.ts 新規5件・sales.test.ts 連番2件・invoice-tax.test.ts 税率別集計3件追加)
+- `JAVA_HOME=... pnpm test:emulators` — 合格(7件)
+- `JAVA_HOME=... pnpm test:rules` — 合格(79件。validInvoiceは必須項目のみ検査のため新規フィールド追加の影響なし)
+- 免税事業者(登録番号未設定)でも帳票は出力できるが登録番号行は省略される。適格請求書として交付するには設定画面での登録番号入力が前提
+- 請求書番号のフォーマットは `INV-`+6桁固定(prefix・桁数は formatInvoiceNumber に集約)。年頭リセットや任意接頭辞は未対応(要望があれば別タスク)
+- e2e は未実施(同時起動1系統の制約)。帳票プレビューは単体レンダリングのため DOM 構造は invoice-sheet.tsx を参照
+## 2026-11-02: データ保護(Issue #96)
+- Worktree: data-protection
+「最後のowner降格/脱退防止」と「締め期間ロックの請求書/入金への拡大」の2点を対応。
+
+### 最後のowner降格/脱退防止
+- `src/lib/api/member-role.ts`: `effectiveOwnerUids(memberRoles, ownerUid)` を追加。
+  memberドキュメントの role='owner' に加え、`requireMembership` のフォールバック
+  (memberドキュメントが無い/role不正な `business.ownerUid` はowner扱い)と同じ規則で
+  実効owner集合を計算する
+- `src/lib/actions/businesses.ts`: `assertOwnerRemains(businessId, apply)` を新設。
+  members一覧とbusiness.ownerUidを読み、applyで変更を適用した後の実効owner数が
+  0になる操作を FORBIDDEN で拒否する。以下の3経路へ適用:
+  - `updateMemberRole`(対象を非ownerロールへ変更する前に検証)
+  - `removeMember`(対象のmemberドキュメントを消す前に検証)
+  - `inviteMember`(既存memberへの再招待はロール上書き=降格と同義のため同じ検証。
+    再招待で owner→viewer にされると実効ownerを喪失し得る経路だった)
+- 穴の整理:
+  - UIはowner行の変更/削除コントロールを出さないが、action側は未検証だった
+  - `memberInviteSchema` は editor/viewer のみ許可するため、再招待によるowner降格が
+    アプリ内で到達可能な唯一の「実効owner喪失」経路だった(ownerUidのmember
+    ドキュメントをviewerに上書き → フォールバック停止 → owner不在)
+  - 既存の自己変更/自己削除ブロックは維持(自分自身への操作は従来どおり別エラー)
+- `firestore.rules` members: `uid != business.ownerUid` を update/delete に追加。
+  rulesではowner数を数えられないため、クライアントSDK経由では基点owner(ownerUid)
+  のmemberドキュメントを不変にすることで「事業の実効owner不在化」だけを防ぐ。
+  ownerUid以外のmemberドキュメントへのowner操作は従来どおり許可
+
+### 締め期間ロックを請求書/入金へ拡大
+- `src/lib/accounting/services/common.ts`: `isDateInClosedPeriod` を追加し
+  `assertDateInOpenPeriod` を共用化
+- `src/lib/accounting/services/sales.ts` `refreshOverdueInvoices`: 期間一覧を読み、
+  issueDateが締め済み期間の請求書は issued→overdue 更新対象から除外。
+  締め済み期間データの変更禁止に整合(overdue判定は findUnpaidInvoices の
+  動的フラグで別途行える)
+  - 既存の registerInvoice(issueDate)/issueInvoice/registerPayment(入金日)は
+    ガード済み。締め後年度の入金(payment.dateが未締め)は引き続き登録可能で、
+    その際の issued→paid 更新も締め後の正当な更新として許容
+- `firestore.rules`: `dateInClosedPeriod(businessId, dateStr)` を追加。
+  business.fiscalYearStartMonth とサービス層の `fy{会計年度}` ID規則から
+  期間ドキュメントを引き status='closed' を判定
+  - invoices: issueDate が締め済み期間なら create/update/delete を拒否
+    (updateは新旧両方のissueDateを検査。期間移動で締め済みデータを逃がす経路も塞ぐ)
+  - payments: date が締め済み期間なら create/update/delete を拒否(同様に新旧検査)
+  - クライアントSDKからの直接書き込み経路のみを塞ぐ防御層
+    (アプリはAdmin SDK経由でrulesを通らないため締め後の正当な更新は継続可能)
+
+### テスト
+- `member-role.test.ts`: `effectiveOwnerUids` 5件(owner列挙/フォールバック/
+  非owner化でフォールバック停止/不正roleでフォールバック/空)
+- `sales.test.ts`: refreshOverdueInvoices の締め済み期間スキップ2件
+  (全スキップ・未締めのみ更新)
+- `tests/rules/firestore.rules.test.ts`: 基点owner保護3件 + 請求書/入金の
+  締め済み期間拒否4件(作成・更新・削除・issueDate移動・未締めなら従来どおり可)
+
+- `pnpm lint` — 合格(既存warning 1件のみ)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(45ファイル546件、skip 10)
+- `pnpm test:rules` — 合格(86件)
+
+- `assertOwnerRemains` はmembersコレクションの読み→検証→putMember/deleteMemberが
+  非トランザクションのため最良努力のガード(並行する2 owner操作の同時実行までは
+  防げない)。rules側もowner数を数えられない制約上、厳密な排他は将来Functions等の
+  集約経路が必要(REVIEW.md 既存の注記と同じ方針)
+- `updateMemberRole`/`removeMember` で対象にmemberドキュメントが無い場合の
+  ownerUidフォールバック喪失シナリオも `effectiveOwnerUids` がカバーする
+- `docs/SECURITY_RULES.md` に members(ownerUid保護)と invoices/payments の
+  締め済み期間ルールを追記
+## 2026-11-02: セキュリティレビュー ラウンド2
+- Worktree: security-round2
+- 前回(REVIEW_SECURITY.md, 2026-10-31 foundation骨格時点)から機能実装が出揃った現行全体を対象に監査し、`REVIEW_SECURITY_R2.md` を新設。領域別に API/認証・Server Actions・Rules対スキーマ・設定/ヘッダ/ロギングの4面を並行監査し、重要指摘は実コードで検証済み。
+- 結果: High 4 / Medium 17 / Low 多数。主要Highは:
+  - R2-1: receipts の `storagePath`/`mimeType` をサーバーが無検証で信頼(rulesの`validReceipt`も型チェックのみ) → クロステナント読取 + inline serve による stored XSS + OCR経由の外部送出
+  - R2-2: backupリストアが14コレクションへ verbatim 書き込み → auditLogs/aiSuggestions/members(role:'owner')/locked status/closed期間 の不変条件を全面迂回(owner権限前提だが監査証跡の信頼を破壊)
+  - R2-3: 締め済み保護が transactions の `status='locked'` のみに依存 → journalEntries/expenses等は closed期間内でも client SDK から mutable(Rules層の穴。サーバー側 assertDateInOpenPeriod は全経路で担保済み)
+  - R2-4: inviteMember/updateMemberRole/removeMember が `business.ownerUid`・自己招待を防御せず → 唯一ownerの自己降格・第2ownerによる ownerUid doc 降格で不可逆ロックアウト/乗っ取り
+- ラウンド1対応の検証: S3/S4/S5/S6/S7 は解消。S2 は `server-only` 追加済みだが本番での demo projectId フォールバックとサーバー側 emulator env ガード(client経路にしか存在しない)が未解消 → R2-19 として Medium で再掲
+- 文書: `REVIEW_SECURITY_R2.md` に各 finding の file:line・影響・修正案・確認済み項目・Rulesテスト不足・推奨対応順を記録
+- テストは未実行(監査のみ・コード変更なし)。rules テスト不足は R2 文書の「Rules テストの不足」節に列挙
+## 2026-11-02: セキュリティレビュー ラウンド2 対応実施
+- `REVIEW_SECURITY_R2.md` の指摘を「対応状況」節に記録する形で修正。対象別の実装は同文書を参照
+- R2-1: `src/lib/receipt-files.ts` 新設。`isReceiptStoragePathOf`/`isAllowedReceiptMime`/上限値を集約し、ダウンロード route・`ReceiptOcrResolver.resolveOcrText`・`POST /api/receipts` の3経路で検証。serve 側は許可外 MIME を octet-stream+attachment 化・nosniff・CSP `default-src 'none'` 付与。`storagePath`/`fileName`/`mimeType` は rules 側でも登録後不変
+- R2-4: `src/lib/actions/businesses.ts` — `getOwnerUid()` 追加。`inviteMember` の自己招待禁止、`updateMemberRole`/`removeMember` が `business.ownerUid` member の降格・削除を拒否。rules 側も同保護を再現(第2オーナー経由の乗っ取りを deny)
+- R2-2: `planRestore` をコレクション別 sanitize に変更。実行者 actorUid 必須、`idempotencyKeys` 等の内部コレクション除外、status/closed期間/locked/owner注入/auditLog 偽造を復元時に拒否
+- R2-5/R2-6: `src/lib/api/body.ts` 新設(`readRequestText` で実バイト上限・chunked 対策)。backup/OCR route は認証をボディ読取前に移動し OCR を editor/owner 限定化
+- R2-3/R2-8〜R2-13: `firestore.rules` を全面強化。`inClosedPeriod`(日付→fy{year}・開始月考慮)を transactions 以外にも適用、`unaffected` で帰属・証跡フィールドをピン留め、invoice/payment の発行後不変・参照整合性、editor delete を owner 化、auditLogs を actorUid/action/targetPath/時刻で限定、member uid/invitedBy 整合、owner member 保護を追加。`storage.rules` に `receiptFileMutable`(doc 未登録=可変、登録済みは unprocessed かつ未締めのみ)・`image/heif` 追加・create/update 双方に保護(上書きが create 評価される経路を塞ぐ)
+- R2-14: `CommitBatch.deletes` 追加で `deleteTransaction` を transact 内で delete+audit 原子化
+- R2-15: schemas に account/名称/items 等の上限を追加
+- R2-16: `scopedIdempotencyKey(scope,key)` で操作別に冪等キーを分離
+- R2-17: 固定資産の登録/更新/除却/償却計上に `assertDateInOpenPeriod` を追加
+- R2-19: admin.ts で本番 projectId 未解決時は throw + サーバー側 emulator env ガード有効化
+- R2-20: `escapeField` で先頭 `= + - @` 等に `'` 前置
+- R2-7: `clientIpKey` を XFF 最右採用 + createBusiness に uid レート制限
+- ルール実装メモ(REVIEW_SECURITY_R2.md 末尾): `matches()` は文字列全体一致、match内 wildcard は同スコープの function にのみ見える、put 上書きは emulator で create 評価されることがある — いずれも実機で確認してルール側を修正
+- `pnpm lint` — エラー0(既存 warning 1件のみ)
+- `pnpm test` — 合格(48ファイル549件、skip 10)
+- `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
+- 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
+- rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約

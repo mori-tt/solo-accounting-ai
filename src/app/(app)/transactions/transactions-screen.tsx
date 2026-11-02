@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
@@ -31,6 +32,7 @@ import {
   formatMonthKey,
   formatYen,
   monthKeyDateRange,
+  parseMonthKeyParam,
 } from "@/lib/format";
 import {
   Alert,
@@ -84,6 +86,7 @@ function TransactionRow({
   selectDisabled,
   onToggleSelect,
   onChanged,
+  focused,
 }: {
   transaction: Transaction;
   /** この取引を対象とするAI提案(新しい順) */
@@ -97,10 +100,12 @@ function TransactionRow({
   selectDisabled: boolean;
   onToggleSelect: () => void;
   onChanged: () => void;
+  /** ディープリンク等の注目対象。展開・強調表示する(手動で閉じることは可能) */
+  focused: boolean;
 }) {
   const { businessId } = useApp();
   const { label, activeCodes } = useAccounts();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(focused);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -126,7 +131,10 @@ function TransactionRow({
   return (
     <>
       <tr
-        className="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+        id={`transaction-${t.id}`}
+        className={`cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${
+          focused ? "bg-indigo-50 dark:bg-indigo-950/40" : ""
+        }`}
         onClick={() => setExpanded((v) => !v)}
       >
         {canEdit && (
@@ -473,14 +481,39 @@ function BulkActionBar({
 
 export function TransactionsScreen() {
   useBrowserOnly();
+  // 検索結果等からのディープリンク ?month=YYYYMM&focus=<transactionId>。
+  // パラメータが変わると内側を再マウントし、月・focusを初期値として反映する
+  // (戻る/進むや別のディープリンクへの同一ページ内遷移にも対応)
+  const searchParams = useSearchParams();
+  const monthParam = searchParams.get("month");
+  const focusParam = searchParams.get("focus");
+  return (
+    <TransactionsScreenInner
+      key={`${monthParam ?? ""}/${focusParam ?? ""}`}
+      initialMonthKey={parseMonthKeyParam(monthParam)}
+      initialFocusId={focusParam}
+    />
+  );
+}
+
+function TransactionsScreenInner({
+  initialMonthKey,
+  initialFocusId,
+}: {
+  initialMonthKey: string | undefined;
+  initialFocusId: string | null;
+}) {
   const { businessId, business } = useApp();
   const { options, optionsFor, label } = useAccounts();
   const canEdit = business?.role !== "viewer";
 
-  const [monthKey, setMonthKey] = useState(currentMonthKey());
+  const [monthKey, setMonthKey] = useState(
+    () => initialMonthKey ?? currentMonthKey(),
+  );
+  const [focusId, setFocusId] = useState<string | null>(initialFocusId);
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [showFormState, setShowFormState] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
@@ -490,6 +523,18 @@ export function TransactionsScreen() {
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  // キーボードショートカット「n」等から /transactions?new=1 で遷移した場合は
+  // 登録フォームを開く。開閉状態はURLパラメータから派生し、閉じる際に除去する
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const wantsNew = canEdit && searchParams.get("new") === "1";
+  const showForm = wantsNew || showFormState;
+  const closeForm = () => {
+    setShowFormState(false);
+    if (wantsNew) router.replace("/transactions");
+  };
+  const toggleForm = () => (showForm ? closeForm() : setShowFormState(true));
 
   const range = useMemo(() => monthKeyDateRange(monthKey), [monthKey]);
   const { data, initialLoading, error, reload } = useApiData(async () => {
@@ -526,6 +571,17 @@ export function TransactionsScreen() {
       ),
     [data, typeFilter, statusFilter],
   );
+
+  const focusFound =
+    focusId !== null && filtered.some((t) => t.id === focusId);
+
+  // 対象行が描画されたら画面中央へスクロールする
+  useEffect(() => {
+    if (!focusFound || focusId === null) return;
+    document
+      .getElementById(`transaction-${focusId}`)
+      ?.scrollIntoView({ block: "center" });
+  }, [focusFound, focusId]);
 
   // 月・絞り込みを変えたら選択と結果をリセットし、
   // 非表示の行への誤操作を防ぐ(フィルタ系onChangeから呼ぶ)
@@ -696,7 +752,7 @@ export function TransactionsScreen() {
                 >
                   明細CSVインポート
                 </Link>
-                <Button onClick={() => setShowForm((v) => !v)}>
+                <Button onClick={toggleForm}>
                   {showForm ? "閉じる" : "取引を登録"}
                 </Button>
               </>
@@ -720,13 +776,13 @@ export function TransactionsScreen() {
                     idempotencyKey: crypto.randomUUID(),
                   }),
                 );
-                setShowForm(false);
+                closeForm();
                 reload();
               } finally {
                 setFormBusy(false);
               }
             }}
-            onCancel={() => setShowForm(false)}
+            onCancel={closeForm}
           />
         </Card>
       )}
@@ -744,6 +800,7 @@ export function TransactionsScreen() {
           monthKey={monthKey}
           onChange={(v) => {
             setMonthKey(v);
+            setFocusId(null);
             resetBulk();
           }}
         />
@@ -752,6 +809,7 @@ export function TransactionsScreen() {
           value={typeFilter}
           onChange={(e) => {
             setTypeFilter(e.target.value);
+            setFocusId(null);
             resetBulk();
           }}
           aria-label="種別で絞り込み"
@@ -766,6 +824,7 @@ export function TransactionsScreen() {
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value);
+            setFocusId(null);
             resetBulk();
           }}
           aria-label="状態で絞り込み"
@@ -789,6 +848,25 @@ export function TransactionsScreen() {
           onClear={() => setSelectedIds(new Set())}
           progress={bulkProgress}
         />
+      )}
+
+      {focusId !== null && data !== undefined && !focusFound && (
+        <Alert
+          tone="info"
+          className="mb-4 flex items-center justify-between gap-3"
+        >
+          <span>
+            指定された取引は{formatMonthKey(monthKey)}
+            の一覧に見つかりませんでした
+          </span>
+          <button
+            type="button"
+            className="shrink-0 text-xs underline"
+            onClick={() => setFocusId(null)}
+          >
+            閉じる
+          </button>
+        </Alert>
       )}
 
       {bulkResult && (
@@ -872,6 +950,7 @@ export function TransactionsScreen() {
                   selectDisabled={bulkProgress !== null}
                   onToggleSelect={() => toggleSelect(t)}
                   onChanged={reload}
+                  focused={t.id === focusId}
                 />
               ))}
             </tbody>

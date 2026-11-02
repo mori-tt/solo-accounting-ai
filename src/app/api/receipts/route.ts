@@ -1,24 +1,14 @@
 import { registerReceipt } from "@/lib/accounting/services/receipts";
 import { receiptUploadRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
-import { requireEditor } from "@/lib/api/session";
+import { requireEditor, requireUid } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
 import { getAdminBucket } from "@/lib/firebase/admin";
-
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10MB
-const ALLOWED_MIME = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-]);
-
-function sanitizeFileName(name: string): string {
-  const cleaned = name.replace(/[^\w.一-龠ぁ-んァ-ヶ-]/g, "_").slice(-80);
-  return cleaned || "receipt";
-}
+import {
+  isAllowedReceiptMime,
+  RECEIPT_MAX_FILE_BYTES,
+  sanitizeReceiptFileName,
+} from "@/lib/receipt-files";
 
 /**
  * 証憑ファイルのアップロード。
@@ -28,7 +18,15 @@ function sanitizeFileName(name: string): string {
  */
 export async function POST(request: Request) {
   try {
-    const form = await request.formData();
+    // ボディ(multipart全体)のバッファリング前に認証のみ先行する。
+    // businessId 依存のロール検証はボディ解析後に行う
+    await requireUid();
+    const form = await request.formData().catch(() => {
+      throw new ApiError(
+        "INVALID_INPUT",
+        "multipart/form-data ボディが必要です",
+      );
+    });
     const businessId = String(form.get("businessId") ?? "");
     const file = form.get("file");
     if (!businessId || !(file instanceof File)) {
@@ -38,13 +36,13 @@ export async function POST(request: Request) {
     // Storage書き込み+帯域が課金対象のため businessId 単位で制限
     receiptUploadRateLimiter.consume(businessId);
 
-    if (!ALLOWED_MIME.has(file.type)) {
+    if (!isAllowedReceiptMime(file.type)) {
       throw new ApiError(
         "INVALID_INPUT",
         "対応形式は画像(JPEG/PNG/WebP/HEIC)とPDFです",
       );
     }
-    if (file.size > MAX_FILE_BYTES) {
+    if (file.size > RECEIPT_MAX_FILE_BYTES) {
       throw new ApiError(
         "INVALID_INPUT",
         "ファイルは10MB以下にしてください",
@@ -52,7 +50,7 @@ export async function POST(request: Request) {
     }
 
     const receiptId = crypto.randomUUID();
-    const fileName = sanitizeFileName(file.name || "receipt");
+    const fileName = sanitizeReceiptFileName(file.name || "receipt");
     const storagePath = `receipts/${businessId}/${receiptId}/${fileName}`;
 
     const bucket = getAdminBucket();

@@ -71,11 +71,11 @@ describe("clientIpKey", () => {
     return new Request("http://localhost/api/session", { headers });
   }
 
-  it("x-forwarded-for の先頭IPを使う(プロキシ経由)", () => {
+  it("x-forwarded-for の最右IPを使う(先頭はクライアント偽装可能)", () => {
     const req = requestWith({
       "x-forwarded-for": "203.0.113.1, 10.0.0.1, 10.0.0.2",
     });
-    expect(clientIpKey(req)).toBe("203.0.113.1");
+    expect(clientIpKey(req)).toBe("10.0.0.2");
   });
 
   it("x-forwarded-for が無ければ x-real-ip にフォールバック", () => {

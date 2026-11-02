@@ -19,10 +19,14 @@ import {
   buildIncomeStatement,
   type IncomeStatement,
 } from "@/lib/accounting/domain/filing";
-import { fiscalPeriodRange } from "@/lib/accounting/domain/fiscal";
+import {
+  fiscalPeriodRange,
+  type DateRange,
+} from "@/lib/accounting/domain/fiscal";
 import {
   computeConsumptionTaxFiling,
   type ConsumptionTaxFiling,
+  type FilingTaxableAmounts,
 } from "@/lib/accounting/domain/tax";
 import {
   fiscalPeriodBounds,
@@ -225,6 +229,66 @@ export async function getYearlyReport(
       report,
       tax,
       taxFiling,
+    };
+  });
+}
+
+export interface ConsumptionTaxFilingData {
+  businessName: string;
+  fiscalYear: number;
+  /** 会計年度の期間範囲 */
+  range: DateRange;
+  /** 事業の消費税課税方式 */
+  taxMode: TaxMode;
+  /**
+   * computeConsumptionTaxFiling への入力(課税売上・課税仕入の税率別税込合計)。
+   * 簡易課税の事業区分(みなし仕入率)はBusinessに保持しないため、
+   * 納付額の算出は画面側で選択値を使って行う。
+   */
+  filingAmounts: FilingTaxableAmounts[];
+  /** taxCategory 未設定の集計対象取引件数 */
+  unclassifiedCount: number;
+}
+
+/**
+ * 消費税申告用納付税額計算シート用の集計。
+ * 会計年度範囲の確定済み取引から税率別の課税対価・仕入対価を集計して返す。
+ * 集計は保存せず確定済みTransactionからその場で組み立てる(手計算値の保存禁止)。
+ */
+export async function getConsumptionTaxFilingData(
+  businessId: string,
+  fiscalYear: number,
+): Promise<ActionResult<ConsumptionTaxFilingData>> {
+  if (!validFiscalYear(fiscalYear)) {
+    return fail("INVALID_INPUT", "年度が不正です");
+  }
+  return run(async () => {
+    await requireViewer(businessId);
+    const store = getStore();
+    const business = await store.getBusiness(businessId);
+    if (!business) {
+      throw new ApiError("NOT_FOUND", "事業が見つかりません");
+    }
+    const range = fiscalPeriodRange(
+      fiscalYear,
+      business.fiscalYearStartMonth,
+    );
+    const [transactions, expenses] = await Promise.all([
+      store.listTransactionsInRange(
+        businessId,
+        range.startDate,
+        range.endDate,
+      ),
+      store.listExpenses(businessId),
+    ]);
+    const tax = buildConsumptionTaxSummary(transactions, expenses);
+    return {
+      businessName: business.name,
+      fiscalYear,
+      range,
+      taxMode: business.taxMode,
+      filingAmounts: tax.filingAmounts,
+      unclassifiedCount: tax.unclassifiedCount,
     };
   });
 }

@@ -51,6 +51,7 @@ export const AUDIT_TARGET_TYPES = [
   { value: "members", label: "メンバー" },
   { value: "businesses", label: "事業" },
   { value: "idempotencyKeys", label: "冪等キー" },
+  { value: "imports", label: "インポート" },
 ] as const;
 
 const targetTypeLabelMap: ReadonlyMap<string, string> = new Map(
@@ -70,6 +71,7 @@ export const AUDIT_ACTIONS = [
   { value: "run_ai", label: "AI実行" },
   { value: "approve_ai", label: "AI提案承認" },
   { value: "reject_ai", label: "AI提案却下" },
+  { value: "import", label: "インポート" },
 ] as const;
 
 const actionLabelMap: ReadonlyMap<string, string> = new Map(
@@ -81,12 +83,51 @@ export function auditActionLabel(action: string): string {
   return actionLabelMap.get(action) ?? action;
 }
 
+/** CSVインポートの種別。監査の targetPath は `imports/{kind}:{件数}` 形式の擬似パス */
+export const IMPORT_KINDS = [
+  { value: "bank-csv", label: "明細CSV" },
+  { value: "transactions-csv", label: "取引CSV" },
+] as const;
+
+export type ImportKind = (typeof IMPORT_KINDS)[number]["value"];
+
+const importKindLabelMap: ReadonlyMap<string, string> = new Map(
+  IMPORT_KINDS.map((k) => [k.value, k.label]),
+);
+
+export function isImportKind(value: unknown): value is ImportKind {
+  return typeof value === "string" && importKindLabelMap.has(value);
+}
+
+/** `imports` 対象の docId(`{kind}:{件数}`)を分解する。解釈不可は undefined */
+export function parseImportDocId(
+  docId: string,
+): { kind: ImportKind; count: number | null } | undefined {
+  const m = /^([a-z-]+)(?::(\d+))?$/.exec(docId);
+  if (!m || !isImportKind(m[1])) return undefined;
+  return { kind: m[1], count: m[2] === undefined ? null : Number(m[2]) };
+}
+
 /** AI系actionは対象を含む説明文を持つため概要はそれをそのまま使う */
 const SELF_DESCRIBING_ACTIONS: Record<string, string> = {
   run_ai: "AI提案を実行",
   approve_ai: "AI提案を承認",
   reject_ai: "AI提案を却下",
 };
+
+/** インポート実行の概要。targetPath の docId から種別・件数を取り出す */
+function describeImportEntry(targetPath: string): string {
+  const target = parseAuditTargetPath(targetPath);
+  const info =
+    target?.collection === "imports"
+      ? parseImportDocId(target.docId)
+      : undefined;
+  if (!info) return "インポートを実行";
+  const kindLabel = importKindLabelMap.get(info.kind) ?? info.kind;
+  return info.count === null
+    ? `${kindLabel}をインポート`
+    : `${kindLabel}から${info.count}件を取込`;
+}
 
 /**
  * 操作の概要。「対象ラベル + 操作」の説明文を組み立てる
@@ -98,6 +139,7 @@ export function describeAuditEntry(entry: {
 }): string {
   const self = SELF_DESCRIBING_ACTIONS[entry.action];
   if (self) return self;
+  if (entry.action === "import") return describeImportEntry(entry.targetPath);
   const target = parseAuditTargetPath(entry.targetPath);
   const label = target ? auditTargetTypeLabel(target.collection) : "対象";
   return `${label}を${auditActionLabel(entry.action)}`;

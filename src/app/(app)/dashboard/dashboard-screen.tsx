@@ -6,6 +6,7 @@ import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getDashboard } from "@/lib/actions/reports";
 import { callApi, fetchAiUsage } from "@/lib/api-client";
+import { backupFreshness } from "@/lib/backup";
 import {
   currentMonthKey,
   formatMonthKey,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks/use-accounts";
 import {
+  Alert,
   Amount,
   Badge,
   Card,
@@ -102,6 +104,10 @@ export function DashboardScreen() {
   if (!data) return <ErrorState onRetry={reload} />;
 
   const profit = data.summary.totalIncome - data.summary.totalExpense;
+  // business未ロード時は誤警告を出さない(undefinedのみ鮮度判定を保留)
+  const backupState = business
+    ? backupFreshness(business.lastBackupAt)
+    : "fresh";
   const suggestionTargets = new Set(data.pendingSuggestionTransactionIds);
   const allClear =
     data.draftCount === 0 &&
@@ -125,6 +131,20 @@ export function DashboardScreen() {
           </Link>
         }
       />
+
+      {backupState !== "fresh" && (
+        <Alert tone="warning" className="mb-4">
+          {backupState === "never"
+            ? "バックアップがまだ取得されていません。"
+            : `最後のバックアップ( ${business?.lastBackupAt?.slice(0, 10)} )から30日を超えています。`}
+          <Link
+            href="/backup"
+            className="ml-1 font-medium underline hover:no-underline"
+          >
+            バックアップを取得する
+          </Link>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <SummaryCard
