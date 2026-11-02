@@ -1305,3 +1305,20 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 一括処理は全件トランザクションではなく行ごとの逐次呼出しで部分失敗を許容(既存のCSV取込/明細インポートと同設計)。実行中はチェック・操作類を disabled にして選択の変更を防ぐ
 - 行ごとの既存操作(確定・AI提案・編集・削除)は無変更。展開行の colSpan は canEdit 時 7/非表示時 6 に調整
 - E2E・単体テストの一括操作カバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)
+## 2026-11-02: 会計ライブラリ旧層の死コード削除(Issue #74)
+- Worktree: cleanup-old-layer
+- `src/lib/accounting/` 直下の旧層クラスタを削除。`AccountingService`(service.ts)・旧フラット `AccountingStore`/`EntityByCollection`/`CollectionName`/`IDEMPOTENT_COLLECTIONS`(store.ts)・`InMemoryAccountingStore`(memory-store.ts)・テスト用 `setup`/`expectDomainError`/`NOW`/`BIZ`/`ACTOR`(test-helpers.ts)は、import 網羅調査の結果これら5ファイル+旧serviceテスト3件の内部でしか参照されておらず、services//store//ai//actions//app//api/ 等の他層からの参照なしを確認して一括削除
+- 旧 `AccountingService` のテスト `service.billing.test.ts`/`service.closing.test.ts`/`service.transactions.test.ts` もテスト対象ごと削除
+- `index.ts` から `./memory-store`・`./service`・`./store` の re-export を除去(domain/* の re-export は維持)。barrel import(`@/lib/accounting` 直下)の利用者は repo 内にゼロ
+- `testing.ts` は削除せず保持。`testActor`/`setupStore`/`seedClosedPeriod` が services/*.test.ts 8件と tests/emulator/firestoreStore.test.ts から使用中で、実質新層向けテストヘルパーのため
+- 同名注意点: 旧 `store.ts`(get/list/create/remove 系フラットIF)と `store/types.ts`(新層 `AccountingStore`)は別物。`@/lib/api/store.ts` の `getStore()` は新層 `store/firestore.ts` を返しており旧層と無関係
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(worktree作成直後は `.next/types` 未生成で `LayoutProps` エラーになるため typegen を先行)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
+### 設計上の判断・備考
+- 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
+- `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
