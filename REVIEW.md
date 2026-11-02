@@ -16,10 +16,42 @@
 
 ## Log
 
+## 2026-11-02: 消費税2割特例(インボイス制度移行措置)の課税方式対応(Issue #145)
+- Worktree: tax-2wari
+免税事業者が適格請求書発行事業者の登録で課税事業者になった場合の経過措置「2割特例」(納付税額=課税標準額の消費税額×20%)を、課税方式 `special20` として追加。適用対象は2023-10-01〜2026-09-30の日の属する課税期間に限定。依存追加なし。
+### 実装内容
+- `src/lib/accounting/types.ts`: `TaxMode` に `"special20"` を追加(適用期間の要件をJSDocに記載)
+- `src/lib/accounting/domain/tax.ts`:
+  - `TAX_MODES` に `"special20"` 追加。`SPECIAL20_DEEMED_PURCHASE_FRACTION = 4/5`(一律80%のみなし仕入率。申告書の「控除対象仕入税額=消費税額×80%」の手順に対応)
+  - `SPECIAL20_APPLICABLE_PERIOD`(2023-10-01〜2026-09-30)と `isSpecial20ApplicablePeriod(range)` を追加。「期間内の日の属する課税期間」要件を期間重なり判定で検証(開始>終了の逆転期間は VALIDATION_FAILED、不正日付は INVALID_DATE)
+  - 両関数の options を `ConsumptionTaxOptions`(`businessClass?`+`period?`)へ拡張。`period` は special20 で必須・他方式では指定拒否(`businessClass` の simple 専用ルールと同型の厳格バリデーション)
+  - `computeConsumptionTaxPayable`: special20 は `deductibleInputTax = floor(outputTax×80%)`、`taxPayable = outputTax − 控除額`
+  - `computeConsumptionTaxFiling`: special20 は `deductibleInputTax = floor(nationalTax合計×80%)`。税率別 breakdown の控除額は簡易課税と同じく0(合計への一括適用)。控除額は売上税額を超えないため還付は発生しない
+- バリデーション・保存系: `validation/schemas.ts`(businessSchema)、`backup.ts`(backupBusinessSchema)、`services/business.ts`(TAX_MODES) に `special20` を追加。firestore.rules は taxMode を検証していないため変更なし
+- 設定系UI: settings-screen の `TAX_MODE_LABELS` に「2割特例(インボイス移行措置)」追加(選択肢・表示とも `Object.entries` 駆動のため同時反映)。onboarding-screen・app-shell(初回事業作成)にも選択肢を追加(app-shell は `useState` の型を `TaxMode` へ修正)
+- `reports/actions.ts` の `getYearlyReport`: special20 は適用期間と重なる場合のみ `computeConsumptionTaxFiling` に `period` 付きで実行し、期間外は `taxFiling=null` を返す(画面側で「適用期間外」案内を出すため)
+- `yearly-screen.tsx`: 課税方式ラベルに2割特例追加。special20 で税Filing=null(適用期間外)のとき「適用期間外」Alertを表示。概算カードの方式表記に2割特例を追加
+- `consumption-tax-screen.tsx`: special20 は `data.range` が適用期間と重なるときのみ filing を計算(`{ period: data.range }` を渡す)。期間外は警告Alert(期間・年度日付を併記)を表示してシートを出さない
+- `consumption-tax-sheet.tsx`: ModeLabel に「2割特例(インボイス制度移行措置)」、仕入税額控除セクションに「控除対象仕入税額(2割特例・消費税額×80%)」行を追加(本則課税の支払対価行・簡易課税のみなし仕入率行は出さない)。脚注に適用要件・期間制限を追記
+- ドキュメント: `docs/ACCOUNTING_RULES.md`・`docs/FIRESTORE_SCHEMA.md` の taxMode 列挙に `special20` を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(61ファイル767件、skip 10。`tax.test.ts` に special20 計算・period バリデーション・`isSpecial20ApplicablePeriod` 境界値、`consumption-tax-sheet.test.tsx` に2割特例帳票の計7件追加)
+- `pnpm build` — 合格
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル156件)
+- `pnpm test:emulators` — 合格(2ファイル7件)
+### 判断事項・次の担当者への注意事項
+- 控除額は「消費税額合計×80%の切捨て」で算出するため、差引税額は厳密には売上税額の20%ではなく端数分だけ大きくなり得る(例: 消費税999円→控除799→差引200円)。申告書(付表2-3)の「控除対象仕入税額=消費税額×80%」の手順どおりの挙動
+- 納付税額は従来どおり国税・地方消費税とも百円未満切捨て。小額では百円切捨て後0になる場合がある(例: 差引21円→納付0)
+- special20 は消費税申告期限アラート対象(`deadlines.ts` の `taxMode !== "exempt"` に自動適合)。還付は発生しない計算構造
+- 適用期間は「期間内の日を含む課税期間」(重なり判定)。暦年課税期間なら2023・2024・2025・2026年が対象。2026-10-01以降開始の期間は適用不可
+- 特例の適用要件(インボイス登録による免税→課税転換であること、簡易課税選択の有無等)はアプリでは検証できないため、期間妥当性のみドメインで強制し、要件の確認は画面・帳票の注意書きに委ねる設計
+- `computeConsumptionTaxPayable` はアプリ画面から未参照(テスト専用の集計API)だが、filing と同じバリデーション規則を適用して対称性を保った
 ## 2026-11-02: 請求書メール送信導線(mailto)とサポート連絡先(Issue #146)
 - Worktree: mail-support
 請求書一覧・帳票プレビューからユーザーのメーラーで請求書送付メールの下書きを開く導線と、LPフッター・設定画面へのサポート連絡先を追加。送信基盤は外部サービス不要の mailto 実装のみで、将来の SendGrid 等接続に備えて送信インターフェースを抽象化。依存追加なし。
-### 実装内容
 - `src/lib/mail/`(新規): メール送信の抽象化レイヤ
   - `sender.ts` — `MailMessage`(to?/subject/body)、`MailSendResult`、`MailSender` インターフェース(`kind` + `send(message): Promise<MailSendResult>`)。将来の外部送信基盤はこのインターフェースの別実装として接続する想定
   - `mailto.ts` — `buildMailtoUrl`(RFC 6068。subject/body は encodeURIComponent で percent-encoding。空白が `+` になる URLSearchParams は件名表示崩れを避けるため不使用)と `MailtoMailSender`(既定メーラーで下書きを開くだけでアプリ自身は送信しない。URL遷移は `location.assign`、テスト用に navigate 関数を注入可能)。メーラー有無・起動成否はブラウザから検知不可のため遷移発行できれば ok
@@ -34,16 +66,12 @@
 ### Checks
 - `pnpm install --frozen-lockfile` — 成功・依存追加なし
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(64ファイル774件、skip 10。新規: `mail/mailto.test.ts` 7件、`mail/invoice-mail.test.ts` 6件、`mail/support.test.ts` 4件)
-- `pnpm build` — 合格
 - `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル156件。ルール変更なし・退行確認のみ)
-### 判断事項・次の担当者への注意事項
 - mailto はファイル添付を渡せないため、請求書メール本文に「送信前に請求書ファイルの添付と内容をご確認ください」を自動付記している。実際の請求書は帳票プレビューから印刷/PDF保存して添付する運用
 - 送信はすべてユーザーの既定メーラー任せ。メーラー未設定の環境では mailto 遷移が何も起きない場合があるが、ブラウザから検知できないため現状はエラー表示なし(将来 SendGrid 等のサーバー送信実装を追加する場合は `getMailSender()` の差し替えで対応する設計)
 - `SUPPORT_EMAIL` の既定値は `support@example.com`(IANA予約のプレースホルダー)。法務ページ同様プレースホルダー状態のため、公開前に `NEXT_PUBLIC_SUPPORT_EMAIL` で正式な窓口アドレスを必ず設定すること
 - 請求書メールの導線は下書き請求書を含む全ステータスで表示(メーラー上の下書きは編集可能で、送信自体はアプリのデータ変更を伴わないため)
-
 ## 2026-11-02: 帳票発行(見積書・見積→請求変換・納品書・領収書・請求書PDF)(Issue #129)
 - Worktree: docs-issuance
 見積書コレクション新設、見積→請求転換、請求書ベースの納品書・入金ベースの発行領収書の帳票追加、印刷/PDF導線の改善。依存追加なし。
@@ -2414,6 +2442,40 @@ Stripe等の実接続を伴わない課金基盤の抽象層。プラン保持(B
 - `pnpm test:rules`(JAVA_HOME=openjdk@21) — 合格(2ファイル157件)
 - `pnpm test:emulators`(JAVA_HOME=openjdk@21) — 合格(2ファイル7件)
 
+## 2026-11-02: 複数年比較レポート(Issue #149)
+- Worktree: reports-compare
+### 実装内容
+年度をまたいだ売上・経費・利益の比較帳票(/reports/compare)。
+選択年度+前2年度の3年を比較し、前年同月比の増減率を表示する。依存追加なし。
+- `src/lib/accounting/domain/compare.ts`(新規): `yoyRate`((当年-前年)/前年%、
+  前年0以下はnull)と `buildYearComparison`。YearlyReport 群を年度昇順に並べ、
+  年間合計(annual)+月別(monthly)の各指標に amounts+yoyRates を付ける。
+  月別行は最新年の会計年度順(開始月が1月以外でも同じ暦月同士が比較される)
+- `src/app/(app)/reports/actions.ts`: `getYearComparisonReport` 追加。
+  最古年期首〜選択年期末を `listTransactionsInRange` で1回だけ読み、
+  `buildYearlyReport` を3年分適用(期間外取引は自動除外されるため振り分け不要)。
+  viewer権限+readレート制限。集計は保存しない(手計算値の保存禁止に準拠)
+- `src/app/(app)/reports/compare/`: page/loading/compare-screen。
+  月次比較(指標セレクタ: 売上/経費/利益、12行の月別推移+合計行)と
+  年次比較(売上/経費/利益×3年の年間合計)をトグル切替。
+  列構成は [古い年|中間年|前年比|選択年|前年比]。
+  印刷は既存パターン(no-print/PrintHeader/print-sheet/print-table)に従う
+- `src/components/nav-links.tsx`: レポート群に「複数年比較」追加
+  (年次レポートと決算書の間)。nav-links.test のリンク数 29→30
+### 判断事項
+- 前年比が定義できないケース(前年0円・前年赤字)は「-」表示。
+  0→0 は±0%、0→正は無限大、負→正負混在で率の意味が曖昧なため
+  算出しない方針(画面脚注に記載)
+- 月次比較は指標セレクタ式。3指標×3年を1表に展開すると13列超となり
+  画面・印刷ともに読めないため。年次比較は指標を行にした単一表
+- 比較対象は確定済み(confirmed/locked)取引のみで年次レポートと同一条件
+### Checks
+- `pnpm lint` — 合格(0 errors、既存warning 1件: receiptsの<img>)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(62ファイル764件、skip 10。compare.test 7件新規+nav更新)
+- `pnpm build` — 合格(/reports/compare ルート生成)
+- Firebase Emulator tests — 未実施(firestore.rules/firestore書き込み経路の
+  変更なし。追加はAdmin SDK経由の読み取りのみ)
 ## 2026-11-02: Dependabotグループ化 + 法務E2E flaky修正(Issue #144)
 - Worktree: ops-guard
 - `.github/dependabot.yml` に `groups` を追加

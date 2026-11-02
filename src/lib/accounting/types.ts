@@ -7,7 +7,12 @@ import type { ConsumptionTaxRate } from "./domain/tax";
  * Firestore への変換は store 層が担う。
  */
 
-export type TaxMode = "exempt" | "simple" | "standard";
+/**
+ * 消費税課税方式。
+ * special20 = 2割特例(インボイス制度移行措置。免税→課税転換事業者向け。
+ * 適用対象は 2023-10-01〜2026-09-30 の日の属する課税期間)。
+ */
+export type TaxMode = "exempt" | "simple" | "standard" | "special20";
 
 export type MemberRole = "owner" | "editor" | "viewer";
 

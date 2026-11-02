@@ -70,6 +70,40 @@ describe("ConsumptionTaxSheet", () => {
     expect(screen.getByText(formatYen(500_000))).toBeTruthy();
   });
 
+  it("2割特例: 80%控除行と納付税額を出力する", () => {
+    const filing = computeConsumptionTaxFiling("special20", [...AMOUNTS], {
+      period: RANGE,
+    });
+    render(
+      <ConsumptionTaxSheet
+        businessName="山田商店"
+        range={RANGE}
+        mode="special20"
+        amounts={[...AMOUNTS]}
+        filing={filing}
+      />,
+    );
+
+    expect(
+      screen.getByText(/課税方式:.*2割特例\(インボイス制度移行措置\)/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/控除対象仕入税額\(2割特例・消費税額×80%\)/),
+    ).toBeTruthy();
+    // 消費税額 780,000 → 控除 624,000 → 差引 156,000
+    expect(screen.getByText(formatYen(624_000))).toBeTruthy();
+    // 156,000 は差引税額・納付税額(国税)の2行に出る
+    expect(
+      screen.getAllByText(formatYen(156_000)).length,
+    ).toBeGreaterThan(1);
+    // 納付: 国税 156,000 / 地方消費税 44,000 / 合計 200,000
+    expect(screen.getByText(formatYen(44_000))).toBeTruthy();
+    expect(screen.getByText(formatYen(200_000))).toBeTruthy();
+    // 本則課税・簡易課税向けの行は出さない
+    expect(screen.queryByText(/みなし仕入率による控除額/)).toBeNull();
+    expect(screen.queryByText(/課税仕入れ等に係る支払対価/)).toBeNull();
+  });
+
   it("控除超過時は還付税額の行を出力する", () => {
     const amounts = [
       { rate: "standard", salesYen: 1_111_111, purchasesYen: 2_222_222 },
