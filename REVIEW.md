@@ -1354,6 +1354,33 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: LP/SEO整備(Issue #81)
+- Worktree: lp-seo
+### 実装内容
+- `src/app/page.tsx`: サーバーredirectのみだった `/` をランディングページに刷新。構成はヒーロー(キャッチコピー・CTA・画面イメージのCSSモック)/機能紹介6項目/安心設計3項目/利用手順3ステップ/CTAバンド/フッタ。日本語・Tailwindで、アプリ本体と同じ indigo/zinc 配色とダークモード対応に統一
+- リダイレクト挙動: ログイン済みで `/` を開いた場合は引き続き `/dashboard` へ戻す。新設 `src/app/auth-redirect.tsx` が `useApp().status === "signed_in"` で `router.replace`(login-screenと同パターン)。未ログインはLPを表示し、CTAから `/login` へ進む導線に変更(旧: サーバー `redirect("/dashboard")` 固定)
+- `src/app/layout.tsx`: metadata整備。`metadataBase`・title template(`%s | Solo Accounting AI`)・`applicationName`・Open Graph(ja_JP/website)・Twitter summary card を追加
+- `src/app/site.ts` 新設: `siteUrl`/`siteName`/`siteDescription` を一元管理。siteUrl は環境変数 `NEXT_PUBLIC_SITE_URL`、未設定時 `http://localhost:3000` にフォールバック
+- `src/app/robots.ts` 新設: `/`・`/legal/*` を許可、認証必須のアプリ画面・`/api`・`/login` 等は disallow を列挙 + sitemap URL
+- `src/app/sitemap.ts` 新設: `/` と `/legal/{terms,privacy,tokusho}` の4URL
+- `src/app/manifest.ts` 新設: name/description/`lang: "ja"`/theme_color `#4f46e5` + `/app-icon.svg` アイコン
+- `src/app/icon.svg` 新設、`src/app/favicon.ico` 削除(create-next-app既定のNextロゴをブランドSVGに置換)。manifest用に `public/app-icon.svg`(512px viewBox)も配置
+- フッタに `/legal/terms`・`/legal/privacy`・`/legal/tokusho` リンク追加(ルート本体は別タスク)
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格(`/` は static プリレンダ、`/robots.txt` `/sitemap.xml` `/manifest.webmanifest` `/icon.svg` 生成確認)
+- `next start` で実レスポンス確認 — `/` 200・title/description/canonical/OGタグ・manifest link 出力、robots/sitemap XML・manifest JSON・icon.svg(200, image/svg+xml)を目視確認
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
+### 設計上の判断・備考
+- 「既存リダイレクト挙動は保持」の解釈: 旧実装の無条件 `redirect("/dashboard")` を残すとLP自体が表示されないため、「ログイン済みユーザーはアプリへ戻る」側を保持し、未ログインにはLPを表示する構成とした
+- e2e/home.spec.ts(「未認証で `/` → `/login`」を期待)は本変更で失敗する。touch範囲外のため未修正。未認証時の `/` 到達先がLPへ変わる仕様変更のため、別タスクでspec更新が必要
+- robots の disallow は (app) ルートグループのパスを列挙する方式(URLプレフィックスを持たないため allow/deny の優先度ルールに頼れない)。アプリ画面追加時は PRIVATE_PATHS への追記が必要
+- `NEXT_PUBLIC_SITE_URL` は新規環境変数。本番デプロイ時に設定すること(.env.example への追記はtouch範囲外のため未実施)
+- manifest icons は SVG(`sizes: "any"`)。PNG版(192/512)が必要になれば別タスクで `public/` へ追加
+- `export const instant = false` は削除。旧ページはサーバーredirectで動的だったが、新LPは完全静的でプリレンダ可能なため(ビルド出力でも ○ Static を確認)
 ## 2026-11-02: UX仕上げ(スケルトン/空状態/loading)(Issue #82)
 - Worktree: ux-polish
 `app/(app)` 配下の全24 route に `loading.tsx` を追加し、`components/ui.tsx` にスケルトン系コンポーネントを末尾追記。空状態は全一覧画面で既に `EmptyState` 統一済みだったため画面側の変更は不要だった。
@@ -1361,9 +1388,6 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `loading.tsx`: `app/(app)` 配下の全 route(dashboard/transactions/transactions-import/receipts/invoices/customers/projects/accounts/allocations/audit-log/backup/business-delete/closing/expenses-new/fixed-assets/opening-balances/recurring/reports-6件/search/settings)に `ScreenSkeleton` を返す `Loading` を配置。`cacheComponents`+`partialPrefetching` 有効のため、この fallback はプリフェッチされる App Shell の一部となり client navigation 時に即時表示される。詳細 route(`[id]` 動的セグメント)は本アプリに存在しないため一覧+レポートが対象
 - 空状態の確認: transactions/receipts/invoices/customers/projects/accounts/fixed-assets/recurring/audit-log/opening-balances/expenses-new/search/settings/dashboard/closing/全レポート画面は既に `EmptyState` 使用済み。残余の「まだ/なし」表記は成功メッセージ(`問題ありません`等)・帳票行(`(収入なし)`等の収支内訳書様式行)・select option・フォーム内ヒントであり空状態ではないため置換対象外と判断
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
-- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格(37 route 生成)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動は worktree 横断で1系統の制約あり)
 - 各画面の内部ローディング(`useApiData` の `initialLoading` → `LoadingBlock` スピナー)は従来どおり。`loading.tsx` は route segment 境界のフォールバックであり、画面内のデータ取得中表示とは別層として共存する
@@ -1408,7 +1432,6 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `e2e/helpers.ts`: URL アサーションを `?next=` 付き遷移に対応
 - `playwright.config.ts`: `E2E_PORT` 環境変数でポートを変更可能に(`const port = process.env.E2E_PORT ?? "3000"`)。ローカルに別プロジェクトの dev server が :3000 を占有していても E2E を実行できるように(実際に :3000 が別アプリ orooro-ginza で占有されており、初回 E2E が誤ってそちらを叩いて失敗した経緯あり)
 
-### 実行したテスト
 - `pnpm test` — 合格(41ファイル509件、skip 10)
 - `pnpm build` — 合格
 - `JAVA_HOME=... pnpm test:rules` — 合格(2ファイル79件)
@@ -1425,7 +1448,6 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 
 Firebase `sendEmailVerification` によるメールアドレス確認フローを追加。確認はソフトゲート(機能ブロックせずバナーで促す)とし、サインアップ直後の送信・未確認バナー・再送・確認済み反映を実装した。
 
-### 実装内容
 - `src/components/email-verify-banner.tsx`(新規): `(app)` レイアウト上部に常駐する未確認バナー
   - 表示条件: `status === "signed_in"` かつ `user.emailVerified === false`(ローカルの `verified` state と併用。`user.reload()` は同一オブジェクトを更新するだけで context の `setUser` が再描画を起こさないため、ローカルでも確認済みを保持する)
   - 「確認を反映」: `user.reload()` → 確認済みなら `getIdToken(true)` でIDトークンの `email_verified` claim を更新(onIdTokenChanged 経由でセッションCookieも再同期)しバナーを閉じる。未確認なら案内メッセージ
@@ -1477,7 +1499,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test` — 合格(43ファイル508件、skip 10。clientIpKey テスト4件追加)
 - `pnpm test:emulators` — 合格(7件) / `pnpm test:rules` — 合格(79件)
 - 実機検証: `pnpm dev` で Emulator向け `connect-src`(localhost:9099/8080/9199)+`'unsafe-eval'`+`upgrade-insecure-requests`なし、`pnpm start` で本番向け `connect-src`(googleapis)+`upgrade-insecure-requests`あり、を curl で確認
-### 設計上の判断・備考
 - `next.config.ts` から `./src/lib/firebase/config` を import している(依存ゼロの純粋モジュールのためconfig評価時に解決可。Emulator接続先の解釈を client.ts と共有)
 - IP単位の session 制限は最良努力(x-forwarded-for 偽装は防げない)。厳密な制限が必要なら rate-limit.ts のコメント通り共有ストア化が要となる
 - receipts GET の 1200回/時は一覧 `<img>` の一括要求(数十〜百件/ページ)を踏まえた緩め設定。正常利用で 429 にならない水準
@@ -1511,9 +1532,7 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `src/components/legal-footer.tsx`: 新規。3ページへのリンクフッター(server component、Linkのみ)
 - `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
 - `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
-- `pnpm install --frozen-lockfile` — 成功
 - `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
-- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
 - 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
 - legal ページはリクエスト依存データを読まない完全静的のため `instant` export は不要(cacheComponents環境でもそのまま static shell 検証を通過)
 - フッターは page/layout の return 末尾・Suspense内へ追加する方式で既存行の改変ゼロを維持。AppShellに手を入れないため認証ローディング中はフッターも fallback に含まれる挙動
@@ -1527,10 +1546,10 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `firebase.json`: `hosting` セクション新設。`/_next/static/**`(ハッシュ付き)を `public, max-age=31536000, immutable` の長期キャッシュ、それ以外(HTMLを含む `**`)を `public, max-age=0, must-revalidate` の短い再検証に。Hosting のヘッダールールは last match wins のため catch-all → 個別の順で記述
 - `firebase.json` `emulators.hosting.port`: 5005 に固定。hosting 追加により `pnpm emulators` で Hosting Emulator も起動するようになるが、デフォルト 5000 は macOS AirPlay Receiver(ControlCe 実在確認済み・LISTEN中)と衝突するため変更
 - `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
-### 実行したテスト
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
-- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
+### 実行したテスト
+- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格
 - Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
 ### 備考
