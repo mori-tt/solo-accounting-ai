@@ -1160,9 +1160,34 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 全角元号アルファベット(Ｒ等)は数字のみ半角化するため列名・日付ともに対象外(半角表記のみ受理)
 - `api-client.ts`・`csv.ts`・`accounts.ts`・`firestore.rules`・設定画面は変更なし(許容範囲内で不要だった)
 - E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク
+## 2026-11-02: グローバル検索と入力履歴サジェスト(Issue #61)
+- Worktree: search-suggest
+### 実装内容
+- `/search` 新規画面(`src/app/(app)/search/`): フリーテキストで摘要・取引先・科目・金額を横断検索。確定済み(confirmed/locked)のみ、businessIdは `requireViewer` でスコープ。期間は「全会計期間(既定)/直近1年/期間を指定(任意の片側のみも可)」。結果は日付降順テーブルで、各行に取引一覧へのリンク(50件ずつ「さらに読み込む」)
+- `src/lib/search.ts`(新規): `transactionMatchesQuery`(空白区切りトークンのAND。各トークンは 摘要/取引先/科目コード/科目名/金額 のいずれかに部分一致。金額は数字以外を落として比較)と `normalizeSearchText`(NFKC正規化で全角英数・半角カナ・全角スペースを吸収)、`recentDistinctValues`(直近利用順distinct)
+- `src/lib/actions/search.ts`(新規): `searchTransactions`。`listTransactionsInRange` で範囲取得後、科目ラベル(標準+カスタム科目)を解決してマッチング。未指定期間は `0001-01-01`〜`9999-12-31`
+- `src/lib/validation/schemas.ts`: `transactionSearchSchema`(query≤200文字、任意期間、startDate≤endDateのrefine)追加
+- `src/lib/actions/transactions.ts`: `listTransactionInputHistory` 追加。全期間の取引(下書き含む)から取引先・摘要のdistinct値を直近利用順で返す
+- `transaction-form.tsx`: 取引先・摘要に `<datalist>` オートコンプリート。履歴はフォーム内で `listTransactionInputHistory` を取得(親画面は変更不可のため自己完結)。摘要は datalist 非対応の `Textarea` から `TextInput` へ変更(もともと rows=1 の単一行)
+- `app-shell.tsx`: ナビ「取引一覧」の次に「検索」を1行追加
+- `src/lib/search.test.ts`(新規): 14件。正規化(全角/半角カナ/空白畳み)、横断一致(摘要/取引先/科目コード/科目名/金額各表記)、ANDトークン、空クエリ全件一致、distinct順序/空除外/limit
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(38ファイル496件、skip 10。search.test.ts 14件含む)
+- `pnpm build` — 合格(`/search` が静的ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+### 設計上の判断・備考
+- Firestoreに全文検索が無いため、期間範囲の取引取得→`transactionMatchesQuery` でサーバー側フィルタ。期間未指定は既存と同じ全期間rangeを使う
+- 検索対象は confirmed/locked(=確定済み)に限定。入力履歴サジェストは入力補助のため下書きも含める
+- 金額検索はトークンの数字以外を除去して部分一致(「12,000」「¥12000」「12000円」「１２０００」いずれも金額12000に一致)
+- 結果行のリンク先は `/transactions`(同画面は月単位表示・deep link未対応のため一覧入口への遷移)
+- datalistは `<input>` 専用のため摘要フィールドを `Textarea(rows=1)` → `TextInput` に変更。単一行UI・スキーマ(max 500)は不変
+- `queries.ts`/`api-client.ts` は変更なし。検索・履歴ともドメインstore(`getStore().listTransactionsInRange`)とServer Action経由で既存パターンの範囲に収まった
+- E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク
 ## 2026-11-02: 取引の一括操作(Issue #64)
 - Worktree: bulk-ops
-### 実装内容
 取引一覧 `/transactions` に下書き取引への一括操作を追加。変更は `transactions-screen.tsx` のみ(`api-client.ts`・他画面・domain・rules等は変更不要だった)。依存追加なし。
 - 選択列: `canEdit`(viewer以外)時のみテーブル先頭にチェック列を追加。ヘッダのチェックで表示中の下書き行を全選択/全解除(一部選択時は indeterminate 表示)。行チェックは `stopPropagation` で展開トグルと分離
 - 選択不可行: confirmed は「確定済みの取引は一括操作できません(行の展開から個別に操作してください)」、locked(締め済み期間)は「締め済み期間の取引は一括操作できません」を `title` ツールチップ+`aria-label`で表示し disabled チェックボックスを描画。選択可能行は `status === "draft"` のみ(`toggleSelect` ガードと操作対象の派生フィルタで二重に防御)
@@ -1171,14 +1196,11 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 科目一括変更: 選択行の `type` 全てに適用できる科目の共通部分(`optionsFor` の積集合。混在時は kind=any のみ)を選択肢として提示し、行ごとに `updateTransaction` を順次呼出し。taxCategory/taxRate は省略(=サーバー側で既存値保持)
 - 結果表示: `Alert` で「N件成功 / M件失敗(失敗分は選択したまま)」+先頭の失敗メッセージを表示し、手動で閉じられる。失敗行のみ選択を残して再実行可能
 - 月送り・種別/状態フィルタ変更時は選択と結果をリセット(onChangeで明示実行)し、非表示行への誤操作を防止。選択対象は「表示中かつdraft」の派生集合なので、リロード後に確定・削除された行は自然に対象外となる
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(37ファイル483件、skip 10)
 - `pnpm build` — 合格
 - Firebase Emulator tests — 未実施(Issue制約でEmulator起動禁止。rules・サーバー書き込み経路の変更なし)
-### 設計上の判断・備考
 - 一括操作は draft のみ対象とし、confirmed はIssue仕様どおり選択不可(確定データの一括変更は個別操作に限定)。締め済みは `status === "locked"` で判定(締め処理は期間内draft残存を拒否するため、closed期間内のdraftは存在しない)
 - `react-hooks/set-state-in-effect` が有効なため、選択リセットは useEffect ではなく各フィルタの onChange から呼ぶ方式とした
 - 一括処理は全件トランザクションではなく行ごとの逐次呼出しで部分失敗を許容(既存のCSV取込/明細インポートと同設計)。実行中はチェック・操作類を disabled にして選択の変更を防ぐ
