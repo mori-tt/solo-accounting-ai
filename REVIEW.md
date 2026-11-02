@@ -1822,6 +1822,31 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
 - rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約
+## 2026-11-02: アクセシビリティ第2弾(Issue #114)
+- Worktree: a11y-pass2
+- 変更内容: skip-to-contentリンク・常設aria-live領域によるSR通知・モーダルダイアログのフォーカス管理
+- 変更ファイル:
+  - `src/components/ui.tsx`
+    - `ModalDialog` 新設: モーダル共通枠(オーバーレイ+portal+`role="dialog"`/`aria-modal`/`aria-labelledby`)。開時にパネル内の最初のフォーカス可能要素へ移動(子の `autoFocus` で個別指定可)、閉時に復帰、Esc で onClose、Tab/Shift+Tab をパネル内で循環(フォーカストラップ。パネル外にフォーカスがあっても Tab で引き戻す)。復帰先は `autoFocus` が useEffect より先に効くため open 時点の activeElement では取れず、`focusin` でモーダル外(`data-modal-panel` 外)の最終フォーカスを常時記録する方式で取得
+    - `ConfirmDialog`: 上記共通枠へ委譲(Esc ハンドラと portal/マウント判定の重複を解消)。API・見た目は不変、初期フォーカスは引き続きキャンセルボタン
+    - `announce(message, assertive)` + `LiveAnnouncer` 新設: 常時マウントの非表示ライブ領域(polite=role="status" / assertive=role="alert")。`announce()` はモジュール級リスナー経由で領域に流し、毎回 `key` を変えた新要素を挿すため同一メッセージ連続通知も再読上げされる。未マウント時は no-op
+  - `src/components/app-shell.tsx`: 「本文へスキップ」リンクをサイドバーより前(DOM先頭)に追加(`sr-only` + `focus:not-sr-only` でフォーカス時のみ表示)、`<main>` に `id="main-content"` + `tabIndex={-1}` を付与
+  - `src/app/(app)/layout.tsx`: `LiveAnnouncer` を Suspense 境界の外にマウント(フォールバック中もアンマウントされないよう)
+  - `src/components/email-verify-banner.tsx`: 再送/反映の結果メッセージを `announce()` で通知(エラーは assertive)。二重読み上げ防止のため動的メッセージの `<p>` は `role="status"` 領域の外に移し `role` 属性を除去(バナー本文の role="status" は維持)
+  - `src/components/keyboard-shortcuts.tsx`: ショートカット一覧ダイアログを `ModalDialog` へ移行(Esc/フォーカストラップ/フォーカス復帰が適用され、固有実装を削除)
+  - `src/components/ui.test.tsx`: ConfirmDialog の初期フォーカス/Esc/Tab循環/フォーカス復帰と LiveAnnouncer の polite・assertive 通知・同一メッセージ再通知・未マウント時の no-op を検証(7件追加)
+- Checks:
+  - `pnpm install --frozen-lockfile` — 成功
+  - `pnpm lint` — 合格(既存 warning 1件: receipts-screen の `<img>`、対象外)
+  - `pnpm exec next typegen` / `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(50ファイル600件、skip 10)
+  - `pnpm build` — 合格
+- 備考:
+  - ダイアログは ConfirmDialog とショートカット一覧の2系統のみで、両方 `ModalDialog` に統一。各画面側の ConfirmDialog 呼び出しは無変換で動作
+  - `ModalDialog` の背景 inert 化(モーダル中に背面コンテンツをSRツリーから隠す)は未実施。`LiveAnnouncer` がアプリルート内にあるため祖先への aria-hidden/inert で通知経路ごと遮断されるリスクを避けた。フォーカストラップで実用上の Tab 脱出は防いでいる
+  - ショートカット一覧ダイアログ表示中もグローバルショートカット(n/g→d 等)は従来どおり発火する。「?」トグルで閉じる既存仕様を維持するため抑止はしていない
+  - email-verify-banner はタスク touch 範囲の明示列挙外だが、要件(2)の「email-verifyバナー等の動的表示に対応」の該当コンポーネントとして最小変更で配線
+  - Emulator 系チェック(test:rules/test:emulators)は本タスクの指定チェック範囲外のため未実施
 ## 2026-11-02: lib整合性(経費の金額検証・barrel export・スキーマ文書同期)
 - Worktree: lib-consistency
 - Issue #113

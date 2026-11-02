@@ -5,6 +5,8 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useRef,
+  useState,
   useSyncExternalStore,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -445,6 +447,139 @@ export function Amount({
   );
 }
 
+/** モーダル内でフォーカス可能な要素のセレクタ */
+const FOCUSABLE_IN_DIALOG =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * モーダルの外で最後にフォーカスされていた要素。
+ * 子の autoFocus は useEffect より先に効くため、open になった時点の
+ * document.activeElement は既にパネル内であり復帰先として使えない。
+ * focusin で常時記録し、パネル内(data-modal-panel 内)への移動は除外する。
+ */
+let lastFocusOutsideDialog: Element | null = null;
+let dialogFocusTrackerInstalled = false;
+
+function installDialogFocusTracker() {
+  if (dialogFocusTrackerInstalled) return;
+  dialogFocusTrackerInstalled = true;
+  document.addEventListener("focusin", (e) => {
+    if (!(e.target instanceof Element)) return;
+    if (e.target.closest("[data-modal-panel]")) return;
+    lastFocusOutsideDialog = e.target;
+  });
+}
+
+/**
+ * モーダルダイアログの共通枠(オーバーレイ+フォーカス管理)。
+ * - 開いた時: 直前のフォーカス位置を記憶し、パネル内の最初の
+ *   フォーカス可能要素へ移す(子の autoFocus で個別指定も可)
+ * - 閉じた時: 記憶した要素へフォーカスを戻す
+ * - Esc で onClose、Tab/Shift+Tab をパネル内で循環させる(フォーカストラップ)
+ */
+export function ModalDialog({
+  open,
+  onClose,
+  labelledBy,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  labelledBy: string;
+  children: ReactNode;
+}) {
+  // portal先(document)はクライアントでのみ存在する
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    installDialogFocusTracker();
+  }, []);
+
+  // 開時の初期フォーカス + 閉時のフォーカス復帰
+  useEffect(() => {
+    if (!open) return;
+    const previous = lastFocusOutsideDialog;
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) {
+      const first = panel.querySelector<HTMLElement>(FOCUSABLE_IN_DIALOG);
+      (first ?? panel).focus();
+    }
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) {
+        previous.focus();
+      }
+    };
+  }, [open]);
+
+  // Esc で閉じる + Tab/Shift+Tab をパネル内に閉じ込める
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const items = Array.from(
+        panel.querySelectorAll<HTMLElement>(FOCUSABLE_IN_DIALOG),
+      );
+      if (items.length === 0) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || active === panel || !panel.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (
+        active === last ||
+        active === panel ||
+        !panel.contains(active)
+      ) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open || !mounted) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={labelledBy}
+      onClick={onClose}
+    >
+      <div
+        ref={panelRef}
+        data-modal-panel
+        tabIndex={-1}
+        className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /** 破壊的操作・重要操作の確認ダイアログ */
 export function ConfirmDialog({
   open,
@@ -465,62 +600,33 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  // portal先(document)はクライアントでのみ存在する
-  const mounted = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
   const titleId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
-
-  if (!open || !mounted) return null;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={onCancel}
-    >
-      <div
-        className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id={titleId} className="text-base font-semibold">
-          {title}
-        </h2>
-        <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          {message}
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button
-            variant="secondary"
-            onClick={onCancel}
-            disabled={loading}
-            autoFocus
-          >
-            キャンセル
-          </Button>
-          <Button
-            variant={danger ? "danger" : "primary"}
-            onClick={onConfirm}
-            loading={loading}
-          >
-            {confirmLabel}
-          </Button>
-        </div>
+  return (
+    <ModalDialog open={open} onClose={onCancel} labelledBy={titleId}>
+      <h2 id={titleId} className="text-base font-semibold">
+        {title}
+      </h2>
+      <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+        {message}
       </div>
-    </div>,
-    document.body,
+      <div className="mt-5 flex justify-end gap-2">
+        <Button
+          variant="secondary"
+          onClick={onCancel}
+          disabled={loading}
+          autoFocus
+        >
+          キャンセル
+        </Button>
+        <Button
+          variant={danger ? "danger" : "primary"}
+          onClick={onConfirm}
+          loading={loading}
+        >
+          {confirmLabel}
+        </Button>
+      </div>
+    </ModalDialog>
   );
 }
 
@@ -585,5 +691,63 @@ export function ScreenSkeleton() {
       <TableSkeleton className="mt-6" />
       <span className="sr-only">読み込み中...</span>
     </div>
+  );
+}
+
+type AnnouncerListener = (message: string, assertive: boolean) => void;
+const announcerListeners = new Set<AnnouncerListener>();
+
+/**
+ * スクリーンリーダーへメッセージを通知する(トーストの代替)。
+ * (app)レイアウトに常駐する LiveAnnouncer のライブ領域へ流す。
+ * assertive=true は割り込み通知(エラー等)。アナウンサー未マウント時は無害な no-op。
+ */
+export function announce(message: string, assertive = false): void {
+  for (const listener of announcerListeners) listener(message, assertive);
+}
+
+/**
+ * 常時マウントする非表示の aria-live 領域。
+ * 動的に挿入される要素へ live role を付ける方式は、挿入のタイミングで
+ * 読み上げが漏れることがあるため、永続する領域の中身を差し替える方式にする。
+ * 毎回新しい要素(key=n)を挿すので同一メッセージの連続通知も読み上げられる。
+ */
+export function LiveAnnouncer() {
+  const [polite, setPolite] = useState<{ n: number; msg: string }>();
+  const [assertive, setAssertive] = useState<{ n: number; msg: string }>();
+
+  useEffect(() => {
+    const listener: AnnouncerListener = (message, isAssertive) => {
+      if (isAssertive) {
+        setAssertive((prev) => ({ n: (prev?.n ?? 0) + 1, msg: message }));
+      } else {
+        setPolite((prev) => ({ n: (prev?.n ?? 0) + 1, msg: message }));
+      }
+    };
+    announcerListeners.add(listener);
+    return () => {
+      announcerListeners.delete(listener);
+    };
+  }, []);
+
+  return (
+    <>
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {polite && <span key={polite.n}>{polite.msg}</span>}
+      </div>
+      <div
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {assertive && <span key={assertive.n}>{assertive.msg}</span>}
+      </div>
+    </>
   );
 }
