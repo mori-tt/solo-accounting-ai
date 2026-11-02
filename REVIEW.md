@@ -1391,3 +1391,17 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - receipts GET の 1200回/時は一覧 `<img>` の一括要求(数十〜百件/ページ)を踏まえた緩め設定。正常利用で 429 にならない水準
 - 429 応答は `toErrorResponse` が `RateLimitError.retryAfterSec` → `Retry-After` ヘッダへ変換する既存仕組みで返る(画面側は `ApiClientError.code==="RATE_LIMITED"` のメッセージ表示)
 - 未対応(別タスク): nonceベースCSPへの移行(proxy/middleware導入が必要)、HSTS、Server Actions 側のレート制限、`api-client.ts` への 429 リトライ配慮
+## 2026-11-02: リリース運用整備(Issue #85)
+- Worktree: release-ops
+- `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
+- `src/lib/version.ts`(新規): `APP_VERSION` を `package.json` から import して export するバージョン一元化モジュール。フッター等の表示はこの値を使う想定(`resolveJsonModule` 有効のため型安全)
+- `CHANGELOG.md`(新設): REVIEW.md のエントリ群から機能リリースノートを `## [1.0.0]` として要約(機能 / 基盤・改善の2区分)
+- `firebase.json`: `hosting` セクション新設。`/_next/static/**`(ハッシュ付き)を `public, max-age=31536000, immutable` の長期キャッシュ、それ以外(HTMLを含む `**`)を `public, max-age=0, must-revalidate` の短い再検証に。Hosting のヘッダールールは last match wins のため catch-all → 個別の順で記述
+- `firebase.json` `emulators.hosting.port`: 5005 に固定。hosting 追加により `pnpm emulators` で Hosting Emulator も起動するようになるが、デフォルト 5000 は macOS AirPlay Receiver(ControlCe 実在確認済み・LISTEN中)と衝突するため変更
+- `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
+### 備考
+- version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
+- `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
