@@ -37,6 +37,7 @@ import {
   tableClass,
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
+import { APP_VERSION } from "@/lib/version";
 
 const TAX_MODE_LABELS: Record<TaxMode, string> = {
   exempt: "免税事業者",
@@ -474,6 +475,10 @@ export function SettingsScreen() {
                 "-"
               )}
             </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">アプリバージョン</dt>
+            <dd>v{APP_VERSION}</dd>
           </div>
         </dl>
       </Card>

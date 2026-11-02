@@ -1573,3 +1573,18 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: バージョン表示(Issue #99 項目1)
+- Worktree: wiring-ops
+- Issue #85 で一元化済みの `src/lib/version.ts`(`APP_VERSION`)を UI へ配線する「version表示」項目への対応。Issue #99 の残項目(monitoring配線・dev dep監査・バックアップ鮮度アラート・Emulatorキャッシュ)は未着手
+- `src/components/legal-footer.tsx`: 法務リンク末尾に `v{APP_VERSION}` を `<span>` で追加。本フッターは login・legal・認証済み全画面((app)/layout)で共通描画されるため1箇所の変更で全表示面をカバー
+- `src/app/page.tsx`: LP フッターのコピーライト右に `v{APP_VERSION}` を追加(自前footerを持つため別途配線)
+- `src/app/(app)/settings/settings-screen.tsx`: アカウントカードの `<dl>` に「アプリバージョン」項目を追加(ユーザーが版数を確認する慣例的な場所)
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(worktree新規のため)
+- `pnpm lint` — 合格(receipts の既存 `<img>` warning 1件のみ、本変更と無関係)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(fresh worktree では LayoutProps 等の生成型が無いため typegen 先行が必要)
+- `pnpm test` — 合格(45ファイル539件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 実施せず(rules・データ書き込み経路の変更なし。加えて別worktreeの Emulator が port 8080/9199/4400 を占有中で AGENTS.md の1系統制約により起動不可)
+### 備考
+- 表示は `v1.0.0` 形式で統一。server component(LegalFooter・LP)と client component(settings)双方から import するが、version.ts は依存ゼロのため問題なし
