@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { Transaction } from "@/lib/accounting/types";
-import { getAccountOptions } from "./accounts";
 import {
+  CASH_ACCOUNT,
+  transactionToJournalEntry,
+  buildTrialBalance,
+} from "@/lib/accounting/domain/ledger";
+import type { Transaction } from "@/lib/accounting/types";
+import { accountLabelIn, getAccountOptions } from "./accounts";
+import {
+  buildJournalCsv,
   buildTransactionsCsv,
+  buildTrialBalanceCsv,
   decodeCsvBytes,
+  JOURNAL_CSV_HEADER,
   parseCsv,
   parseTransactionsCsv,
   serializeCsv,
   TRANSACTION_CSV_HEADER,
+  TRIAL_BALANCE_CSV_HEADER,
 } from "./csv";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -347,5 +356,101 @@ describe("buildTransactionsCsv(カスタム科目)", () => {
       options,
     );
     expect(parseCsv(csv)[1][3]).toBe("ソフトウェア利用料");
+  });
+});
+
+/** 帳簿CSV用のテスト用ラベル解決(画面側の useBookAccountLabel 相当) */
+const bookLabel = (code: string): string =>
+  code === CASH_ACCOUNT ? "現金" : (accountLabelIn(getAccountOptions(), code));
+
+describe("buildJournalCsv", () => {
+  it("ヘッダー+仕訳行を定義列で出力する", () => {
+    const csv = buildJournalCsv(
+      [
+        transactionToJournalEntry({
+          ...transactionFixture,
+          status: "confirmed",
+        }),
+        transactionToJournalEntry({
+          ...transactionFixture,
+          id: "t2",
+          type: "income",
+          account: "sales",
+          amount: 98000,
+          counterparty: "△△商事",
+          description: "11月分",
+          status: "locked",
+        }),
+      ],
+      bookLabel,
+    );
+    const rows = parseCsv(csv);
+    expect(rows[0]).toEqual([...JOURNAL_CSV_HEADER]);
+    // 支出: 借方=消耗品費 / 貸方=現金
+    expect(rows[1]).toEqual([
+      "2026-11-01",
+      "消耗品費",
+      "現金",
+      "12000",
+      "備品,購入",
+      "〇〇商店",
+    ]);
+    // 収入: 借方=現金 / 貸方=売上高
+    expect(rows[2]).toEqual([
+      "2026-11-01",
+      "現金",
+      "売上高",
+      "98000",
+      "11月分",
+      "△△商事",
+    ]);
+  });
+
+  it("取引先・摘要が空の仕訳は空セルにする", () => {
+    const csv = buildJournalCsv(
+      [
+        transactionToJournalEntry({
+          ...transactionFixture,
+          counterparty: "",
+          description: "",
+          status: "confirmed",
+        }),
+      ],
+      bookLabel,
+    );
+    expect(parseCsv(csv)[1]).toEqual([
+      "2026-11-01",
+      "消耗品費",
+      "現金",
+      "12000",
+      "",
+      "",
+    ]);
+  });
+});
+
+describe("buildTrialBalanceCsv", () => {
+  it("科目別行+合計行を定義列で出力する", () => {
+    const tb = buildTrialBalance([
+      transactionToJournalEntry({
+        ...transactionFixture,
+        status: "confirmed",
+      }),
+      transactionToJournalEntry({
+        ...transactionFixture,
+        id: "t2",
+        type: "income",
+        account: "sales",
+        amount: 98000,
+        status: "confirmed",
+      }),
+    ]);
+    const rows = parseCsv(buildTrialBalanceCsv(tb, bookLabel));
+    expect(rows[0]).toEqual([...TRIAL_BALANCE_CSV_HEADER]);
+    // 科目コード昇順: cash < sales < supplies
+    expect(rows[1]).toEqual(["現金", "98000", "12000", "86000"]);
+    expect(rows[2]).toEqual(["売上高", "0", "98000", "-98000"]);
+    expect(rows[3]).toEqual(["消耗品費", "12000", "0", "12000"]);
+    expect(rows[4]).toEqual(["合計", "110000", "110000", "0"]);
   });
 });

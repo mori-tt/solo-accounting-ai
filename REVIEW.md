@@ -2105,3 +2105,46 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
 - `pnpm build` — 合格
 - `pnpm test` — 合格(50ファイル593件、skip 10)
+
+## 2026-11-02: 帳簿CSVエクスポート+申告期限アラート(Issue #134)
+- Worktree: export-alerts
+- 変更内容:
+  - 仕訳帳・試算表にCSVダウンロードを追加(税理士受け渡し想定)。
+    取引一覧は既存のCSV出力を共通ヘルパーへ置き換え
+  - 仕訳帳CSV: 日付/借方科目/貸方科目/金額/摘要/取引先(Issue指定の列構成。
+    科目は帳簿用ラベル解決済みの表示名、金額は貸借一致のため1列)
+  - 試算表CSV: 勘定科目/借方合計/貸方合計/残高+末尾に合計行
+  - いずれもBOM付UTF-8でExcel文字化け対策(既存 transactions と同一方式を
+    `downloadCsv` ヘルパーに集約)
+  - 申告期限アラート: 確定申告(所得税・3/15)、消費税の申告・納付
+    (3/31・課税事業者のみ)、償却資産の申告(1/31・active固定資産の保有時のみ)
+    をダッシュボード上部のAlertに表示。期限30日前から警告(warning)、
+    期限超過は30日の猶予内のみerror表示(申告済みフラグが無いため
+    無期限の誤表示を防ぐ)。期限日が土日なら翌月曜へ繰り下げ(祝日は未考慮)
+- 変更ファイル:
+  - `src/lib/accounting/domain/deadlines.ts`(新規): 期限計算ロジック(純粋関数)
+  - `src/lib/csv.ts`: buildJournalCsv/buildTrialBalanceCsv 追加。
+    escapeField を修正し純粋な数値(負の残高等)を数式対策の `'` 化から除外
+    (`'-98000` となりExcelで数値読みできない問題を回避)
+  - `src/lib/download.ts`(新規): BOM付きCSVダウンロード共通ヘルパー
+  - `src/lib/actions/reports.ts`: getDashboard が deadlineAlerts を返す
+    (business・active固定資産の読み取りを Promise.all に追加。storeは
+    Admin SDK経由のため rules 影響なし)
+  - `src/app/(app)/dashboard/dashboard-screen.tsx`: 期限アラート表示+
+    種別ごとの確認画面リンク(申告データ/消費税集計/固定資産台帳)
+  - `src/app/(app)/reports/journal,trial-balance の各screen`: CSV出力ボタン
+  - `src/app/(app)/transactions/transactions-screen.tsx`: downloadCsv へ置換
+- Checks:
+  - `pnpm lint` — 合格(既存warning 1件: receipts-screen `<img>`)
+  - `pnpm exec next typegen` + `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(52ファイル633件、skip 10。deadlines 13件・csv 3件新規)
+  - `pnpm build` — 合格
+  - `pnpm test:emulators`(JAVA_HOME=openjdk@21)— 合格(7件)
+- 備考:
+  - 取引一覧CSVの列構成は既存形式を維持(CSV取込との往復互換のため)。
+    Issue記載の列構成は仕訳帳CSVに適用
+  - 期限の祝日調整は未対応(土日のみ)。個人の課税期間は暦年固定のため
+    fiscalYearStartMonth には依存しない設計
+  - firestore.rules 変更なし(追加は読み取り経路のみ・サーバー側Admin SDK)
+  - getDashboard に getBusiness+listFixedAssets の読み取り2件を追加。
+    listFixedAssets は status+取得日の既存複合indexを利用

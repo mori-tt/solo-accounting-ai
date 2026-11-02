@@ -1,3 +1,7 @@
+import type {
+  JournalEntry,
+  TrialBalance,
+} from "@/lib/accounting/domain/ledger";
 import type { Transaction, TransactionType } from "@/lib/accounting/types";
 import {
   ACCOUNT_OPTIONS,
@@ -35,8 +39,16 @@ export const CSV_UTF8_BOM = "\uFEFF";
  */
 const FORMULA_PREFIX = /^[=+\-@\t\r]/;
 
+/**
+ * 前後空白なしの数値リテラル(負数含む)。
+ * 数値は `-2+3` のような式になり得ないため数式対策の対象外
+ * (試算表の負の残高が `'-98000` となりExcelで数値として
+ * 読めなくなるのを防ぐ)。
+ */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
 function escapeField(value: string): string {
-  if (FORMULA_PREFIX.test(value)) {
+  if (FORMULA_PREFIX.test(value) && !PLAIN_NUMBER.test(value)) {
     value = `'${value}`;
   }
   if (/[",\r\n]/.test(value)) {
@@ -208,6 +220,80 @@ export function buildTransactionsCsv(
   return serializeCsv([
     [...TRANSACTION_CSV_HEADER],
     ...transactions.map((t) => transactionToCsvRow(t, options)),
+  ]);
+}
+
+// ---------- 帳簿CSV(税理士受け渡し用) ----------
+
+/**
+ * 仕訳帳CSVの列ヘッダー。
+ * 会計ソフトへの取り込み・税理士との共有を想定した汎用構成。
+ * 科目は表示名(標準科目・カスタム科目・現金等の帳簿用コードを
+ * 呼び出し側のラベル解決で変換済み)で出力する。
+ */
+export const JOURNAL_CSV_HEADER = [
+  "日付",
+  "借方科目",
+  "貸方科目",
+  "金額",
+  "摘要",
+  "取引先",
+] as const;
+
+/** 仕訳1件 → CSV行。借方・貸方は同額(貸借一致)のため金額は1列 */
+export function journalEntryToCsvRow(
+  entry: JournalEntry,
+  label: (code: string) => string,
+): string[] {
+  const [debit, credit] = entry.lines;
+  return [
+    entry.date,
+    label(debit.account),
+    label(credit.account),
+    String(debit.debit),
+    entry.description,
+    entry.counterparty,
+  ];
+}
+
+/** 仕訳帳 → ヘッダー付きCSV文字列(BOMなし) */
+export function buildJournalCsv(
+  entries: readonly JournalEntry[],
+  label: (code: string) => string,
+): string {
+  return serializeCsv([
+    [...JOURNAL_CSV_HEADER],
+    ...entries.map((e) => journalEntryToCsvRow(e, label)),
+  ]);
+}
+
+/** 試算表CSVの列ヘッダー */
+export const TRIAL_BALANCE_CSV_HEADER = [
+  "勘定科目",
+  "借方合計",
+  "貸方合計",
+  "残高",
+] as const;
+
+/** 試算表 → ヘッダー付きCSV文字列(BOMなし)。末尾に合計行を付ける */
+export function buildTrialBalanceCsv(
+  trialBalance: TrialBalance,
+  label: (code: string) => string,
+): string {
+  return serializeCsv([
+    [...TRIAL_BALANCE_CSV_HEADER],
+    ...trialBalance.rows.map((row) => [
+      label(row.account),
+      String(row.debitTotal),
+      String(row.creditTotal),
+      String(row.balance),
+    ]),
+    [
+      "合計",
+      String(trialBalance.debitTotal),
+      String(trialBalance.creditTotal),
+      String(trialBalance.debitTotal - trialBalance.creditTotal),
+    ],
   ]);
 }
 
