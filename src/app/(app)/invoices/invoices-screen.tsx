@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import Link from "next/link";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
@@ -9,6 +10,7 @@ import {
   issueInvoiceAction,
   listCustomers,
   listInvoiceRows,
+  listPaymentLinkCandidates,
   listProjects,
   registerPaymentAction,
   type InvoiceRow,
@@ -19,6 +21,11 @@ import {
   invoiceTaxAmount,
 } from "@/lib/accounting/invoice-tax";
 import type { ConsumptionTaxRate } from "@/lib/accounting/domain/tax";
+import type { Transaction } from "@/lib/accounting/types";
+import {
+  invoicePaymentProgress,
+  invoiceSettlement,
+} from "@/lib/payment-matching";
 import { formatYen, todayDateString } from "@/lib/format";
 import {
   invoiceSchema,
@@ -28,6 +35,7 @@ import {
 import {
   Alert,
   Amount,
+  Badge,
   Button,
   Card,
   EmptyState,
@@ -264,6 +272,43 @@ function InvoiceForm({
   );
 }
 
+function paymentLinkCandidateLabel(t: Transaction): string {
+  const counterparty = t.counterparty || "取引先なし";
+  const description = t.description ? ` / ${t.description}` : "";
+  return `${t.date} / ${counterparty} / ${formatYen(t.amount)}${description}`;
+}
+
+/** 入金履歴。消込済みの入金は取引一覧への参照リンクを表示する */
+function PaymentHistory({ row }: { row: InvoiceRow }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-xs font-medium text-zinc-500">入金履歴</p>
+      {row.payments.map((p) => (
+        <div
+          key={p.id}
+          className="flex flex-wrap items-center gap-3 text-sm"
+        >
+          <span className="whitespace-nowrap">{p.date}</span>
+          <Amount value={p.amount} />
+          {p.transactionId ? (
+            <>
+              <Badge tone="sky">消込済</Badge>
+              <Link
+                href="/transactions"
+                className="text-xs text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+              >
+                取引を参照
+              </Link>
+            </>
+          ) : (
+            <Badge tone="amber">未消込</Badge>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PaymentForm({
   row,
   onDone,
@@ -274,8 +319,34 @@ function PaymentForm({
   const { businessId } = useApp();
   const [date, setDate] = useState(todayDateString());
   const [amount, setAmount] = useState(String(row.remaining));
+  const [transactionId, setTransactionId] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+
+  // 紐付け候補(同顧客・発行日以降の収入取引)。取得失敗時は紐付けなしで登録可
+  const {
+    data: linkData,
+    initialLoading: linkLoading,
+    error: linkError,
+  } = useApiData(
+    () =>
+      callApi(() =>
+        listPaymentLinkCandidates(
+          businessId ?? "",
+          row.invoice.id,
+          todayDateString(),
+        ),
+      ),
+    [businessId, row.invoice.id],
+  );
+  const sameCustomer = useMemo(
+    () => (linkData?.candidates ?? []).filter((c) => c.sameCustomer),
+    [linkData],
+  );
+  const otherCandidates = useMemo(
+    () => (linkData?.candidates ?? []).filter((c) => !c.sameCustomer),
+    [linkData],
+  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,6 +354,7 @@ function PaymentForm({
       invoiceId: row.invoice.id,
       date,
       amount: Number(amount),
+      transactionId: transactionId || undefined,
     };
     const parsed = parseForm(paymentSchema, input);
     if (!parsed.success) {
@@ -314,6 +386,7 @@ function PaymentForm({
 
   return (
     <form onSubmit={submit} noValidate className="flex flex-col gap-2">
+      {row.payments.length > 0 && <PaymentHistory row={row} />}
       <div className="flex flex-wrap items-end gap-2">
         <Field label="入金日">
           <TextInput
@@ -332,6 +405,48 @@ function PaymentForm({
             required
           />
         </Field>
+        <Field
+          label="対応する収入取引(任意)"
+          hint={
+            linkError
+              ? "候補を取得できませんでした。紐付けなしで登録できます"
+              : undefined
+          }
+        >
+          <Select
+            value={transactionId}
+            onChange={(e) => setTransactionId(e.target.value)}
+            disabled={linkLoading}
+          >
+            <option value="">
+              {linkLoading ? "候補を読み込み中..." : "紐付けない"}
+            </option>
+            {sameCustomer.length > 0 && (
+              <optgroup label="同顧客の収入取引">
+                {sameCustomer.map((c) => (
+                  <option key={c.transaction.id} value={c.transaction.id}>
+                    {paymentLinkCandidateLabel(c.transaction)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {otherCandidates.length > 0 && (
+              <optgroup
+                label={
+                  sameCustomer.length > 0
+                    ? "その他の収入取引"
+                    : "同期間の収入取引"
+                }
+              >
+                {otherCandidates.map((c) => (
+                  <option key={c.transaction.id} value={c.transaction.id}>
+                    {paymentLinkCandidateLabel(c.transaction)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </Select>
+        </Field>
         <Button type="submit" loading={busy}>
           入金を記録
         </Button>
@@ -348,6 +463,7 @@ export function InvoicesScreen() {
 
   const [showForm, setShowForm] = useState(false);
   const [payTarget, setPayTarget] = useState<string | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string>();
 
@@ -457,7 +573,13 @@ export function InvoicesScreen() {
               </tr>
             </thead>
             <tbody>
-              {data.rows.map((row) => (
+              {data.rows.map((row) => {
+                const progress = invoicePaymentProgress(
+                  row.invoice,
+                  row.paidAmount,
+                );
+                const settlement = invoiceSettlement(row.payments);
+                return (
                 <Fragment key={row.invoice.id}>
                   <tr>
                     <td className="whitespace-nowrap font-medium">
@@ -488,12 +610,44 @@ export function InvoicesScreen() {
                       <Amount value={row.paidAmount} />
                       {" / "}
                       <Amount value={row.remaining} />
+                      {row.payments.length > 0 && (
+                        <div>
+                          <button
+                            type="button"
+                            className="text-xs text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+                            onClick={() => {
+                              setPayTarget(null);
+                              setHistoryTarget(
+                                historyTarget === row.invoice.id
+                                  ? null
+                                  : row.invoice.id,
+                              );
+                            }}
+                          >
+                            入金履歴({row.payments.length})
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td>
-                      <StatusBadge
-                        kind="invoice"
-                        status={row.invoice.status}
-                      />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StatusBadge
+                          kind="invoice"
+                          status={row.invoice.status}
+                        />
+                        {progress === "unpaid" && (
+                          <Badge tone="gray">未入金</Badge>
+                        )}
+                        {progress === "partial" && (
+                          <Badge tone="amber">一部入金</Badge>
+                        )}
+                        {settlement === "unmatched" && (
+                          <Badge tone="amber">未消込</Badge>
+                        )}
+                        {settlement === "matched" && (
+                          <Badge tone="sky">消込済</Badge>
+                        )}
+                      </div>
                     </td>
                     {canEdit && (
                       <td className="whitespace-nowrap">
@@ -511,13 +665,14 @@ export function InvoicesScreen() {
                             row.remaining > 0 && (
                               <Button
                                 variant="secondary"
-                                onClick={() =>
+                                onClick={() => {
+                                  setHistoryTarget(null);
                                   setPayTarget(
                                     payTarget === row.invoice.id
                                       ? null
                                       : row.invoice.id,
-                                  )
-                                }
+                                  );
+                                }}
                               >
                                 入金を記録
                               </Button>
@@ -526,6 +681,16 @@ export function InvoicesScreen() {
                       </td>
                     )}
                   </tr>
+                  {historyTarget === row.invoice.id && (
+                    <tr>
+                      <td
+                        colSpan={canEdit ? 7 : 6}
+                        className="bg-zinc-50/70 dark:bg-zinc-800/30"
+                      >
+                        <PaymentHistory row={row} />
+                      </td>
+                    </tr>
+                  )}
                   {canEdit && payTarget === row.invoice.id && (
                     <tr>
                       <td
@@ -543,7 +708,8 @@ export function InvoicesScreen() {
                     </tr>
                   )}
                 </Fragment>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </Card>
