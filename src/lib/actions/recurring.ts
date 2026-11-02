@@ -7,6 +7,11 @@ import {
   updateRecurringTemplate,
 } from "@/lib/accounting/services/recurring";
 import type { RecurringTemplate } from "@/lib/accounting/types";
+import {
+  actionBulkRateLimiter,
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -29,7 +34,8 @@ export async function listRecurringTemplates(
   businessId: string,
 ): Promise<ActionResult<RecurringTemplate[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const list = await getStore().listRecurringTemplates(businessId);
     return sortTemplates(list);
   });
@@ -43,6 +49,7 @@ export async function createRecurringTemplate(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { template } = await registerRecurringTemplate(
       getStore(),
       businessId,
@@ -72,6 +79,7 @@ export async function updateRecurringTemplateAction(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { template } = await updateRecurringTemplate(
       getStore(),
       businessId,
@@ -100,6 +108,7 @@ export async function setRecurringTemplateActiveAction(
 ): Promise<ActionResult<RecurringTemplate>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { template } = await setRecurringTemplateActive(
       getStore(),
       businessId,
@@ -123,6 +132,7 @@ export async function generateRecurringForMonth(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionBulkRateLimiter.consume(businessId);
     const { transactions } = await generateRecurringTransactions(
       getStore(),
       businessId,

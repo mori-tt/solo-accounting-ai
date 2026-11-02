@@ -3,6 +3,10 @@
 import { DomainError } from "@/lib/accounting/errors";
 import { auditsFor } from "@/lib/accounting/services/common";
 import type { Business, OpeningBalance } from "@/lib/accounting/types";
+import {
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireOwner, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -18,7 +22,8 @@ export async function getOpeningBalances(
   businessId: string,
 ): Promise<ActionResult<OpeningBalance[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const business = await getStore().getBusiness(businessId);
     if (!business) {
       throw new ApiError("NOT_FOUND", "事業が見つかりません");
@@ -56,6 +61,7 @@ export async function saveOpeningBalances(
   }
   return run(async () => {
     const actor = await requireOwner(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const store = getStore();
     await store.transact(businessId, {}, async (tx) => {
       const current = await tx.getBusiness(businessId);
