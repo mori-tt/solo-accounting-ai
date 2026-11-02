@@ -1378,3 +1378,18 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - 期首残高ステップの年度は現在日付を含む会計年度に自動決定(初期セットアップ用途のため年度選択UIは設けず)。締め済み年度の不変条件は `saveOpeningBalances` 側の既存チェックに委譲
 - `businessSchema.pick({name,taxMode})` でステップ0の先行検証を行い、開始月の検証は保存時にまとめる(未表示フィールドのエラーを先出ししないため)
 - E2E・単体テストのウィザードカバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)
+## 2026-11-02: リリース運用整備(Issue #85)
+- Worktree: release-ops
+- `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
+- `src/lib/version.ts`(新規): `APP_VERSION` を `package.json` から import して export するバージョン一元化モジュール。フッター等の表示はこの値を使う想定(`resolveJsonModule` 有効のため型安全)
+- `CHANGELOG.md`(新設): REVIEW.md のエントリ群から機能リリースノートを `## [1.0.0]` として要約(機能 / 基盤・改善の2区分)
+- `firebase.json`: `hosting` セクション新設。`/_next/static/**`(ハッシュ付き)を `public, max-age=31536000, immutable` の長期キャッシュ、それ以外(HTMLを含む `**`)を `public, max-age=0, must-revalidate` の短い再検証に。Hosting のヘッダールールは last match wins のため catch-all → 個別の順で記述
+- `firebase.json` `emulators.hosting.port`: 5005 に固定。hosting 追加により `pnpm emulators` で Hosting Emulator も起動するようになるが、デフォルト 5000 は macOS AirPlay Receiver(ControlCe 実在確認済み・LISTEN中)と衝突するため変更
+- `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
+- `pnpm build` — 合格
+- Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
+### 備考
+- version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
+- `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
