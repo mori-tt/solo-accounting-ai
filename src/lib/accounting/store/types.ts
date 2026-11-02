@@ -1,11 +1,15 @@
 import type {
   AuditLogEntry,
+  Bill,
+  BillPayment,
   Business,
   Customer,
   Expense,
   FiscalPeriod,
   FixedAsset,
   FixedAssetStatus,
+  InventoryCount,
+  InventoryItem,
   Invoice,
   MonthlySummary,
   Payment,
@@ -31,9 +35,13 @@ export type CollectionName =
   | "projects"
   | "invoices"
   | "payments"
+  | "bills"
+  | "billPayments"
   | "monthlySummaries"
   | "recurringTemplates"
   | "fixedAssets"
+  | "inventoryItems"
+  | "inventoryCounts"
   | "fiscalPeriods"
   | "withholdingRecords"
   | "auditLogs"
@@ -93,6 +101,17 @@ export interface AccountingReader {
     businessId: string,
     status?: FixedAssetStatus,
   ): Promise<FixedAsset[]>;
+  getInventoryItem(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryItem | undefined>;
+  listInventoryItems(businessId: string): Promise<InventoryItem[]>;
+  /** id は `fy{fiscalYear}` 形式の決定的ID */
+  getInventoryCount(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryCount | undefined>;
+  listInventoryCounts(businessId: string): Promise<InventoryCount[]>;
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,
@@ -105,6 +124,17 @@ export interface AccountingReader {
   listWithholdingRecords(
     businessId: string,
   ): Promise<WithholdingRecord[]>;
+
+  getBill(businessId: string, id: string): Promise<Bill | undefined>;
+  listBills(businessId: string): Promise<Bill[]>;
+  getBillPayment(
+    businessId: string,
+    id: string,
+  ): Promise<BillPayment | undefined>;
+  listBillPaymentsForBill(
+    businessId: string,
+    billId: string,
+  ): Promise<BillPayment[]>;
   listFiscalPeriods(businessId: string): Promise<FiscalPeriod[]>;
   listAuditLogs(businessId: string): Promise<AuditLogEntry[]>;
 }

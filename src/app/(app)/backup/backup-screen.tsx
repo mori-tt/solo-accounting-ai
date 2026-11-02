@@ -30,6 +30,8 @@ const COLLECTION_LABELS: Record<string, string> = {
   receipts: "領収書(メタデータ)",
   invoices: "請求書",
   payments: "入金",
+  bills: "受領請求書(買掛)",
+  billPayments: "支払",
   journalEntries: "仕訳",
   fiscalPeriods: "会計期間",
   closingChecks: "決算チェック",

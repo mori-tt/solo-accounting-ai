@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUDIT_LOG_CSV_HEADER,
   auditActionLabel,
   auditTargetTypeLabel,
+  buildAuditLogCsv,
   describeAuditEntry,
   filterAuditLogs,
   isImportKind,
   parseAuditTargetPath,
   parseImportDocId,
+  type AuditLogCsvEntry,
   type AuditLogViewEntry,
 } from "./audit-log-view";
 
@@ -232,5 +235,52 @@ describe("filterAuditLogs", () => {
         endAt: "2026-10-01T00:00:00.000Z",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("buildAuditLogCsv", () => {
+  const csvEntry = (
+    id: string,
+    createdAt: string,
+    extra: Partial<AuditLogCsvEntry> = {},
+  ): AuditLogCsvEntry => ({
+    id,
+    createdAt,
+    actorUid: "uid-" + id,
+    actorName: null,
+    action: "update",
+    targetPath: "businesses/b1/transactions/t1",
+    ...extra,
+  });
+
+  it("ヘッダー+行を定義列で出力する", () => {
+    const csv = buildAuditLogCsv([
+      csvEntry("a1", "2026-10-01T01:00:00.000Z", {
+        actorName: "山田",
+        action: "create",
+      }),
+      csvEntry("a2", "2026-10-02T01:00:00.000Z", {
+        action: "delete",
+        targetPath: "businesses/b1/receipts/r1",
+      }),
+    ]);
+    const [header, r1, r2] = csv.split("\r\n");
+    expect(header).toBe(AUDIT_LOG_CSV_HEADER.join(","));
+    expect(r1).toBe(
+      "2026-10-01T01:00:00.000Z,山田,uid-a1,登録,取引,businesses/b1/transactions/t1,取引を登録",
+    );
+    expect(r2).toBe(
+      "2026-10-02T01:00:00.000Z,,uid-a2,削除,領収書,businesses/b1/receipts/r1,領収書を削除",
+    );
+  });
+
+  it("解釈できないtargetPathは対象種別を空にする", () => {
+    const csv = buildAuditLogCsv([
+      csvEntry("a1", "2026-10-01T01:00:00.000Z", { targetPath: "broken" }),
+    ]);
+    const r1 = csv.split("\r\n")[1];
+    expect(r1).toBe(
+      "2026-10-01T01:00:00.000Z,,uid-a1,更新,,broken,対象を更新",
+    );
   });
 });

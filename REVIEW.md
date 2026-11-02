@@ -50,6 +50,117 @@
 - 記録一覧は暦年内の取引に紐付くもののみ表示(取引が期間外・存在しない記録は表示されない。孤児は削除経路が無いため通常発生しない)
 - 取引更新時の withholding は省略=保持・null=解除・値=作成更新の3値セマンティクス。フォームは常に値かnullを送る(API直接呼び出し時のみ保持が効く)
 - paymentAmount(対象支払額)は取引額以下で、取引額より小さくできる(消費税込み支払いで税抜部分のみ対象などのケース用)。仕訳展開の税額は taxAmount を使うため支払額設定が仕訳金額へ影響しない設計
+## 2026-11-02: 棚卸資産管理(在庫品目+期末棚卸高の自動集計)(Issue #133)
+- Worktree: inventory
+棚卸品目マスタ(`inventoryItems`)と年度別期末棚卸カウント(`inventoryCounts`)を新設し、
+期末棚卸高(数量×評価単価の合計)を決算書(収支内訳書)の「期末商品棚卸高」・
+翌年度の「期首商品棚卸高」の初期値として連携する機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `InventoryItem`(name/unit/standardUnitPrice)、
+  `InventoryCountLine`(itemId/name/unit/quantity/unitPrice。name/unitは保存時点の
+  スナップショット)、`InventoryCount`(fiscalYear/lines。docIdは `fy{fiscalYear}`)を追加
+- `src/lib/accounting/domain/inventory.ts`(新規): `inventoryLineAmount`
+  (数量×単価を円・整数へ四捨五入。小数数量の浮動誤差で1円欠けないよう round 採用)、
+  `inventoryTotalAmount`(期末棚卸高=明細合計)、`costOfGoodsSold`(期首+仕入-期末)
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"inventoryItems"`/`"inventoryCounts"`、
+  `AccountingReader` に `getInventoryItem`/`listInventoryItems`/`getInventoryCount`/`listInventoryCounts`。
+  `store/memory.ts`・`store/firestore.ts` に実装
+- `src/lib/accounting/services/inventory.ts`(新規): `registerInventoryItem`
+  (冪等キー)、`updateInventoryItem`、`deleteInventoryItem`(再実行冪等)、
+  `inventoryCountId`(fy{year})、`saveInventoryCount`(年度upsert。
+  締め済み年度は `PERIOD_CLOSED`、itemId重複・存在しない品目・負数量・負単価を拒否。
+  unitPrice省略時は品目の標準単価で解決し、品目名・単位をスナップショット保存)
+- `src/lib/validation/schemas.ts`: `inventoryItemSchema`/`inventoryCountLineSchema`/
+  `inventoryCountSchema`(年度1900-2200・明細500行以内・itemId重複不可・
+  単価は円整数0以上・数量は0以上の実数)追加
+- `src/lib/actions/inventory.ts`(新規): `listInventoryYearData`
+  (requireViewer・品目+年度カウント+棚卸高+締め状態)、`createInventoryItem`/
+  `updateInventoryItemAction`(requireEditor+zod再検証)、`deleteInventoryItemAction`
+  (requireOwner・rulesと同じ制限)、`saveInventoryCountAction`(requireEditor)
+- `/inventory` ページ新設(`page.tsx`/`loading.tsx`/`inventory-screen.tsx`):
+  年度ナビ付き期末棚卸カウント表(数量・評価単価入力、金額・合計を自動計算)、
+  品目マスタの登録・編集・削除(ownerのみ)、締め済み年度の読取専用表示、
+  削除済み品目を参照する保存済み明細の警告(保存時に除外)。
+  ナビ「決算・管理」グループに「棚卸・在庫」を追加
+- 決算書連携: `getFilingStatement` が前年度・対象年度のカウント合計を
+  `beginningInventory`/`endingInventory` として返却。filing画面に期首・期末
+  商品棚卸高の入力欄を追加(専従者給与と同じ「自動値をキーとした上書き状態」で
+  手入力上書き可・年度切替/自動値変化で自動値へ復帰)。`domain/filing.ts` に
+  `grossIncomeWithInventory` を追加し差引金額へ反映。`filing-sheet` の
+  「期首/期末商品(製品)棚卸高」は固定値0から実値表示へ、差引原価=期首+仕入-期末
+- `firestore.rules`: `inventoryItems`(member読取/canEdit作成更新/createdBy一致・
+  不変/ownerのみ削除/`validInventoryItem` 検証)、`inventoryCounts`
+  (member読取/canEdit作成更新・`docId == "fy" + fiscalYear` 強制・
+  fiscalYear/createdBy/createdAt不変・締め済み年度は `periodClosed` で
+  作成更新削除を拒否・ownerのみ削除)を追加
+- `tests/rules/helpers.ts` に `inventoryItem()`/`inventoryCount()`、
+  `firestore.rules.test.ts` に2つの describe(読取/作成/他人名義拒否/不正データ拒否/
+  docId-fiscalYear不一致拒否/不変フィールド/締め済み年度の変更削除拒否/viewer拒否/
+  owner削除)を追加
+- `src/lib/backup.ts`: `BACKUP_COLLECTIONS` に2コレクション追加。
+  `inventoryCounts` は決定的IDのため `FIXED_ID_COLLECTIONS` に登録し、
+  復元時のID衝突は既存を維持してskip。`RESTORE_ACTOR_FIELDS` に両者の
+  `createdBy` を追加(復元者へ上書き)
+- `docs/FIRESTORE_SCHEMA.md`: コレクション一覧と2コレクションのフィールド表・
+  棚卸高の計算規約(保存せず都度計算)・締め済み保護を追記
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm test` — 合格(53ファイル637件、skip 10。`domain/inventory.test.ts` 6件 +
+  `services/inventory.test.ts` 11件 新規、nav-links テストのリンク数を25へ更新)
+- `pnpm build` — 合格(/inventory が静的路由として生成)
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules`
+  — 合格(2ファイル125件。inventoryItems 6件 + inventoryCounts 8件を含む)
+- `JAVA_HOME=... pnpm test:emulators` — 合格(2ファイル7件)
+- 期末棚卸高はドキュメントに保存せず lines(数量×評価単価)から都度計算する
+  (depreciation と同じ方針)。決算書の棚卸高欄はその計算値を初期値として表示し、
+  手入力上書き値は保存しない(年度切替・再取得で自動値へ戻る)
+- 数量は小数可(kg/m 等)。金額は `Math.round(数量×単価)` で円・整数
+  (切り捨てだと 0.29×100 のような浮動誤差で欠けるため)
+- 品目を削除しても保存済みカウント明細は name/unit スナップショットで残る
+  (棚卸表は期末確定資料のため)。次回保存時に削除済み品目の行は除外される
+  (画面で警告表示)。保存は「現在の品目マスタにある行のみ」を送るUI設計
+- inventoryCounts の Rules 検証は lines 要素の中身まで反復できないため
+  `lines is list && size() <= 500` まで。明細内容の検証はサービス層+zodで実施
+- 締め済み年度の保護はサービス層(トランザクション内で fiscalPeriod 参照)と
+  Rules(`periodClosed`)の二重。期首棚卸高は「前年度カウント fy{year-1}」を
+  参照するため、前年度が締め済みでも読取のみで問題ない
+- `inventoryCounts` の復元は FIXED_ID_COLLECTIONS で既存維持skipとなるため、
+  別事業への復元で棚卸カウントを引き継ぐには新しい年度環境である必要がある
+- Emulator利用: `JAVA_HOME` 設定後 `test:rules`/`test:emulators` を実行(ポート衝突なし)
+## 2026-11-02: 電子帳簿保存法コンプライアンス・e-Tax連携可否調査(Issue #135)
+- Worktree: compliance
+### 調査: 電帳法要件との比較(詳細は docs/ELECTRONIC_BOOKKEEPING.md)
+| 要件 | 状況 |
+|---|---|
+| 検索(取引年月日・金額・取引先) | 帳簿側(`/search`)は既存で対応。証憑側はメタデータがなかったため本Issueで追加 |
+| 訂正削除履歴 | append-only監査ログで既に対応。識別情報のみ記録(内容スナップショットなし)で要件上は「履歴を確認できるシステム」として機能。CSVエクスポートを本Issueで追加 |
+| タイムスタンプ | システム時刻(Firestore Timestamp、監査ログはrequest.time±1h検証)。認定タイムスタンプは未対応だが訂正削除履歴システム措置で代替可 |
+| ダウンロードの求め | JSONバックアップ・取引CSVは既存。証憑一覧CSV・監査ログCSVを追加。証憑ファイル一括DLは残ギャップ |
+| 優良電子帳簿 | 検索・履歴要件は概ね充足だが「すべての国税関係帳簿の備付け」等の確認が必要で認定取得支援はスコープ外 |
+- `Receipt`型に検索要件メタデータ `transactionDate`/`amount`/`counterparty`(いずれもoptional)を追加。紐付け(`linkReceipt`)時に取引値をコピー
+- `services/receipts.ts` に `updateReceiptMetadata` を追加(冪等再実行許容、紐付取引が締め済み期間ならPERIOD_CLOSED拒否、監査ログ `update` 記録)
+- `actions/receipts.ts` に `updateReceiptMetadataAction`(requireEditor+zod再検証)を追加
+- `firestore.rules`: `validReceipt` にメタデータ3項目の型検証追加(transactionDate: YYYY-MM-DD文字列、amount: int>=0、counterparty: string)。rules test に検証ケース追加
+- `src/lib/receipt-search.ts`(新規): 証憑フィルタの純粋関数(キーワード=ファイル名/証憑メタデータ/紐付取引の摘要・取引先・金額、取引日範囲=証憑メタデータと紐付取引日の両方を対象)
+- `csv.ts` に `buildReceiptsCsv`/`RECEIPT_CSV_HEADER` 追加(既存 serializeCsv 経由で数式注入対策済み)
+- `audit-log-view.ts` に `buildAuditLogCsv`/`AUDIT_LOG_CSV_HEADER`/`AuditLogCsvEntry` 追加(識別情報のみ: 日時・実行者・操作・対象種別・対象パス・概要。証憑内容を含まない)
+- `/receipts`: キーワード+取引日範囲フィルタ、証憑ごとのメタデータ表示・編集フォーム(紐付取引ロック時は無効化)、フィルタ済み一覧のCSV出力ボタン
+- `/audit-log`: 表示中フィルタ済みログのCSV出力ボタン(全件・ページングなし)
+- `docs/FIRESTORE_SCHEMA.md`: receipts のメタデータ3フィールド追記
+- `docs/ELECTRONIC_BOOKKEEPING.md`(新規): 電帳法要件マッピング・残ギャップ
+- `docs/ETAX.md`(新規): e-Tax連携可否調査
+### e-Tax連携の可否(詳細は docs/ETAX.md)
+**アプリ単体での実装不可。** 理由:
+1. e-Tax公式API(HTTP・APIキーはNTAへ申請制)は参照系のみ(登録済み基本情報・税目情報・受信データ参照)。「認証や申告等データ送信はAPI一覧にない操作で対応していない」と公式明記
+2. 申告送信は受付システムIF仕様書+帳票XML仕様書への自前対応が必要(仕様書は所得税関係だけで約8MB)
+3. 申告送信には利用者の電子署名(電子証明書: マイナンバーカード等)が必須で、ブラウザアプリ単体ではICカードへアクセスするローカル署名コンポーネントが実現できない
+代替手段: `/reports/filing` 集計の確定申告書等作成コーナー転記、CSV/JSONバックアップの税理士・他ソフト受け渡し、証憑/監査ログCSVの資料化。REQUIREMENTS.mdのスコープ外記載と整合
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm test` — 合格(52ファイル635件、skip 10。`receipt-search.test.ts` 9件、`buildReceiptsCsv` 3件、`buildAuditLogCsv` 2件、`updateReceiptMetadata` 5件を含む新規)
+- `pnpm build` — 合格
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル112件。receiptメタデータ検証ケース含む)
+- 証憑メタデータは紐付け時点のスナップショットであり取引編集に自動追従しない(検索は両方の値を対象とするため探索可能性は維持)。追従が必要になった場合は紐付取引の更新フックで連動させる設計変更を検討
+- 監査ログCSVは識別情報のみ(actorNameは表示名、パスから証憑内容は推測されない)。内容スナップショットを含める要件が出た場合は個人情報取り扱い方針(docs/SECURITY_RULES.md)との整合確認が必要
+- 「ダウンロードの求め」への完全対応には証憑ファイル本体の一括エクスポートが残っている。個別DL+一覧CSV+JSONバックアップで代替可能だが、必要なら別Issue化
+- e-Tax「電子証明書必須」は現行の電子署名要件。署名コンポーネントを外部化(署名モジュールIF)する構想があっても、帳票XML対応と併せ大規模開発になる
 
 ## 2026-11-02: 減価償却(固定資産台帳)(Issue #58)
 - Worktree: depreciation
@@ -2059,3 +2170,78 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
 - `pnpm build` — 合格
 - `pnpm test` — 合格(50ファイル593件、skip 10)
+
+## 2026-11-02: 買掛管理(受領請求→支払予定→支払消込)(Issue #132)
+- Worktree: payables
+### 実装内容
+入金消込(payments/請求書)と対称な買掛ワークフロー。
+受領請求書登録 → 支払予定・期日アラート → 支払記録・支出取引との消込。依存追加なし。
+- `src/lib/accounting/types.ts`: `Bill`(vendorName/totalAmount/receivedDate/dueDate/description?/status/createdBy/createdAt/updatedAt)、`BillStatus`(`unpaid`/`paid`。期限超過はdueDateから都度判定するため保持しない)、`BillPayment`(billId/date/amount/transactionId?/createdAt) を追加
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"bills"`/`"billPayments"`、`AccountingReader` に `getBill`/`listBills`/`getBillPayment`/`listBillPaymentsForBill` を追加。`store/firestore.ts`(billId等値クエリ)・`store/memory.ts` に実装
+- `src/lib/accounting/services/bills.ts`(新規): `registerBill`(unpaid登録・冪等キー・受領日の締め期間チェック)、`updateBill`(未払のみ・新旧受領日ともopen期間・支払累計未満への請求額引下げは拒否)、`registerBillPayment`(部分支払可・過払い拒否・paid化は支払合計到達時のみ・支払日の締め期間チェック・監査はpayment+status変更時のbill)、`findUnpaidBills`(期日昇順・overdue判定・remaining算出)
+- `src/lib/bill-matching.ts`(新規): payment-matching の買掛版。`rankBillPaymentLinkCandidates`(同一取引先優先+日付降順・二重消込はexcludeIdsで排除)、`billPaymentProgress`、`billSettlement` を payment-matching 関数で実装
+- `src/lib/validation/schemas.ts`: `billSchema`/`billPaymentSchema` を追加
+- `src/lib/actions/bills.ts`(新規): `listBillRows`(未払は期日昇順・支払済は期日降順+支払履歴)、`createBill`/`updateBillAction`(editor・冪等キー)、`listBillPaymentLinkCandidates`(受領日〜asOfのexpense取引・紐付済み除外)、`registerBillPaymentAction`(transactionIdはexpense型の実在取引のみ)
+- `src/lib/api/queries.ts`: `listBillPaymentsRaw` を追加
+- `src/lib/actions/reports.ts` + `dashboard-screen.tsx`: DashboardData に `unpaidBillCount`/`unpaidBillAmount`/`overdueBillCount` を追加し「要対応」アラートへ未払請求書項目を追加(既存AttentionItemと同パターン・/billsへリンク)
+- `src/app/(app)/bills/`: 一覧(支払額/残額・期限超過・一部支払・消込バッジ)+ 登録/編集フォーム + 支払記録フォーム(支出取引の候補選択つき) + 支払履歴
+- `src/components/nav-links.tsx`: 「仕入・支払」グループに「支払・買掛」(/bills)追加、`status-badge.tsx` に `bill` 種別追加、nav-links.test 更新(リンク数24→25)
+- `src/lib/backup.ts` + `backup-screen.tsx` + `audit-log-view.ts` + `businesses.ts`(コメント): bills/billPayments をバックアップ対象・復元ルール(status遷移はskip・createdBy張替・receivedDate/dateのclosed期間検査・billId/transactionId参照張替)・コレクション表示名・監査対象種別に追加
+- `firestore.rules`: `billDoc`ヘルパ、`/bills`(member読・editor作成createdBy一致・未払のみ編集可/paidは不変・editorは未払のみ削除・受領日closed期間ガード)、`/billPayments`(実在bill必須・transactionIdは実在のexpense型取引のみ・金額日付消込先不変・削除はownerのみ・支払日closed期間ガード)
+- `docs/FIRESTORE_SCHEMA.md`: bills/billPaymentsコレクション定義を追加(overdueは派生値であることも明記)
+- `tests/rules/helpers.ts` + `firestore.rules.test.ts`: bills/billPayments フィクスチャと7ケース追加(権限・createdBy偽装・status/日付/金額不正値・paid不変性・削除権限・closed期間・実在bill参照・expense限定transactionId)
+### 判断事項
+- BillStatusは`unpaid`/`paid`のみ。invoicesの`overdue`と違い保存値にしない(dueDate+基準日からの導出値で、status遷移の管理負荷を避ける)
+- billの編集は未払のみ・請求額を支払累計未満には下げられない(残高負転防止)
+- billPayment確定後の訂正はpayment削除(owner)+再登録で表現(paymentsと同様の不変性方針)
+- invoicesのupdate rulesと同パターン: 未払billはクライアント更新可(paidへの直接変更もrules上は許容。invoicesのdraft→paidと同じ既知の緩さ)
+- `updateBill`の請求額下限ガードを自己レビューで追加(invoicesにupdate相当が無く先例なし)
+### Checks
+- `pnpm lint` — 合格(0 errors、既存warning1件のみ: receiptsの<img>)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` で `.next/types` 生成後。worktree初期状態ではLayoutProps未生成で失敗する既知事象)
+- `pnpm test` — 合格(53ファイル641件、skip 10)
+- `pnpm build` — 合格(/bills ルート生成)
+- `pnpm test:rules`(JAVA_HOME=openjdk@21) — 合格(2ファイル117件)
+- `pnpm test:emulators` — 合格(2ファイル7件)
+## 2026-11-02: 帳簿CSVエクスポート+申告期限アラート(Issue #134)
+- Worktree: export-alerts
+- 変更内容:
+  - 仕訳帳・試算表にCSVダウンロードを追加(税理士受け渡し想定)。
+    取引一覧は既存のCSV出力を共通ヘルパーへ置き換え
+  - 仕訳帳CSV: 日付/借方科目/貸方科目/金額/摘要/取引先(Issue指定の列構成。
+    科目は帳簿用ラベル解決済みの表示名、金額は貸借一致のため1列)
+  - 試算表CSV: 勘定科目/借方合計/貸方合計/残高+末尾に合計行
+  - いずれもBOM付UTF-8でExcel文字化け対策(既存 transactions と同一方式を
+    `downloadCsv` ヘルパーに集約)
+  - 申告期限アラート: 確定申告(所得税・3/15)、消費税の申告・納付
+    (3/31・課税事業者のみ)、償却資産の申告(1/31・active固定資産の保有時のみ)
+    をダッシュボード上部のAlertに表示。期限30日前から警告(warning)、
+    期限超過は30日の猶予内のみerror表示(申告済みフラグが無いため
+    無期限の誤表示を防ぐ)。期限日が土日なら翌月曜へ繰り下げ(祝日は未考慮)
+- 変更ファイル:
+  - `src/lib/accounting/domain/deadlines.ts`(新規): 期限計算ロジック(純粋関数)
+  - `src/lib/csv.ts`: buildJournalCsv/buildTrialBalanceCsv 追加。
+    escapeField を修正し純粋な数値(負の残高等)を数式対策の `'` 化から除外
+    (`'-98000` となりExcelで数値読みできない問題を回避)
+  - `src/lib/download.ts`(新規): BOM付きCSVダウンロード共通ヘルパー
+  - `src/lib/actions/reports.ts`: getDashboard が deadlineAlerts を返す
+    (business・active固定資産の読み取りを Promise.all に追加。storeは
+    Admin SDK経由のため rules 影響なし)
+  - `src/app/(app)/dashboard/dashboard-screen.tsx`: 期限アラート表示+
+    種別ごとの確認画面リンク(申告データ/消費税集計/固定資産台帳)
+  - `src/app/(app)/reports/journal,trial-balance の各screen`: CSV出力ボタン
+  - `src/app/(app)/transactions/transactions-screen.tsx`: downloadCsv へ置換
+- Checks:
+  - `pnpm lint` — 合格(既存warning 1件: receipts-screen `<img>`)
+  - `pnpm exec next typegen` + `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(52ファイル633件、skip 10。deadlines 13件・csv 3件新規)
+  - `pnpm build` — 合格
+  - `pnpm test:emulators`(JAVA_HOME=openjdk@21)— 合格(7件)
+- 備考:
+  - 取引一覧CSVの列構成は既存形式を維持(CSV取込との往復互換のため)。
+    Issue記載の列構成は仕訳帳CSVに適用
+  - 期限の祝日調整は未対応(土日のみ)。個人の課税期間は暦年固定のため
+    fiscalYearStartMonth には依存しない設計
+  - firestore.rules 変更なし(追加は読み取り経路のみ・サーバー側Admin SDK)
+  - getDashboard に getBusiness+listFixedAssets の読み取り2件を追加。
+    listFixedAssets は status+取得日の既存複合indexを利用

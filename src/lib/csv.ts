@@ -1,4 +1,12 @@
-import type { Transaction, TransactionType } from "@/lib/accounting/types";
+import type {
+  JournalEntry,
+  TrialBalance,
+} from "@/lib/accounting/domain/ledger";
+import type {
+  Receipt,
+  Transaction,
+  TransactionType,
+} from "@/lib/accounting/types";
 import {
   ACCOUNT_OPTIONS,
   accountLabelIn,
@@ -35,8 +43,16 @@ export const CSV_UTF8_BOM = "\uFEFF";
  */
 const FORMULA_PREFIX = /^[=+\-@\t\r]/;
 
+/**
+ * 前後空白なしの数値リテラル(負数含む)。
+ * 数値は `-2+3` のような式になり得ないため数式対策の対象外
+ * (試算表の負の残高が `'-98000` となりExcelで数値として
+ * 読めなくなるのを防ぐ)。
+ */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
 function escapeField(value: string): string {
-  if (FORMULA_PREFIX.test(value)) {
+  if (FORMULA_PREFIX.test(value) && !PLAIN_NUMBER.test(value)) {
     value = `'${value}`;
   }
   if (/[",\r\n]/.test(value)) {
@@ -208,6 +224,146 @@ export function buildTransactionsCsv(
   return serializeCsv([
     [...TRANSACTION_CSV_HEADER],
     ...transactions.map((t) => transactionToCsvRow(t, options)),
+  ]);
+}
+
+// ---------- 証憑一覧CSV ----------
+
+/**
+ * 証憑一覧のエクスポート列。電帳法の検索要件(取引年月日/金額/取引先)と
+ * 「ダウンロードの求め」への対応として、証憑メタデータと紐付取引の
+ * 双方の値を出力する。
+ */
+export const RECEIPT_CSV_HEADER = [
+  "証憑ID",
+  "ファイル名",
+  "状態",
+  "取引日",
+  "取引金額",
+  "取引先",
+  "紐付取引ID",
+  "紐付取引日",
+  "紐付取引金額",
+  "紐付取引先",
+  "MIME",
+  "storagePath",
+  "アップロード日時",
+  "更新日時",
+] as const;
+
+const RECEIPT_STATUS_TO_LABEL: Record<Receipt["status"], string> = {
+  unprocessed: "未処理",
+  linked: "紐付済み",
+  archived: "アーカイブ",
+};
+
+/** 証憑1件 → CSV行(エクスポート列順)。紐付取引が解決できる場合はその値も出す */
+export function receiptToCsvRow(r: Receipt, tx?: Transaction): string[] {
+  return [
+    r.id,
+    r.fileName,
+    RECEIPT_STATUS_TO_LABEL[r.status] ?? r.status,
+    r.transactionDate ?? "",
+    r.amount === undefined ? "" : String(r.amount),
+    r.counterparty ?? "",
+    r.transactionId ?? "",
+    tx?.date ?? "",
+    tx === undefined ? "" : String(tx.amount),
+    tx?.counterparty ?? "",
+    r.mimeType,
+    r.storagePath,
+    r.createdAt,
+    r.updatedAt,
+  ];
+}
+
+/** 証憑一覧 → ヘッダー付きCSV文字列(BOMなし) */
+export function buildReceiptsCsv(
+  receipts: readonly Receipt[],
+  txById: ReadonlyMap<string, Transaction> = new Map(),
+): string {
+  return serializeCsv([
+    [...RECEIPT_CSV_HEADER],
+    ...receipts.map((r) =>
+      receiptToCsvRow(
+        r,
+        r.transactionId ? txById.get(r.transactionId) : undefined,
+      ),
+    ),
+  ]);
+}
+
+// ---------- 帳簿CSV(税理士受け渡し用) ----------
+
+/**
+ * 仕訳帳CSVの列ヘッダー。
+ * 会計ソフトへの取り込み・税理士との共有を想定した汎用構成。
+ * 科目は表示名(標準科目・カスタム科目・現金等の帳簿用コードを
+ * 呼び出し側のラベル解決で変換済み)で出力する。
+ */
+export const JOURNAL_CSV_HEADER = [
+  "日付",
+  "借方科目",
+  "貸方科目",
+  "金額",
+  "摘要",
+  "取引先",
+] as const;
+
+/** 仕訳1件 → CSV行。借方・貸方は同額(貸借一致)のため金額は1列 */
+export function journalEntryToCsvRow(
+  entry: JournalEntry,
+  label: (code: string) => string,
+): string[] {
+  const [debit, credit] = entry.lines;
+  return [
+    entry.date,
+    label(debit.account),
+    label(credit.account),
+    String(debit.debit),
+    entry.description,
+    entry.counterparty,
+  ];
+}
+
+/** 仕訳帳 → ヘッダー付きCSV文字列(BOMなし) */
+export function buildJournalCsv(
+  entries: readonly JournalEntry[],
+  label: (code: string) => string,
+): string {
+  return serializeCsv([
+    [...JOURNAL_CSV_HEADER],
+    ...entries.map((e) => journalEntryToCsvRow(e, label)),
+  ]);
+}
+
+/** 試算表CSVの列ヘッダー */
+export const TRIAL_BALANCE_CSV_HEADER = [
+  "勘定科目",
+  "借方合計",
+  "貸方合計",
+  "残高",
+] as const;
+
+/** 試算表 → ヘッダー付きCSV文字列(BOMなし)。末尾に合計行を付ける */
+export function buildTrialBalanceCsv(
+  trialBalance: TrialBalance,
+  label: (code: string) => string,
+): string {
+  return serializeCsv([
+    [...TRIAL_BALANCE_CSV_HEADER],
+    ...trialBalance.rows.map((row) => [
+      label(row.account),
+      String(row.debitTotal),
+      String(row.creditTotal),
+      String(row.balance),
+    ]),
+    [
+      "合計",
+      String(trialBalance.debitTotal),
+      String(trialBalance.creditTotal),
+      String(trialBalance.debitTotal - trialBalance.creditTotal),
+    ],
   ]);
 }
 

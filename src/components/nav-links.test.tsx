@@ -18,6 +18,7 @@ describe("NavLinks", () => {
     for (const heading of [
       "記帳",
       "売上・請求",
+      "仕入・支払",
       "レポート",
       "決算・管理",
     ]) {
@@ -50,5 +51,8 @@ describe("NavLinks", () => {
     expect(
       screen.getByRole("link", { name: "決算チェック" }).getAttribute("href"),
     ).toBe("/closing");
+    expect(
+      screen.getByRole("link", { name: "棚卸・在庫" }).getAttribute("href"),
+    ).toBe("/inventory");
   });
 });

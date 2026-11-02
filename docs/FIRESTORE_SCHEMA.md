@@ -28,9 +28,13 @@ businesses/{businessId}/withholdingRecords/{transactionId}
 businesses/{businessId}/receipts/{receiptId}
 businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/payments/{paymentId}
+businesses/{businessId}/bills/{billId}
+businesses/{businessId}/billPayments/{billPaymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
 businesses/{businessId}/recurringTemplates/{templateId}
 businesses/{businessId}/fixedAssets/{assetId}
+businesses/{businessId}/inventoryItems/{itemId}
+businesses/{businessId}/inventoryCounts/fy{fiscalYear}
 businesses/{businessId}/fiscalPeriods/{periodId}
 businesses/{businessId}/closingChecks/{checkId}
 businesses/{businessId}/aiSuggestions/{suggestionId}
@@ -154,6 +158,9 @@ receipts(証憑ファイル)
 | fileName | string | |
 | mimeType | string | |
 | transactionId | string? | 紐付け先 |
+| transactionDate | string? | YYYY-MM-DD。電帳法の検索要件用メタデータ(取引年月日)。紐付け時に取引値をコピー、未紐付は手入力で補完 |
+| amount | number? | 円・整数・0以上。検索要件用メタデータ(取引金額) |
+| counterparty | string? | 検索要件用メタデータ(取引先) |
 | status | string | `unprocessed` / `linked` / `archived` |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
@@ -201,6 +208,35 @@ receipts(証憑ファイル)
 | date | string | YYYY-MM-DD |
 | amount | number | 円・整数 |
 | transactionId | string? | 対応する入金Transaction |
+| createdAt | Timestamp | |
+
+### businesses/{businessId}/bills/{billId}
+
+取引先から受領した請求書(買掛)。支払は `billPayments` で消込し、
+支払合計が `totalAmount` に達すると `status` が `paid` になる
+(入金消込の買掛版)。期限超過は `dueDate` と基準日から都度判定し、
+`overdue` ステータスは持たない。
+
+| Field | Type | Note |
+|---|---|---|
+| vendorName | string | 取引先名(支払先) |
+| totalAmount | number | 請求額(円・整数・税込) |
+| receivedDate | string | 受領日 YYYY-MM-DD |
+| dueDate | string | 支払期日 YYYY-MM-DD |
+| description | string? | 摘要 |
+| status | string | `unpaid` / `paid` |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/billPayments/{billPaymentId}
+
+| Field | Type | Note |
+|---|---|---|
+| billId | string | 消込先 |
+| date | string | YYYY-MM-DD(支払日) |
+| amount | number | 円・整数(部分支払可・超過支払は不可) |
+| transactionId | string? | 対応する支出Transaction |
 | createdAt | Timestamp | |
 
 ### businesses/{businessId}/journalEntries/{journalEntryId}
@@ -264,6 +300,42 @@ draft で生成し、`lastBookedFiscalYear` で二重計上を防ぐ。
 | status | string | `active` / `disposed` |
 | disposedDate | string? | 除却日 YYYY-MM-DD(status=disposed時) |
 | lastBookedFiscalYear | number? | 最後に償却費を計上した会計年度(開始年) |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/inventoryItems/{itemId}
+
+棚卸品目マスタ。年度別棚卸カウント(`inventoryCounts`)の明細を構成する。
+
+| Field | Type | Note |
+|---|---|---|
+| name | string | 品目名 |
+| unit | string | 単位(表示用。例: 個/kg/m) |
+| standardUnitPrice | number | 標準単価(円・整数・0以上) |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/inventoryCounts/fy{fiscalYear}
+
+会計年度ごとの期末棚卸カウント(1事業1年度1ドキュメント)。
+ドキュメントIDは `fy{fiscalYear}`(fiscalPeriodsと同じ採番)で、
+Security Rules側で `docId == "fy" + fiscalYear` を強制する。
+期末棚卸高は `lines` の 数量×評価単価 の合計として計算するため
+ドキュメントには保存しない(円・整数)。決算書の「期末商品棚卸高」
+(対象年度)と「期首商品棚卸高」(翌年度)の初期値として参照される。
+締め済み会計年度のカウントは Security Rules でも変更・削除を拒否する。
+
+| Field | Type | Note |
+|---|---|---|
+| fiscalYear | number | 対象会計年度(docIdの `fy{year}` と一致) |
+| lines | array | 明細行(最大500件・同一itemIdの重複は不可) |
+| lines[].itemId | string | inventoryItems のID(明細登録時点のスナップショット) |
+| lines[].name | string | 品目名スナップショット(品目削除後も帳票表示用に保持) |
+| lines[].unit | string | 単位スナップショット |
+| lines[].quantity | number | 数量(0以上・小数可。kg/m等の端数に対応) |
+| lines[].unitPrice | number | 評価単価(円・整数・0以上。保存時に標準単価で解決済み) |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |

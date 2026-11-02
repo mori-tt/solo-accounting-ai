@@ -3,6 +3,7 @@ import type {
   IncomeStatement,
   NetIncomeResult,
 } from "@/lib/accounting/domain/filing";
+import { costOfGoodsSold } from "@/lib/accounting/domain/inventory";
 import { formatDateJP, formatYen } from "@/lib/format";
 
 /**
@@ -13,12 +14,26 @@ import { formatDateJP, formatYen } from "@/lib/format";
 export function FilingSheet({
   businessName,
   statement,
+  beginningInventory,
+  endingInventory,
+  grossIncome,
   result,
 }: {
   businessName: string;
   statement: IncomeStatement;
+  /** 期首商品(製品)棚卸高(円・整数) */
+  beginningInventory: number;
+  /** 期末商品(製品)棚卸高(円・整数) */
+  endingInventory: number;
+  /** 棚卸高反映後の差引金額(収入金額 - 売上原価 - 経費) */
+  grossIncome: number;
   result: NetIncomeResult & { familyEmployeeSalary: number };
 }) {
+  const purchasesCost = costOfGoodsSold(
+    beginningInventory,
+    statement.totalPurchases,
+    endingInventory,
+  );
   return (
     <div className="print-sheet mx-auto max-w-3xl border border-zinc-300 bg-white p-8 text-zinc-900 shadow-sm">
       <h1 className="text-center text-lg font-bold tracking-wide">
@@ -78,7 +93,9 @@ export function FilingSheet({
           </tr>
           <tr>
             <td className="pl-4">期首商品(製品)棚卸高</td>
-            <td className="text-right tabular-nums">{formatYen(0)}</td>
+            <td className="text-right tabular-nums">
+              {formatYen(beginningInventory)}
+            </td>
           </tr>
           {statement.purchaseRows.length === 0 ? (
             <tr>
@@ -97,12 +114,14 @@ export function FilingSheet({
           )}
           <tr>
             <td className="pl-4">期末商品(製品)棚卸高</td>
-            <td className="text-right tabular-nums">{formatYen(0)}</td>
+            <td className="text-right tabular-nums">
+              {formatYen(endingInventory)}
+            </td>
           </tr>
           <tr className="font-medium">
             <td>差引原価</td>
             <td className="text-right tabular-nums">
-              {formatYen(statement.totalPurchases)}
+              {formatYen(purchasesCost)}
             </td>
           </tr>
 
@@ -136,7 +155,7 @@ export function FilingSheet({
           <tr className="bg-zinc-100 font-semibold">
             <td>差引金額(収入金額 - 売上原価 - 経費)</td>
             <td className="text-right tabular-nums">
-              {formatYen(statement.grossIncome)}
+              {formatYen(grossIncome)}
             </td>
           </tr>
           <tr>
@@ -162,8 +181,9 @@ export function FilingSheet({
 
       <p className="mt-3 text-[10px] text-zinc-400">
         ※ 本帳票は収支内訳書(一般用)の様式を参考にした転記用の内部資料です。
-        棚卸高・青色申告特別控除は手入力値で、確定データには保存されません。
-        専従者給与は専従者給与科目の年間合計を初期表示し、画面上で上書きできます。
+        棚卸高は棚卸・在庫画面の年度別棚卸カウントを初期表示し、
+        画面上で上書きできます(上書き値は確定データには保存されません)。
+        専従者給与は専従者給与科目の年間合計を初期表示します。
       </p>
     </div>
   );
