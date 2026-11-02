@@ -31,6 +31,10 @@ import {
   listPaymentsRaw,
   listProjectsRaw,
 } from "@/lib/api/queries";
+import {
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -50,7 +54,8 @@ export async function listCustomers(
   businessId: string,
 ): Promise<ActionResult<Customer[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     return (await listCustomersRaw(businessId)) as Customer[];
   });
 }
@@ -63,6 +68,7 @@ export async function createCustomer(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { customer } = await registerCustomer(getStore(), businessId, actor, {
       name: parsed.data.name,
       email: parsed.data.email === "" ? undefined : parsed.data.email,
@@ -83,6 +89,7 @@ export async function updateCustomer(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const store = getStore();
     const { value } = await store.transact(businessId, {}, async (tx) => {
       const current = await tx.getCustomer(businessId, customerId);
@@ -118,7 +125,8 @@ export async function listProjects(
   businessId: string,
 ): Promise<ActionResult<Project[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     return (await listProjectsRaw(businessId)) as Project[];
   });
 }
@@ -131,6 +139,7 @@ export async function createProject(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { project } = await registerProject(getStore(), businessId, actor, {
       customerId: parsed.data.customerId,
       name: parsed.data.name,
@@ -148,6 +157,7 @@ export async function updateProject(
 ): Promise<ActionResult<Project>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     if (!input.name) {
       throw new ApiError("INVALID_INPUT", "案件名を入力してください");
     }
@@ -193,6 +203,7 @@ export async function listInvoiceRows(
 ): Promise<ActionResult<InvoiceRow[]>> {
   return run(async () => {
     const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     // 期限切れのissuedをoverdueへ更新(冪等)。viewerには書き込み権がないため
     // editor以上の場合のみ最良努力で実行する
@@ -237,6 +248,7 @@ export async function createInvoice(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const items: InvoiceItem[] = parsed.data.items.map((item) => ({
       description: item.description,
       quantity: item.quantity,
@@ -263,6 +275,7 @@ export async function issueInvoiceAction(
 ): Promise<ActionResult<Invoice>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { invoice } = await issueInvoice(
       getStore(),
       businessId,
@@ -290,7 +303,8 @@ export async function listPaymentLinkCandidates(
   asOf: string,
 ): Promise<ActionResult<PaymentLinkCandidatesResult>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const endDate = assertDateString(asOf, "asOf");
     const store = getStore();
     const invoice = await store.getInvoice(businessId, invoiceId);
@@ -328,6 +342,7 @@ export async function registerPaymentAction(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const store = getStore();
     const transactionId = parsed.data.transactionId || undefined;
     if (transactionId !== undefined) {

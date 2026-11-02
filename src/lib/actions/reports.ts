@@ -10,6 +10,10 @@ import { monthKeyOf, monthKeyRange } from "@/lib/accounting/dates";
 import type { MonthlySummary, Transaction } from "@/lib/accounting/types";
 import { MAX_LIST_LIMIT } from "@/lib/ai/store";
 import { getAISuggestionService } from "@/lib/api/ai";
+import {
+  actionBulkRateLimiter,
+  actionReadRateLimiter,
+} from "@/lib/api/rate-limit";
 import { run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -31,7 +35,8 @@ export async function getMonthlyReport(
   const parsed = parseForm(monthKey, monthKeyInput);
   if (!parsed.success) return { ok: false, error: { code: "INVALID_INPUT", message: parsed.issues.join(" / ") } };
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const key = parsed.data;
     const { startDate, endDate } = monthKeyRange(key);
@@ -59,6 +64,7 @@ export async function recomputeMonthlyReport(
   if (!parsed.success) return { ok: false, error: { code: "INVALID_INPUT", message: parsed.issues.join(" / ") } };
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionBulkRateLimiter.consume(businessId);
     const { summary } = await recomputeMonthlySummary(
       getStore(),
       businessId,
@@ -94,7 +100,8 @@ export async function getDashboard(
   const parsed = parseForm(monthKey, input.monthKey);
   if (!parsed.success) return { ok: false, error: { code: "INVALID_INPUT", message: parsed.issues.join(" / ") } };
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const { startDate, endDate } = monthKeyRange(parsed.data);
 

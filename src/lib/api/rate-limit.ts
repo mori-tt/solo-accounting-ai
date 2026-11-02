@@ -175,3 +175,34 @@ export const businessCreateRateLimiter = createRateLimiter({
   limit: 20,
   windowMs: 24 * 60 * 60 * 1000,
 });
+
+/**
+ * Server Actions 用のレート制限(1時間窓)。
+ * Route Handler 用と同じインメモリの最良努力制限。
+ * 消費は各アクション内で require*(認可)通過後に行い、
+ * 非メンバーが事業の枠を消費できないようにする。
+ *
+ * - READ(uid単位): viewer以上の参照系アクション。
+ *   getDashboard や総勘定元帳のように全取引を読む重い集計が
+ *   画面遷移のたびに走るため、R2-18 の指摘に基づきユーザー単位で
+ *   制限する(600回/時 = 平均毎分10回。画面操作+自動再取得を許容する余裕)。
+ * - WRITE(businessId単位): editor以上の変更系アクション。
+ *   銀行CSVインポートが行ごとに登録アクションを呼ぶため、
+ *   千件規模の一括取込と通常入力を許容する1200回/時で制限する。
+ * - BULK(businessId単位): 一括生成・締め・事業削除など
+ *   1回の呼出で大量の読み書きを行う操作(60回/時)。
+ */
+export const actionReadRateLimiter = createRateLimiter({
+  limit: 600,
+  windowMs: 60 * 60 * 1000,
+});
+
+export const actionWriteRateLimiter = createRateLimiter({
+  limit: 1200,
+  windowMs: 60 * 60 * 1000,
+});
+
+export const actionBulkRateLimiter = createRateLimiter({
+  limit: 60,
+  windowMs: 60 * 60 * 1000,
+});
