@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppProvider } from "@/components/auth-provider";
+import { siteDescription, siteName, siteUrl } from "./site";
 
 import "./globals.css";
 
@@ -15,9 +16,26 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Solo Accounting AI",
-  description:
-    "個人事業主・小規模事業者向けの経理・決算準備・確定申告準備アプリ",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: siteName,
+    template: `%s | ${siteName}`,
+  },
+  description: siteDescription,
+  applicationName: siteName,
+  openGraph: {
+    type: "website",
+    locale: "ja_JP",
+    url: "/",
+    siteName,
+    title: siteName,
+    description: siteDescription,
+  },
+  twitter: {
+    card: "summary",
+    title: siteName,
+    description: siteDescription,
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
