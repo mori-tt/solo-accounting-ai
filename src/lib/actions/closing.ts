@@ -8,6 +8,11 @@ import {
   type ClosingChecklist,
 } from "@/lib/accounting/services/periods";
 import type { FiscalPeriod } from "@/lib/accounting/types";
+import {
+  actionBulkRateLimiter,
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireOwner, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -17,7 +22,8 @@ export async function listFiscalPeriods(
   businessId: string,
 ): Promise<ActionResult<FiscalPeriod[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const periods = await getStore().listFiscalPeriods(businessId);
     return [...periods].sort((a, b) => b.startDate.localeCompare(a.startDate));
   });
@@ -30,6 +36,7 @@ export async function ensureFiscalPeriod(
 ): Promise<ActionResult<{ period: FiscalPeriod; created: boolean }>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     return ensureFiscalPeriodForDate(getStore(), businessId, actor, date);
   });
 }
@@ -41,7 +48,8 @@ export async function getClosingChecklist(
   asOf: string,
 ): Promise<ActionResult<ClosingChecklist>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     return closingChecklist(getStore(), businessId, periodId, asOf);
   });
 }
@@ -65,6 +73,7 @@ export async function closeFiscalPeriodAction(
 > {
   return run(async () => {
     const actor = await requireOwner(businessId);
+    actionBulkRateLimiter.consume(businessId);
     const result = await closeFiscalPeriod(
       getStore(),
       businessId,

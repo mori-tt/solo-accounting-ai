@@ -1,6 +1,7 @@
 "use server";
 
 import { writeAuditLog } from "@/lib/api/queries";
+import { actionWriteRateLimiter } from "@/lib/api/rate-limit";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor } from "@/lib/api/session";
 import { isImportKind, type ImportKind } from "@/lib/audit-log-view";
@@ -21,6 +22,7 @@ export async function recordImportRun(
   const count = Math.max(0, Math.floor(input.count));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     await writeAuditLog(businessId, {
       actorUid: actor.uid,
       action: "import",

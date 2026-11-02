@@ -34,6 +34,7 @@ import {
   monthKeyRange,
 } from "@/lib/accounting/dates";
 import type { TaxMode } from "@/lib/accounting/types";
+import { actionReadRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -79,7 +80,8 @@ export async function getJournalReport(
     return fail("INVALID_INPUT", parsed.issues.join(" / "));
   }
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const { startDate, endDate } = monthKeyRange(parsed.data);
     const transactions = await getStore().listTransactionsInRange(
       businessId,
@@ -112,7 +114,8 @@ export async function getAccountLedgerReport(
     return fail("INVALID_INPUT", parsed.issues.join(" / "));
   }
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const { startDate, endDate } = monthKeyRange(parsed.data);
     const transactions = await getStore().listTransactionsInRange(
       businessId,
@@ -153,7 +156,8 @@ export async function getTrialBalanceReport(
     return fail("INVALID_INPUT", parsed.issues.join(" / "));
   }
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const { startDate, endDate } = monthKeyRange(parsed.data);
     const transactions = await getStore().listTransactionsInRange(
       businessId,
@@ -198,7 +202,8 @@ export async function getYearlyReport(
     return fail("INVALID_INPUT", "年度が不正です");
   }
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const business = await store.getBusiness(businessId);
     if (!business) {
@@ -263,7 +268,8 @@ export async function getConsumptionTaxFilingData(
     return fail("INVALID_INPUT", "年度が不正です");
   }
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const business = await store.getBusiness(businessId);
     if (!business) {
@@ -310,7 +316,8 @@ export async function getFilingStatement(
     return fail("INVALID_INPUT", "年度が不正です");
   }
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const business = await store.getBusiness(businessId);
     if (!business) {

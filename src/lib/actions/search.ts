@@ -2,6 +2,7 @@
 
 import { getAccountOptions } from "@/lib/accounts";
 import type { Transaction } from "@/lib/accounting/types";
+import { actionReadRateLimiter } from "@/lib/api/rate-limit";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -24,7 +25,8 @@ export async function searchTransactions(
   const parsed = parseForm(transactionSearchSchema, input);
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const [transactions, business] = await Promise.all([
       store.listTransactionsInRange(

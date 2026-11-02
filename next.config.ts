@@ -55,10 +55,19 @@ function connectSrc(): string[] {
   ];
 }
 
-// nonceなしの静的CSP(middleware非依存)。inline script/style は
+// nonceなしの静的CSP(middleware/proxy非依存)。inline script/style は
 // Next.js の bootstrap が埋め込むため 'unsafe-inline' を許可し、
 // 開発時のみ React の eval デバッグ用に 'unsafe-eval' を足す。
 // upgrade-insecure-requests は Emulator(http)利用時は付けない。
+//
+// nonce ベース CSP への移行は見送り(REVIEW.md 参照):
+// cacheComponents 下では全ページが静的 prerender 済みHTMLとして
+// verbatim 配信されるため、リクエスト毎の nonce を script に注入する
+// 経路が存在しない(Next16.4 時点では TURBOPACK bootstrap 等の
+// shell 内 inline script に nonce が付かない)。
+// 将来 nonce CSP を proxy.ts で実装する場合は、二重ヘッダ防止のため
+// ここの Content-Security-Policy を外して proxy 側へ移すこと。
+// Strict-Transport-Security(本番のみ)は src/proxy.ts で付与。
 const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
