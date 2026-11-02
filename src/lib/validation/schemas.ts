@@ -174,6 +174,21 @@ export const transactionSchema = z
   });
 export type TransactionInput = z.infer<typeof transactionSchema>;
 
+/** 取引検索の入力。queryは摘要・取引先・科目・金額への横断検索文字列 */
+export const transactionSearchSchema = z
+  .object({
+    query: z
+      .string()
+      .max(200, "検索キーワードは200文字以内で入力してください"),
+    startDate: dateString.optional(),
+    endDate: dateString.optional(),
+  })
+  .refine((v) => !v.startDate || !v.endDate || v.startDate <= v.endDate, {
+    message: "開始日は終了日以前の日付を指定してください",
+    path: ["endDate"],
+  });
+export type TransactionSearchInput = z.infer<typeof transactionSearchSchema>;
+
 export const expenseSchema = z.object({
   date: dateString,
   amount: yenAmount,

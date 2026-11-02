@@ -18,6 +18,7 @@ import {
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
+import { recentDistinctValues } from "@/lib/search";
 import {
   parseForm,
   transactionSchema,
@@ -192,5 +193,39 @@ export async function deleteTransaction(
       targetPath: `businesses/${businessId}/transactions/${transactionId}`,
     });
     return null;
+  });
+}
+
+/** 取引先・摘要の入力履歴。フォームのサジェスト用 */
+export interface TransactionInputHistory {
+  counterparties: string[];
+  descriptions: string[];
+}
+
+/**
+ * 過去の取引から取引先・摘要のdistinct値を直近利用順で返す。
+ * 下書き含む全期間の取引が履歴対象(入力補助なので確定済みに限定しない)。
+ */
+export async function listTransactionInputHistory(
+  businessId: string,
+): Promise<ActionResult<TransactionInputHistory>> {
+  return run(async () => {
+    await requireViewer(businessId);
+    const transactions = await getStore().listTransactionsInRange(
+      businessId,
+      "0001-01-01",
+      "9999-12-31",
+    );
+    const byDateDesc = [...transactions].sort((a, b) =>
+      b.date.localeCompare(a.date),
+    );
+    return {
+      counterparties: recentDistinctValues(
+        byDateDesc.map((t) => t.counterparty),
+      ),
+      descriptions: recentDistinctValues(
+        byDateDesc.map((t) => t.description),
+      ),
+    };
   });
 }
