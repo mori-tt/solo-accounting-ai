@@ -34,6 +34,7 @@ export const BACKUP_COLLECTIONS = [
   "withholdingRecords",
   "receipts",
   "invoices",
+  "quotes",
   "payments",
   "bills",
   "billPayments",
@@ -260,6 +261,8 @@ const RESTORE_STATUS_RULES: Record<
   expenses: { allowed: ["draft", "confirmed"], optional: true },
   receipts: { allowed: ["unprocessed", "linked", "archived"] },
   invoices: { allowed: ["draft", "issued", "paid", "overdue"] },
+  quotes: { allowed: ["draft", "sent", "accepted", "converted"] },
+
   bills: { allowed: ["unpaid", "paid"] },
   journalEntries: { allowed: ["draft", "confirmed"] },
   closingChecks: { allowed: ["open", "resolved", "waived"] },
@@ -298,6 +301,8 @@ const RESTORE_DATE_FIELDS: Record<string, readonly string[] | undefined> = {
   payments: ["date"],
   journalEntries: ["date"],
   invoices: ["issueDate", "dueDate"],
+  quotes: ["issueDate", "validUntil"],
+
   bills: ["receivedDate"],
   billPayments: ["date"],
 };
@@ -379,6 +384,11 @@ const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
     receipts: [["transactionId", "transactions"]],
     projects: [["customerId", "customers"]],
     invoices: [
+      ["customerId", "customers"],
+      ["projectId", "projects"],
+      ["quoteId", "quotes"],
+    ],
+    quotes: [
       ["customerId", "customers"],
       ["projectId", "projects"],
     ],

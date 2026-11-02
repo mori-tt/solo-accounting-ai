@@ -14,6 +14,7 @@ import type {
   MonthlySummary,
   Payment,
   Project,
+  Quote,
   Receipt,
   ReceiptStatus,
   RecurringInvoiceTemplate,
@@ -123,6 +124,10 @@ export class MemoryStore implements AccountingStore {
     return this.get<Invoice>(businessId, "invoices", id);
   }
 
+  getQuote(businessId: string, id: string): Promise<Quote | undefined> {
+    return this.get<Quote>(businessId, "quotes", id);
+  }
+
   getPayment(businessId: string, id: string): Promise<Payment | undefined> {
     return this.get<Payment>(businessId, "payments", id);
   }
@@ -174,6 +179,10 @@ export class MemoryStore implements AccountingStore {
 
   listInvoices(businessId: string): Promise<Invoice[]> {
     return this.list<Invoice>(businessId, "invoices", () => true);
+  }
+
+  listQuotes(businessId: string): Promise<Quote[]> {
+    return this.list<Quote>(businessId, "quotes", () => true);
   }
 
   getRecurringTemplate(

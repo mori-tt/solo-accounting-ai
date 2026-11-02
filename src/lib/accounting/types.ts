@@ -23,6 +23,8 @@ export type ProjectStatus = "active" | "done" | "archived";
 
 export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue";
 
+export type QuoteStatus = "draft" | "sent" | "accepted" | "converted";
+
 /** 受領請求書(買掛)の状態。期限超過は dueDate から都度判定するため保持しない */
 export type BillStatus = "unpaid" | "paid";
 
@@ -73,6 +75,8 @@ export interface Business {
   issuerAddress?: string;
   /** 請求書番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 */
   invoiceCounter?: number;
+  /** 見積番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 */
+  quoteCounter?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -203,6 +207,32 @@ export interface Invoice {
   /** 消費税合計(円・整数)。税フィールド導入前データは未設定 */
   taxAmount?: number;
   status: InvoiceStatus;
+  /** 転換元の見積ID(見積→請求変換で生成された場合のみ) */
+  quoteId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Quote {
+  id: string;
+  /** 見積番号(事業内連番・作成時に採番)。連番導入前のデータは未設定 */
+  quoteNumber?: string;
+  customerId: string;
+  projectId?: string;
+  /** 見積発行日 YYYY-MM-DD */
+  issueDate: DateString;
+  /** 見積有効期限 YYYY-MM-DD */
+  validUntil: DateString;
+  items: InvoiceItem[];
+  /** 円・整数 = items の amount 合計(税込) */
+  totalAmount: number;
+  /** 消費税合計(円・整数)。税フィールド導入前データは未設定 */
+  taxAmount?: number;
+  /** 帳票の備考欄に出す補足(任意) */
+  notes?: string;
+  status: QuoteStatus;
+  /** 転換先の請求書ID(status=convertedのとき設定) */
+  convertedInvoiceId?: string;
   createdAt: string;
   updatedAt: string;
 }

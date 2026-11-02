@@ -319,6 +319,38 @@ export const invoiceSchema = z
   });
 export type InvoiceInput = z.infer<typeof invoiceSchema>;
 
+export const quoteSchema = z
+  .object({
+    customerId: z.string().min(1, "顧客を選択してください").max(200),
+    projectId: z.string().max(200).optional(),
+    issueDate: dateString,
+    /** 見積有効期限 YYYY-MM-DD */
+    validUntil: dateString,
+    items: z
+      .array(invoiceItemSchema)
+      .min(1, "明細を1行以上入力してください")
+      .max(100, "明細は100行以内で入力してください"),
+    /** 帳票の備考欄。未入力は空文字として受け取る */
+    notes: optionalText,
+  })
+  .refine((v) => v.validUntil >= v.issueDate, {
+    message: "有効期限は発行日以降の日付にしてください",
+    path: ["validUntil"],
+  });
+export type QuoteInput = z.infer<typeof quoteSchema>;
+
+/** 見積→請求転換時に指定する請求書の日付 */
+export const quoteConvertSchema = z
+  .object({
+    issueDate: dateString,
+    dueDate: dateString,
+  })
+  .refine((v) => v.dueDate >= v.issueDate, {
+    message: "支払期日は発行日以降の日付にしてください",
+    path: ["dueDate"],
+  });
+export type QuoteConvertInput = z.infer<typeof quoteConvertSchema>;
+
 export const paymentSchema = z.object({
   invoiceId: z.string().min(1).max(200),
   date: dateString,

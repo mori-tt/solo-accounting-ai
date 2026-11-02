@@ -389,6 +389,36 @@ service cloud.firestore {
           && d.status in ['draft', 'issued', 'paid', 'overdue'];
       }
 
+      // ---------- quotes ----------
+      match /quotes/{quoteId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validQuote(request.resource.data)
+          && !inClosedPeriod(businessId, request.resource.data.issueDate);
+        // 送付済み(sent)以降の見積内容・statusはクライアントから変更不可。
+        // sent/accepted/convertedへの遷移はサーバー側の処理で行う
+        allow update: if canEdit(businessId)
+          && validQuote(request.resource.data)
+          && unaffected(['createdAt'])
+          && (resource.data.status == 'draft'
+            || (request.resource.data.status == resource.data.status
+              && unaffected(['customerId', 'projectId', 'items', 'issueDate',
+                             'validUntil', 'totalAmount', 'taxAmount', 'notes',
+                             'quoteNumber', 'convertedInvoiceId'])));
+        // 送付済み・転換済み見積の削除はownerのみ。closed期間の発行日は削除不可
+        allow delete: if (isOwner(businessId)
+            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'))
+          && !inClosedPeriod(businessId, resource.data.issueDate);
+      }
+
+      function validQuote(d) {
+        return d.customerId is string
+          && dateString(d.issueDate)
+          && dateString(d.validUntil)
+          && d.totalAmount is int
+          && d.status in ['draft', 'sent', 'accepted', 'converted'];
+      }
+
       // ---------- payments ----------
       match /payments/{paymentId} {
         allow get, list: if isMember(businessId);

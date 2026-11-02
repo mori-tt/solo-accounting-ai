@@ -14,6 +14,7 @@ import type {
   MonthlySummary,
   Payment,
   Project,
+  Quote,
   Receipt,
   ReceiptStatus,
   RecurringInvoiceTemplate,
@@ -35,6 +36,7 @@ export type CollectionName =
   | "customers"
   | "projects"
   | "invoices"
+  | "quotes"
   | "payments"
   | "bills"
   | "billPayments"
@@ -64,6 +66,7 @@ export interface AccountingReader {
   getCustomer(businessId: string, id: string): Promise<Customer | undefined>;
   getProject(businessId: string, id: string): Promise<Project | undefined>;
   getInvoice(businessId: string, id: string): Promise<Invoice | undefined>;
+  getQuote(businessId: string, id: string): Promise<Quote | undefined>;
   getPayment(businessId: string, id: string): Promise<Payment | undefined>;
   getMonthlySummary(
     businessId: string,
@@ -87,6 +90,7 @@ export interface AccountingReader {
     status?: ReceiptStatus,
   ): Promise<Receipt[]>;
   listInvoices(businessId: string): Promise<Invoice[]>;
+  listQuotes(businessId: string): Promise<Quote[]>;
   getRecurringTemplate(
     businessId: string,
     id: string,
