@@ -413,6 +413,64 @@ describe("registerPayment / 未入金チェック", () => {
     expect(saved?.status).toBe("overdue");
   });
 
+  it("refreshOverdueInvoices は締め済み期間の請求書を更新しない", async () => {
+    const { store, businessId, actor, invoice } = await seedInvoice();
+    // invoice: issueDate=2025-06-01, dueDate=2025-06-30, issued
+    await seedClosedPeriod(store, businessId, {
+      id: "fy2025",
+      fiscalYear: 2025,
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    });
+    const { updated } = await refreshOverdueInvoices(
+      store,
+      businessId,
+      actor,
+      "2026-01-05",
+    );
+    expect(updated).toEqual([]);
+    const saved = await store.getInvoice(businessId, invoice.id);
+    expect(saved?.status).toBe("issued");
+  });
+
+  it("refreshOverdueInvoices は未締め期間の請求書だけを更新する", async () => {
+    const { store, businessId, actor, customer, invoice } = await seedInvoice();
+    // 締め済み: 2025年(issueDate=2025-06-01 の invoice が該当)
+    await seedClosedPeriod(store, businessId, {
+      id: "fy2025",
+      fiscalYear: 2025,
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    });
+    // 未締め期間(2026年)の請求書は引き続き overdue へ更新される
+    const { invoice: openInvoice } = await registerInvoice(
+      store,
+      businessId,
+      actor,
+      {
+        idempotencyKey: "inv-2026",
+        customerId: customer.id,
+        issueDate: "2026-02-01",
+        dueDate: "2026-02-28",
+        items,
+      },
+    );
+    await issueInvoice(store, businessId, actor, openInvoice.id);
+    const { updated } = await refreshOverdueInvoices(
+      store,
+      businessId,
+      actor,
+      "2026-03-01",
+    );
+    expect(updated.map((i) => i.id)).toEqual([openInvoice.id]);
+    expect((await store.getInvoice(businessId, invoice.id))?.status).toBe(
+      "issued",
+    );
+    expect((await store.getInvoice(businessId, openInvoice.id))?.status).toBe(
+      "overdue",
+    );
+  });
+
   it("締め済み期間の日付の入金を拒否する", async () => {
     const { store, businessId, actor, invoice } = await seedInvoice();
     await seedClosedPeriod(store, businessId, {

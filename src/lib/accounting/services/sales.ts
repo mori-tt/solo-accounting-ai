@@ -17,6 +17,7 @@ import type {
 import {
   assertDateInOpenPeriod,
   auditsFor,
+  isDateInClosedPeriod,
   newId,
   nowOf,
   scopedIdempotencyKey,
@@ -459,6 +460,9 @@ export async function findUnpaidInvoices(
 /**
  * 発行済みで dueDate を過ぎた請求書を overdue に更新する。
  * 定期実行(job)や画面表示前のリフレッシュに使う。
+ * 発行日が締め済み期間に属する請求書は更新しない
+ * (締め済み期間のデータを変更しない。未入金・期限切れの判定自体は
+ * findUnpaidInvoices の overdue フラグで別途行える)。
  */
 export async function refreshOverdueInvoices(
   store: AccountingStore,
@@ -468,9 +472,15 @@ export async function refreshOverdueInvoices(
 ): Promise<{ updated: Invoice[] }> {
   const asOfDate = assertDateString(asOf, "asOf");
   const { value } = await store.transact(businessId, {}, async (tx) => {
-    const invoices = await tx.listInvoices(businessId);
+    const [invoices, periods] = await Promise.all([
+      tx.listInvoices(businessId),
+      tx.listFiscalPeriods(businessId),
+    ]);
     const targets = invoices.filter(
-      (i) => i.status === "issued" && i.dueDate <= asOfDate,
+      (i) =>
+        i.status === "issued" &&
+        i.dueDate <= asOfDate &&
+        !isDateInClosedPeriod(i.issueDate, periods),
     );
     const updated = targets.map((i) => ({
       ...i,

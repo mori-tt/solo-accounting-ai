@@ -170,7 +170,7 @@ service cloud.firestore {
         // (自分・別オーナーによる降格で不可逆ロックアウトになるため)
         allow update: if isOwner(businessId)
           && request.resource.data.role in ['owner', 'editor', 'viewer']
-          && request.resource.data.uid == uid
+          && request.resource.data.get('uid', uid) == uid
           && unaffected(['invitedBy'])
           && !(uid == ownerUid(businessId)
             && request.resource.data.role != 'owner');

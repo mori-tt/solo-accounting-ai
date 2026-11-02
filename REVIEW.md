@@ -1573,6 +1573,77 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: データ保護(Issue #96)
+- Worktree: data-protection
+「最後のowner降格/脱退防止」と「締め期間ロックの請求書/入金への拡大」の2点を対応。
+
+### 最後のowner降格/脱退防止
+- `src/lib/api/member-role.ts`: `effectiveOwnerUids(memberRoles, ownerUid)` を追加。
+  memberドキュメントの role='owner' に加え、`requireMembership` のフォールバック
+  (memberドキュメントが無い/role不正な `business.ownerUid` はowner扱い)と同じ規則で
+  実効owner集合を計算する
+- `src/lib/actions/businesses.ts`: `assertOwnerRemains(businessId, apply)` を新設。
+  members一覧とbusiness.ownerUidを読み、applyで変更を適用した後の実効owner数が
+  0になる操作を FORBIDDEN で拒否する。以下の3経路へ適用:
+  - `updateMemberRole`(対象を非ownerロールへ変更する前に検証)
+  - `removeMember`(対象のmemberドキュメントを消す前に検証)
+  - `inviteMember`(既存memberへの再招待はロール上書き=降格と同義のため同じ検証。
+    再招待で owner→viewer にされると実効ownerを喪失し得る経路だった)
+- 穴の整理:
+  - UIはowner行の変更/削除コントロールを出さないが、action側は未検証だった
+  - `memberInviteSchema` は editor/viewer のみ許可するため、再招待によるowner降格が
+    アプリ内で到達可能な唯一の「実効owner喪失」経路だった(ownerUidのmember
+    ドキュメントをviewerに上書き → フォールバック停止 → owner不在)
+  - 既存の自己変更/自己削除ブロックは維持(自分自身への操作は従来どおり別エラー)
+- `firestore.rules` members: `uid != business.ownerUid` を update/delete に追加。
+  rulesではowner数を数えられないため、クライアントSDK経由では基点owner(ownerUid)
+  のmemberドキュメントを不変にすることで「事業の実効owner不在化」だけを防ぐ。
+  ownerUid以外のmemberドキュメントへのowner操作は従来どおり許可
+
+### 締め期間ロックを請求書/入金へ拡大
+- `src/lib/accounting/services/common.ts`: `isDateInClosedPeriod` を追加し
+  `assertDateInOpenPeriod` を共用化
+- `src/lib/accounting/services/sales.ts` `refreshOverdueInvoices`: 期間一覧を読み、
+  issueDateが締め済み期間の請求書は issued→overdue 更新対象から除外。
+  締め済み期間データの変更禁止に整合(overdue判定は findUnpaidInvoices の
+  動的フラグで別途行える)
+  - 既存の registerInvoice(issueDate)/issueInvoice/registerPayment(入金日)は
+    ガード済み。締め後年度の入金(payment.dateが未締め)は引き続き登録可能で、
+    その際の issued→paid 更新も締め後の正当な更新として許容
+- `firestore.rules`: `dateInClosedPeriod(businessId, dateStr)` を追加。
+  business.fiscalYearStartMonth とサービス層の `fy{会計年度}` ID規則から
+  期間ドキュメントを引き status='closed' を判定
+  - invoices: issueDate が締め済み期間なら create/update/delete を拒否
+    (updateは新旧両方のissueDateを検査。期間移動で締め済みデータを逃がす経路も塞ぐ)
+  - payments: date が締め済み期間なら create/update/delete を拒否(同様に新旧検査)
+  - クライアントSDKからの直接書き込み経路のみを塞ぐ防御層
+    (アプリはAdmin SDK経由でrulesを通らないため締め後の正当な更新は継続可能)
+
+### テスト
+- `member-role.test.ts`: `effectiveOwnerUids` 5件(owner列挙/フォールバック/
+  非owner化でフォールバック停止/不正roleでフォールバック/空)
+- `sales.test.ts`: refreshOverdueInvoices の締め済み期間スキップ2件
+  (全スキップ・未締めのみ更新)
+- `tests/rules/firestore.rules.test.ts`: 基点owner保護3件 + 請求書/入金の
+  締め済み期間拒否4件(作成・更新・削除・issueDate移動・未締めなら従来どおり可)
+
+### 実行したチェック
+- `pnpm lint` — 合格(既存warning 1件のみ)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(45ファイル546件、skip 10)
+- `pnpm test:rules` — 合格(86件)
+- `pnpm test:emulators` — 合格(7件)
+- `pnpm build` — 合格
+
+### 備考
+- `assertOwnerRemains` はmembersコレクションの読み→検証→putMember/deleteMemberが
+  非トランザクションのため最良努力のガード(並行する2 owner操作の同時実行までは
+  防げない)。rules側もowner数を数えられない制約上、厳密な排他は将来Functions等の
+  集約経路が必要(REVIEW.md 既存の注記と同じ方針)
+- `updateMemberRole`/`removeMember` で対象にmemberドキュメントが無い場合の
+  ownerUidフォールバック喪失シナリオも `effectiveOwnerUids` がカバーする
+- `docs/SECURITY_RULES.md` に members(ownerUid保護)と invoices/payments の
+  締め済み期間ルールを追記
 ## 2026-11-02: セキュリティレビュー ラウンド2
 - Worktree: security-round2
 - 前回(REVIEW_SECURITY.md, 2026-10-31 foundation骨格時点)から機能実装が出揃った現行全体を対象に監査し、`REVIEW_SECURITY_R2.md` を新設。領域別に API/認証・Server Actions・Rules対スキーマ・設定/ヘッダ/ロギングの4面を並行監査し、重要指摘は実コードで検証済み。
@@ -1585,7 +1656,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - 文書: `REVIEW_SECURITY_R2.md` に各 finding の file:line・影響・修正案・確認済み項目・Rulesテスト不足・推奨対応順を記録
 - テストは未実行(監査のみ・コード変更なし)。rules テスト不足は R2 文書の「Rules テストの不足」節に列挙
 ## 2026-11-02: セキュリティレビュー ラウンド2 対応実施
-- Worktree: security-round2
 - `REVIEW_SECURITY_R2.md` の指摘を「対応状況」節に記録する形で修正。対象別の実装は同文書を参照
 - R2-1: `src/lib/receipt-files.ts` 新設。`isReceiptStoragePathOf`/`isAllowedReceiptMime`/上限値を集約し、ダウンロード route・`ReceiptOcrResolver.resolveOcrText`・`POST /api/receipts` の3経路で検証。serve 側は許可外 MIME を octet-stream+attachment 化・nosniff・CSP `default-src 'none'` 付与。`storagePath`/`fileName`/`mimeType` は rules 側でも登録後不変
 - R2-4: `src/lib/actions/businesses.ts` — `getOwnerUid()` 追加。`inviteMember` の自己招待禁止、`updateMemberRole`/`removeMember` が `business.ownerUid` member の降格・削除を拒否。rules 側も同保護を再現(第2オーナー経由の乗っ取りを deny)
@@ -1604,9 +1674,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm lint` — エラー0(既存 warning 1件のみ)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(48ファイル549件、skip 10)
-- `pnpm build` — 合格
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
-- `pnpm test:emulators` — 合格(7件)
-### 備考
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
 - rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約
