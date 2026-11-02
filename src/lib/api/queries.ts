@@ -72,20 +72,26 @@ export async function getUserProfile(uid: string): Promise<UserProfile> {
   }
 }
 
-/** users/{uid} を upsert。個人情報はこのコレクション内に限定する。 */
+/**
+ * users/{uid} を upsert。個人情報はこのコレクション内に限定する。
+ * createdAt は初回作成時のみ設定(merge で毎回上書きすると
+ * 「最終ログイン日時」になってしまう)。lastLoginAt を別途記録する。
+ */
 export async function upsertUserProfile(
   uid: string,
   profile: { displayName: string; email: string },
 ): Promise<void> {
   const db = getAdminDb();
-  await db.collection("users").doc(uid).set(
-    {
-      displayName: profile.displayName,
-      email: profile.email,
-      createdAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  const ref = db.collection("users").doc(uid);
+  const data: Record<string, unknown> = {
+    displayName: profile.displayName,
+    email: profile.email,
+    lastLoginAt: FieldValue.serverTimestamp(),
+  };
+  if (!(await ref.get()).exists) {
+    data.createdAt = FieldValue.serverTimestamp();
+  }
+  await ref.set(data, { merge: true });
 }
 
 export async function listMembers(businessId: string): Promise<MemberInfo[]> {

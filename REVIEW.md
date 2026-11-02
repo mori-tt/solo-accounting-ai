@@ -1354,3 +1354,96 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: 認証まわりの調査と修正(auth-polish)
+- Worktree: auth-polish
+
+認証経路(Firebase Auth `onIdTokenChanged` → IDトークン→Cookie 同期 → `__session` Cookie 検証 → メンバーシップ・ロール認可 → ログイン/ログアウト/パスワードリセット画面 → AppShell の未ログインリダイレクト)を通して調査し、発見した問題を修正した。
+
+### 重要度の高い発見
+
+**`src/lib/env.ts`: クライアントで常に EnvValidationError が投げられる(main 由来の既存バグ)**
+
+`assertFirebaseClientEnvOnce` → `missingFirebaseClientEnv(env = process.env)` が `env[key]` の動的参照で必須キーを検査していた。クライアントバンドルでは `process.env` オブジェクト自体がポリフィル(中身が空)に置き換わり、インライン化されるのは `process.env.KEY` 形式の**静的参照のみ**のため、環境変数が正しく設定されていてもブラウザでは全キー「未設定」と誤判定 → `AppProvider.useEffect` で throw → エラーバウンダリで全画面がエラー表示になりログイン画面すら描画されない。env.ts 導入(1112673、Issue #34)以降 e2e が一度も実行されていなかったため検出漏れしていた。dev の `/_next/static/chunks` のコンパイル結果で `env = process-polyfill.env` 化していることを確認し、同チャンク内の静的参照(`getFirebaseConfig` 等)はリテラルに正しく展開されていることも併せて検証。
+- 修正: `currentEnv()` を新設し、確認対象キーを `process.env.NEXT_PUBLIC_*` の静的参照で展開したスナップショットを各関数のデフォルト引数に変更。テストからの env 注入経路は維持
+- 副次的影響: `warnIfProductionWithEmulatorHost` のサーバー側 env(FIRESTORE_EMULATOR_HOST 等)はクライアントでは常に undefined になるが、それらはブラウザに出ない値であり警告対象として NEXT_PUBLIC_ 系の残存を検査するのが本来の目的と整合する
+
+### セキュリティ・認証の修正
+
+- `src/lib/api/session.ts`: `verifyIdToken(token, true)` に変更し失効(revocation)チェックを有効化。`members/{uid}.role` を `MemberRole` へ安易にキャストしていた問題を修正し、任意文字列を拒否する `toMemberRole` パーサと `roleAtLeast` ランク比較を `src/lib/api/member-role.ts`(新規)に抽出
+- `src/app/api/session/route.ts`: POST/DELETE とも `assertSameOrigin`(Sec-Fetch-Site / Origin host と Host の一致)でクロスサイトからのセッション固定(ログインCSRF)を拒否。`idToken` の長さ上限 16KB を追加。発行時にも `verifyIdToken(token, true)` で失効チェック
+- `src/lib/api/queries.ts` `upsertUserProfile`: `createdAt` がログインのたび `serverTimestamp()` で上書きされていた問題を修正(既存ドキュメントがあれば維持)。代わりに `lastLoginAt` を毎回更新
+- `src/app/reset-password/reset-password-screen.tsx`: `auth/user-not-found` を別メッセージで出していたアカウント列挙を修正し、未登録メールにも一律「送信しました」系の成功メッセージを返すように
+- `src/app/api/receipts/[receiptId]/route.ts`: ダウンロード応答に `X-Content-Type-Options: nosniff` を追加
+- `src/lib/firebase/admin.ts`: `server-only` を追加しクライアントバンドル混入をビルド時に防止。未参照の死コード `src/lib/firebase/server.ts` を削除
+- `src/lib/firebase/client.ts`: `client-only` を追加(config.ts との対称性)
+
+### 認証 UX・信頼性の修正
+
+- `src/components/app-shell.tsx`: 未ログイン時に `/login?next=<現在パス>` へリダイレクト(`/dashboard` 以外)。ログアウト処理を `try/finally` 化し失敗時も `signingOut` が戻るように
+- `src/app/login/login-screen.tsx`: `useSearchParams` で `next` を読み、ログイン成功後に元の画面へ戻る。検証: `/` 始まりのみ受理、`//`・バックスラッシュ・`/login` 自身(`?`/`#` 付き含む)を拒否しオープンリダイレクトとループを防止
+- `src/lib/api-client.ts` `refreshSession`: `getIdToken()`/`fetch()` の例外がそのまま呼出元へ漏れていたのを `try/catch` で `false` 返しに正規化
+- `src/lib/firebase/config.ts` `parseEmulatorHost`: `localhost:`(ポート空→0)、負数、65535超、余分なコロン、空ホストを拒否。1〜65535 の境界を正しく受理するようバリデーション強化
+- `src/lib/firebase/client.ts` `connectEmulators`: 冪等化。接続済みマーカーをモジュールスコープではなく app インスタンス(`__saiEmulatorsConnected`)へ移し Fast Refresh/HMR 後の二重接続(FAILED_PRECONDITION)を防止。「already been started/used」等のエラーは `ignoreAlreadyConnected` で冪等成功として扱い、全サービス接続完了後にのみマークする
+- `src/lib/accounting/store/firestore.ts`: `getAdminDb()` のデフォルト引数を廃止し、store 生成時に明示的に `getAdminDb()` を渡す形へ(シングルトンへの暗黙依存を排除)
+- ログイン/リセットのネットワーク系エラーメッセージで Emulator 言及を `shouldUseEmulator()` 時のみに条件化
+
+### テスト追加・E2E整備
+
+- `src/lib/api/member-role.test.ts`(新規): `toMemberRole` の正常値/不正値、`roleAtLeast` のランク比較
+- `src/lib/firebase/config.test.ts`: `parseEmulatorHost` のエッジケース(空ポート・負数・65535超・余分コロン・境界値1/65535)を追加
+- `e2e/auth.spec.ts`: 未ログインで `/transactions` へアクセス → `/login?next=%2Ftransactions` へリダイレクト → ログイン後 `/transactions` へ戻る、を検証
+- `e2e/helpers.ts`: URL アサーションを `?next=` 付き遷移に対応
+- `playwright.config.ts`: `E2E_PORT` 環境変数でポートを変更可能に(`const port = process.env.E2E_PORT ?? "3000"`)。ローカルに別プロジェクトの dev server が :3000 を占有していても E2E を実行できるように(実際に :3000 が別アプリ orooro-ginza で占有されており、初回 E2E が誤ってそちらを叩いて失敗した経緯あり)
+
+### 実行したテスト
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(41ファイル509件、skip 10)
+- `pnpm build` — 合格
+- `JAVA_HOME=... pnpm test:rules` — 合格(2ファイル79件)
+- `JAVA_HOME=... pnpm test:emulators` — 合格(2ファイル7件)
+- `JAVA_HOME=... E2E_PORT=3100 pnpm test:e2e` — 合格(31件)
+
+### 判断事項・次の担当者への注意事項
+- E2E の初回失敗は「:3000 が別プロジェクトの dev server に占有されていた」ことが原因。`reuseExistingServer` が別アプリを拾う罠があるため、worktree 運用では `E2E_PORT` を指定するか対象 worktree のサーバーが起動していることを確認してから実行すること
+- 2回目の失敗(EnvValidationError)は当初「Playwright 起動の `pnpm exec next dev` が .env.development を読めていない」と疑ったが、実際にはサーバー側は env ロード済みで、env.ts の動的 `process.env` 参照が原因の main 由来バグだった。`pnpm dev` と `pnpm exec next dev` の差ではない
+- `assertSameOrigin` は `Host` ヘッダとの一致で判定するため、リバースプロキシ等で `Origin`/`Host` が異なる構成(別ドメインからプロキシ)では要検証。現状のデプロイ想定では問題ないが、本番構成変更時に確認する
+- `/api/session` の same-origin・トークン長・revocation の route レベル単体テストは未追加(Route Handler のテスト基盤が未整備)。必要になれば別タスクで
+- `unauthorized()` 等 Next.js 16 の実験的APIは見送り(現行のクライアント側 auth gate で要件を満たす)
+## 2026-11-02: メール確認フロー(Issue #84)
+- Worktree: auth-polish
+
+Firebase `sendEmailVerification` によるメールアドレス確認フローを追加。確認はソフトゲート(機能ブロックせずバナーで促す)とし、サインアップ直後の送信・未確認バナー・再送・確認済み反映を実装した。
+
+### 実装内容
+- `src/components/email-verify-banner.tsx`(新規): `(app)` レイアウト上部に常駐する未確認バナー
+  - 表示条件: `status === "signed_in"` かつ `user.emailVerified === false`(ローカルの `verified` state と併用。`user.reload()` は同一オブジェクトを更新するだけで context の `setUser` が再描画を起こさないため、ローカルでも確認済みを保持する)
+  - 「確認を反映」: `user.reload()` → 確認済みなら `getIdToken(true)` でIDトークンの `email_verified` claim を更新(onIdTokenChanged 経由でセッションCookieも再同期)しバナーを閉じる。未確認なら案内メッセージ
+  - 「確認メールを再送」: `sendEmailVerification(user)`。送信後60秒クールダウンで連打防止。`auth/too-many-requests` は専用メッセージ
+  - マウント時・タブ復帰時(`visibilitychange`)に `user.reload()` で自動チェック(15秒スロットル。StrictMode の二重effectも抑制)。別タブ/メールアプリで確認リンクを開いて戻ったケースを拾う
+  - バナーにはメールアドレスを表示しない(ヘッダーのメール表示と重複し、e2e の `getByText(email)` が strict mode で2件ヒットするため。アカウントはヘッダーで確認可能)
+- `src/app/(app)/layout.tsx`: `<EmailVerifyBanner />` を Suspense 内・AppShell の直上に追加(追加のみ)
+- `src/app/login/login-screen.tsx`: サインアップ成功時に `sendEmailVerification(cred.user)` を送信。失敗は catch して握りつぶす(登録自体は完了しておりバナーから再送できるため、登録エラーとは区別)
+- `src/components/email-verify-banner.test.tsx`(新規): 非表示条件・バナー表示・再送(sendEmailVerification呼出+通知+クールダウン)・確認反映(確認済みでバナー消去+getIdToken(true)/未確認で案内メッセージ)の5件
+
+### 確認した穴の整理
+- 未確認ユーザーのログイン: ログイン自体は許可し、遷移先でバナーが常駐表示される設計(Issue仕様どおりソフトゲート)。ログイン画面側での追加案内は不要(即リダイレクトのため見えない)
+- 旧ユーザ(本機能以前に登録し確認メール未送信): バナーの「確認メールを再送」で回復可能
+- 確認済み反映: Firebase は emailVerified を push しないため reload が必要。マウント時/タブ復帰/手動ボタンの3経路でカバー
+- `/reset-password`: パスワードリセットはメール確認状態と無関係に動作するのが正しいため変更不要(確認)
+- `app/signup/` ディレクトリは存在せず、新規登録は login-screen のトグル内(touch範囲の app/login/ 内で対応済み)
+- E2E 副作用: バナーのメールアドレス表示が `getByText(email)` と重複する件はバナー側からメール表示を除いて解消(テスト・app-shell 非改変)
+
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(42ファイル514件、skip 10。email-verify-banner.test.tsx 5件新規)
+- `pnpm build` — 合格
+- `JAVA_HOME=... E2E_PORT=3101 pnpm test:e2e` — 合格(31件。Auth emulator が sendEmailVerification の oobCode リンクを出力し実送信動作を確認)
+- `pnpm test:rules` / `pnpm test:emulators` — 前回タスクで合格済み(rules・サーバー書込み経路の変更なし)
+
+### 判断事項・次の担当者への注意事項
+- メール確認はソフトゲート。確定操作(Server Actions)側で `email_verified` を必須にするポリシーは未導入(issue範囲外・要検討)。導入する場合は `api/session.ts` 側で idToken の claim を確認する形になる
+- 確認メールの文面・送信元は Firebase コンソール側のテンプレート設定に依存。Emulator では実メールは送られず oobCode リンクがログに出る(手動確認はそのリンクを開く)
+- バナーの再送クールダウン(60秒)はUI側のみ。連続リロード等で回避は可能だが Firebase 側のレート制限が実際の上限を担保する

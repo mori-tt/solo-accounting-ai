@@ -27,17 +27,25 @@ export class ApiClientError extends Error {
   }
 }
 
-/** 現在のIDトークンでセッションCookieを更新する。未ログインなら false。 */
+/**
+ * 現在のIDトークンでセッションCookieを更新する。未ログインなら false。
+ * トークン再取得失敗(アカウント無効化・通信断)やPOST失敗も false に
+ * 正規化し、呼び出し側へ生の FirebaseError を伝播させない。
+ */
 export async function refreshSession(forceRefresh = false): Promise<boolean> {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) return false;
-  const idToken = await user.getIdToken(forceRefresh);
-  const res = await fetch("/api/session", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ idToken }),
-  });
-  return res.ok;
+  try {
+    const user = getFirebaseAuth().currentUser;
+    if (!user) return false;
+    const idToken = await user.getIdToken(forceRefresh);
+    const res = await fetch("/api/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idToken }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function clearSession(): Promise<void> {

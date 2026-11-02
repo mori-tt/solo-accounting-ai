@@ -67,4 +67,25 @@ describe("parseEmulatorHost", () => {
       parseEmulatorHost("localhost:abc", EMULATOR_DEFAULTS.firestore),
     ).toEqual(EMULATOR_DEFAULTS.firestore);
   });
+
+  it("ポート欠落・範囲外・余分なコロンもフォールバックを返す", () => {
+    const fb = EMULATOR_DEFAULTS.firestore;
+    // "localhost:" は Number("")===0 になりポート0として通ってしまう
+    expect(parseEmulatorHost("localhost:", fb)).toEqual(fb);
+    expect(parseEmulatorHost("localhost:0", fb)).toEqual(fb);
+    expect(parseEmulatorHost("localhost:-1", fb)).toEqual(fb);
+    expect(parseEmulatorHost("localhost:65536", fb)).toEqual(fb);
+    expect(parseEmulatorHost("localhost:99999", fb)).toEqual(fb);
+    expect(parseEmulatorHost("a:8080:b", fb)).toEqual(fb);
+    expect(parseEmulatorHost(":8080", fb)).toEqual(fb);
+    // 境界値は通る
+    expect(parseEmulatorHost("localhost:65535", fb)).toEqual({
+      host: "localhost",
+      port: 65535,
+    });
+    expect(parseEmulatorHost("localhost:1", fb)).toEqual({
+      host: "localhost",
+      port: 1,
+    });
+  });
 });
