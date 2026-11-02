@@ -13,6 +13,7 @@ import {
   auditsFor,
   newId,
   nowOf,
+  scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
 
@@ -73,7 +74,7 @@ export async function registerExpense(
 
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("expense", input.idempotencyKey) },
     async (tx) => {
       const periods = await tx.listFiscalPeriods(businessId);
       assertDateInOpenPeriod(date, periods);

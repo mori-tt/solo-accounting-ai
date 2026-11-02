@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/queries";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { ApiError } from "@/lib/api/result";
+import { businessCreateRateLimiter } from "@/lib/api/rate-limit";
 import {
   requireMembership,
   requireOwner,
@@ -93,6 +94,9 @@ export async function createBusiness(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const uid = await requireUid();
+    // businessId単位のレート制限を新規作成で増殖させないため、
+    // 作成数をuid単位で制限する(R2-7)
+    businessCreateRateLimiter.consume(uid);
     const { business } = await registerBusiness(getStore(), { uid }, {
       name: parsed.data.name,
       ownerUid: uid,
@@ -167,6 +171,19 @@ export async function listBusinessMembers(
   });
 }
 
+/** businessドキュメントのownerUidを取得する */
+async function getOwnerUid(businessId: string): Promise<string> {
+  const snap = await getAdminDb()
+    .collection("businesses")
+    .doc(businessId)
+    .get();
+  const ownerUid = snap.data()?.ownerUid;
+  if (!snap.exists || typeof ownerUid !== "string") {
+    throw new ApiError("NOT_FOUND", "事業が見つかりません");
+  }
+  return ownerUid;
+}
+
 /** メンバー招待(オーナーのみ)。メールアドレスでAuthユーザーを引く。 */
 export async function inviteMember(
   businessId: string,
@@ -181,6 +198,21 @@ export async function inviteMember(
       throw new ApiError(
         "NOT_FOUND",
         "そのメールアドレスのユーザーが見つかりません。先にログイン画面でアカウント作成してもらってください。",
+      );
+    }
+    // 招待はmemberドキュメントをset(merge)で上書きするため、
+    // 自分自身・事業owner(ownerUid)を対象にするとロールが書き換わり
+    // owner不在/乗っ取りの不可逆ロックアウトになる(R2-4)
+    if (uid === actor.uid) {
+      throw new ApiError(
+        "FORBIDDEN",
+        "自分自身を招待することはできません",
+      );
+    }
+    if (uid === (await getOwnerUid(businessId))) {
+      throw new ApiError(
+        "FORBIDDEN",
+        "事業のオーナーのロールは変更できません",
       );
     }
     await putMember(businessId, {
@@ -209,6 +241,14 @@ export async function updateMemberRole(
       throw new ApiError(
         "FORBIDDEN",
         "自分自身のロールは変更できません",
+      );
+    }
+    // 別オーナー経由で ownerUid のmemberを降格されると
+    // 真のオーナーがviewer転落し乗っ取り・ロックアウトになる(R2-4)
+    if (memberUid === (await getOwnerUid(businessId))) {
+      throw new ApiError(
+        "FORBIDDEN",
+        "事業のオーナーのロールは変更できません",
       );
     }
     if (role !== "editor" && role !== "viewer") {
@@ -274,6 +314,13 @@ export async function removeMember(
     const actor = await requireOwner(businessId);
     if (memberUid === actor.uid) {
       throw new ApiError("FORBIDDEN", "自分自身は削除できません");
+    }
+    // ownerUid のmember削除も降格と同じくロックアウトを招く(R2-4)
+    if (memberUid === (await getOwnerUid(businessId))) {
+      throw new ApiError(
+        "FORBIDDEN",
+        "事業のオーナーは削除できません",
+      );
     }
     await deleteMember(businessId, memberUid);
     await writeAuditLog(businessId, {

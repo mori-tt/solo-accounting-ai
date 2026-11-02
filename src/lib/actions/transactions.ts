@@ -11,10 +11,6 @@ import {
 } from "@/lib/accounting/services/common";
 import { DomainError } from "@/lib/accounting/errors";
 import type { Transaction } from "@/lib/accounting/types";
-import {
-  deleteTransactionDoc,
-  writeAuditLog,
-} from "@/lib/api/queries";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -162,7 +158,7 @@ export async function confirmTransactionAction(
   });
 }
 
-/** 取引の削除(draftのみ・確認ダイアログ必須) */
+/** 取引の削除(draftのみ・確認ダイアログ必須)。doc削除と監査ログは1トランザクション */
 export async function deleteTransaction(
   businessId: string,
   transactionId: string,
@@ -170,27 +166,35 @@ export async function deleteTransaction(
   return run(async () => {
     const actor = await requireEditor(businessId);
     const store = getStore();
-    const current = await store.getTransaction(businessId, transactionId);
-    if (!current) {
-      throw new ApiError("NOT_FOUND", "取引が見つかりません");
-    }
-    if (current.status === "locked") {
-      throw new ApiError("FORBIDDEN", "締め済み期間の取引は削除できません");
-    }
-    if (current.status !== "draft" && actor.role !== "owner") {
-      throw new ApiError(
-        "FORBIDDEN",
-        "確定済みの取引はオーナーのみ削除できます",
-      );
-    }
-    const periods = await store.listFiscalPeriods(businessId);
-    assertDateInOpenPeriod(current.date, periods);
-
-    await deleteTransactionDoc(businessId, transactionId);
-    await writeAuditLog(businessId, {
-      actorUid: actor.uid,
-      action: "delete",
-      targetPath: `businesses/${businessId}/transactions/${transactionId}`,
+    await store.transact(businessId, {}, async (tx) => {
+      const current = await tx.getTransaction(businessId, transactionId);
+      if (!current) {
+        throw new ApiError("NOT_FOUND", "取引が見つかりません");
+      }
+      if (current.status === "locked") {
+        throw new ApiError("FORBIDDEN", "締め済み期間の取引は削除できません");
+      }
+      if (current.status !== "draft" && actor.role !== "owner") {
+        throw new ApiError(
+          "FORBIDDEN",
+          "確定済みの取引はオーナーのみ削除できます",
+        );
+      }
+      const periods = await tx.listFiscalPeriods(businessId);
+      assertDateInOpenPeriod(current.date, periods);
+      return {
+        batch: {
+          puts: [],
+          deletes: [{ collection: "transactions" as const, id: transactionId }],
+          audits: auditsFor(
+            businessId,
+            [{ collection: "transactions", id: transactionId }],
+            "delete",
+            actor,
+          ),
+        },
+        value: null,
+      };
     });
     return null;
   });

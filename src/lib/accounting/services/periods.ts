@@ -16,7 +16,12 @@ import type {
   OpeningBalance,
   Transaction,
 } from "../types";
-import { auditsFor, nowOf, type ActorContext } from "./common";
+import {
+  auditsFor,
+  nowOf,
+  scopedIdempotencyKey,
+  type ActorContext,
+} from "./common";
 import type { UnpaidExpense } from "./expenses";
 import { findUnpaidExpenses } from "./expenses";
 import { findUnpaidInvoices, type UnpaidInvoice } from "./sales";
@@ -278,7 +283,7 @@ export async function closeFiscalPeriod(
   const at = nowOf(actor);
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("closeFiscalPeriod", idempotencyKey) },
     async (tx) => {
       const period = await tx.getFiscalPeriod(businessId, periodId);
       if (!period) {

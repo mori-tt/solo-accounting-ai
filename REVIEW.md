@@ -1573,3 +1573,40 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: セキュリティレビュー ラウンド2
+- Worktree: security-round2
+- 前回(REVIEW_SECURITY.md, 2026-10-31 foundation骨格時点)から機能実装が出揃った現行全体を対象に監査し、`REVIEW_SECURITY_R2.md` を新設。領域別に API/認証・Server Actions・Rules対スキーマ・設定/ヘッダ/ロギングの4面を並行監査し、重要指摘は実コードで検証済み。
+- 結果: High 4 / Medium 17 / Low 多数。主要Highは:
+  - R2-1: receipts の `storagePath`/`mimeType` をサーバーが無検証で信頼(rulesの`validReceipt`も型チェックのみ) → クロステナント読取 + inline serve による stored XSS + OCR経由の外部送出
+  - R2-2: backupリストアが14コレクションへ verbatim 書き込み → auditLogs/aiSuggestions/members(role:'owner')/locked status/closed期間 の不変条件を全面迂回(owner権限前提だが監査証跡の信頼を破壊)
+  - R2-3: 締め済み保護が transactions の `status='locked'` のみに依存 → journalEntries/expenses等は closed期間内でも client SDK から mutable(Rules層の穴。サーバー側 assertDateInOpenPeriod は全経路で担保済み)
+  - R2-4: inviteMember/updateMemberRole/removeMember が `business.ownerUid`・自己招待を防御せず → 唯一ownerの自己降格・第2ownerによる ownerUid doc 降格で不可逆ロックアウト/乗っ取り
+- ラウンド1対応の検証: S3/S4/S5/S6/S7 は解消。S2 は `server-only` 追加済みだが本番での demo projectId フォールバックとサーバー側 emulator env ガード(client経路にしか存在しない)が未解消 → R2-19 として Medium で再掲
+- 文書: `REVIEW_SECURITY_R2.md` に各 finding の file:line・影響・修正案・確認済み項目・Rulesテスト不足・推奨対応順を記録
+- テストは未実行(監査のみ・コード変更なし)。rules テスト不足は R2 文書の「Rules テストの不足」節に列挙
+## 2026-11-02: セキュリティレビュー ラウンド2 対応実施
+- Worktree: security-round2
+- `REVIEW_SECURITY_R2.md` の指摘を「対応状況」節に記録する形で修正。対象別の実装は同文書を参照
+- R2-1: `src/lib/receipt-files.ts` 新設。`isReceiptStoragePathOf`/`isAllowedReceiptMime`/上限値を集約し、ダウンロード route・`ReceiptOcrResolver.resolveOcrText`・`POST /api/receipts` の3経路で検証。serve 側は許可外 MIME を octet-stream+attachment 化・nosniff・CSP `default-src 'none'` 付与。`storagePath`/`fileName`/`mimeType` は rules 側でも登録後不変
+- R2-4: `src/lib/actions/businesses.ts` — `getOwnerUid()` 追加。`inviteMember` の自己招待禁止、`updateMemberRole`/`removeMember` が `business.ownerUid` member の降格・削除を拒否。rules 側も同保護を再現(第2オーナー経由の乗っ取りを deny)
+- R2-2: `planRestore` をコレクション別 sanitize に変更。実行者 actorUid 必須、`idempotencyKeys` 等の内部コレクション除外、status/closed期間/locked/owner注入/auditLog 偽造を復元時に拒否
+- R2-5/R2-6: `src/lib/api/body.ts` 新設(`readRequestText` で実バイト上限・chunked 対策)。backup/OCR route は認証をボディ読取前に移動し OCR を editor/owner 限定化
+- R2-3/R2-8〜R2-13: `firestore.rules` を全面強化。`inClosedPeriod`(日付→fy{year}・開始月考慮)を transactions 以外にも適用、`unaffected` で帰属・証跡フィールドをピン留め、invoice/payment の発行後不変・参照整合性、editor delete を owner 化、auditLogs を actorUid/action/targetPath/時刻で限定、member uid/invitedBy 整合、owner member 保護を追加。`storage.rules` に `receiptFileMutable`(doc 未登録=可変、登録済みは unprocessed かつ未締めのみ)・`image/heif` 追加・create/update 双方に保護(上書きが create 評価される経路を塞ぐ)
+- R2-14: `CommitBatch.deletes` 追加で `deleteTransaction` を transact 内で delete+audit 原子化
+- R2-15: schemas に account/名称/items 等の上限を追加
+- R2-16: `scopedIdempotencyKey(scope,key)` で操作別に冪等キーを分離
+- R2-17: 固定資産の登録/更新/除却/償却計上に `assertDateInOpenPeriod` を追加
+- R2-19: admin.ts で本番 projectId 未解決時は throw + サーバー側 emulator env ガード有効化
+- R2-20: `escapeField` で先頭 `= + - @` 等に `'` 前置
+- R2-7: `clientIpKey` を XFF 最右採用 + createBusiness に uid レート制限
+- ルール実装メモ(REVIEW_SECURITY_R2.md 末尾): `matches()` は文字列全体一致、match内 wildcard は同スコープの function にのみ見える、put 上書きは emulator で create 評価されることがある — いずれも実機で確認してルール側を修正
+### 実行したテスト
+- `pnpm lint` — エラー0(既存 warning 1件のみ)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(48ファイル549件、skip 10)
+- `pnpm build` — 合格
+- `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
+- `pnpm test:emulators` — 合格(7件)
+### 備考
+- 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
+- rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約

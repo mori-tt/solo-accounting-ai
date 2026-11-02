@@ -19,6 +19,7 @@ import {
   auditsFor,
   newId,
   nowOf,
+  scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
 
@@ -49,7 +50,7 @@ export async function registerCustomer(
   };
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("customer", input.idempotencyKey) },
     async () => ({
       batch: {
         puts: [{ collection: "customers", id, data: customer }],
@@ -85,7 +86,7 @@ export async function registerProject(
   const id = input.id ?? newId();
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("project", input.idempotencyKey) },
     async (tx) => {
       const customer = await tx.getCustomer(businessId, input.customerId);
       if (!customer) {
@@ -218,7 +219,7 @@ export async function registerInvoice(
   const at = nowOf(actor);
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("invoice", input.idempotencyKey) },
     async (tx) => {
       const periods = await tx.listFiscalPeriods(businessId);
       assertDateInOpenPeriod(issueDate, periods);
@@ -341,7 +342,7 @@ export async function registerPayment(
 
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("payment", input.idempotencyKey) },
     async (tx) => {
       const invoice = await tx.getInvoice(businessId, input.invoiceId);
       if (!invoice) {
