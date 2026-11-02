@@ -24,3 +24,73 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * 印刷出力共通ルール。
+ * - アプリのナビ(aside)/ヘッダ(header)/.no-print 要素を隠し帳票本体のみ出力する
+ * - 帳票コンテナには .print-sheet(装飾リセット)、帳票ヘッダには .print-header、
+ *   表組みには .print-table(罫線・改ページ制御・合計行の強調)を付ける
+ * - 画面で hidden の要素を印刷時だけ出す場合は .print-only を併記する
+ */
+@media print {
+  /* dark mode でも白地に黒文字で出力する */
+  body {
+    background: #ffffff;
+    color: #171717;
+  }
+
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-sheet {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  /* 帳票ヘッダ(帳票名・対象期間・事業名・印刷日) */
+  .print-header {
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #18181b;
+  }
+
+  /* 帳票の表組み: 罫線を濃くし、行の途中改ページを防ぐ */
+  .print-table {
+    break-inside: auto;
+  }
+  .print-table th,
+  .print-table td {
+    border-color: #71717a !important;
+  }
+  .print-table thead {
+    display: table-header-group;
+  }
+  .print-table tfoot {
+    display: table-footer-group;
+  }
+  .print-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* 合計行(tfoot)の強調 */
+  .print-table tfoot td {
+    border-top: 2px solid #18181b !important;
+    font-weight: 600;
+  }
+}
