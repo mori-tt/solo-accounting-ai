@@ -1,3 +1,7 @@
+import {
+  assertNonNegativeYen as assertNonNegativeYenAmount,
+  assertYenAmount,
+} from "../money";
 import { DomainError } from "./errors";
 
 export function isIntegerYen(value: unknown): value is number {
@@ -8,36 +12,14 @@ export function assertPositiveYen(
   value: unknown,
   field: string,
 ): asserts value is number {
-  if (!isIntegerYen(value)) {
-    throw new DomainError(
-      "INVALID_AMOUNT",
-      `${field} must be an integer yen amount`,
-    );
-  }
-  if (value <= 0) {
-    throw new DomainError(
-      "INVALID_AMOUNT",
-      `${field} must be a positive yen amount`,
-    );
-  }
+  assertYenAmount(value, field);
 }
 
 export function assertNonNegativeYen(
   value: unknown,
   field: string,
 ): asserts value is number {
-  if (!isIntegerYen(value)) {
-    throw new DomainError(
-      "INVALID_AMOUNT",
-      `${field} must be an integer yen amount`,
-    );
-  }
-  if (value < 0) {
-    throw new DomainError(
-      "INVALID_AMOUNT",
-      `${field} must not be a negative yen amount`,
-    );
-  }
+  assertNonNegativeYenAmount(value, field);
 }
 
 export function addYen(a: number, b: number): number {

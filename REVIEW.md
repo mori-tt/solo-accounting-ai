@@ -1305,6 +1305,41 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 一括処理は全件トランザクションではなく行ごとの逐次呼出しで部分失敗を許容(既存のCSV取込/明細インポートと同設計)。実行中はチェック・操作類を disabled にして選択の変更を防ぐ
 - 行ごとの既存操作(確定・AI提案・編集・削除)は無変更。展開行の colSpan は canEdit 時 7/非表示時 6 に調整
 - E2E・単体テストの一括操作カバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)
+## 2026-11-02: 会計ライブラリ型統一(Issue #75)
+- Worktree: unify-domain-types
+### 実装内容
+domain/(旧世代)とルート側(types.ts/dates.ts/errors.ts/money.ts・新世代)のプリミティブ二重定義を、ルート側を正として統一。domain/は型エイリアス・再 export・委譲に置き換え、export名(公開表面)は維持。
+- `src/lib/accounting/errors.ts`: `DomainErrorCode` union に domain 固有の4コード(`VALIDATION_FAILED`/`INVALID_STATE`/`ALREADY_EXISTS`/`PAYMENT_EXCEEDS_BALANCE`)を取り込み(エラークラス単一化のため正側へ追加)
+- `domain/errors.ts`: `DomainError`/`DomainErrorCode` をルート側へ再 export。`isDomainError` 維持。これで domain 関数が投げるエラーも `api/result.ts` の `instanceof DomainError` に捕捉される(従来は別クラスのため INTERNAL 化していた潜伏ギャップを解消)
+- `domain/types.ts`: enum系(`TransactionType`/`TransactionStatus`/`TaxCategory`/`TaxMode`/`ReceiptStatus`/`InvoiceStatus`/`FiscalPeriodStatus`/`AuditAction`/`InvoiceItem`)をルート側から再 export、`Role = MemberRole` エイリアス。`*Entity` 系は `Omit<ルート側ドキュメント型> & {Date/null差分}` で派生(タイムスタンプ Date・未設定 null・idempotencyKey 等は旧世代モデルとして保持)
+- `domain/dates.ts`: `ISODate = DateString` エイリアス。`isISODateString`/`assertISODate` は `parseDate`/`assertDateString` へ委譲、`lastDayOfMonth`・`isWithinRange`(=`isWithinPeriod`)は再 export。`YearMonth`/`isYearMonth`/`assertYearMonth`/`yearMonthOf`/`pad2`/`toUTCEpoch`/`compareISODate`/`daysBetween`/`todayISO` はルート側に同等物がないため維持
+- `domain/money.ts`: `assertPositiveYen`→`assertYenAmount`、`assertNonNegativeYen`→ルート側同名関数へ委譲(asserts型は維持)。`isIntegerYen`/`addYen` 維持
+- `domain/depreciation.ts`: `DepreciationMethod` をルート側へ統一(再 export)
+- `domain/yearly.ts`: `TransactionTaxCategory` を `TaxCategory` への別名化(重複enum定義を削除)
+- `domain/validate.ts`: `TAX_CATEGORIES` を snake_case(`non_taxable`/`out_of_scope`)に修正 — 永続化形式と一致させた
+- `domain/tax.test.ts`: camelCase リテラルを snake_case に修正
+
+### export対応表(domain → ルート側)
+- dates: `ISODate`=`DateString`/`isWithinRange`=`isWithinPeriod`/`lastDayOfMonth`=同名/`isISODateString`≈`parseDate`/`assertISODate`≈`assertDateString`。`YearMonth`系は yyyyMM monthKey と形式が異なりdomain維持
+- errors: `DomainError`/`DomainErrorCode` =ルート側そのもの(unionにdomain固有4コードを取込)
+- money: `assertPositiveYen`≈`assertYenAmount`/`assertNonNegativeYen`=同名/`isIntegerYen`・`addYen`はルート側に同等物なし維持
+- types: enum9種+`Role`は再 export/エイリアス、`*Entity`10種は `Omit`+差分で派生、`AccountBreakdownEntry`はルート側に名前付きexportがないため維持
+
+### TaxCategoryの判定(調査結果)
+domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.ts`→`service.ts`→`store.ts`→`memory-store.ts` 経路でのみ使われ、Firestoreへ永続化されない(旧 `store.ts` のAccountingStoreにFirestore実装なし・`AccountingService`はテスト経由のみ)。本番の永続化は `services/`+`store/`+ルート側 `types.ts` の snake_caseで確定のため、domain側をsnake_caseに揃えた
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(43ファイル558件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+### 設計上の判断・備考
+- `*Entity`型はルート側と wire形式が異なる(Date vs ISO文字列、null vs optional、idempotencyKey/fiscalYear/taxAmount等の有無)ため完全エイリアス化は不可。`Omit`+差分でフィールド共有に留め、旧世代の永続化モデルを維持した
+- `assertYenAmount`/`assertNonNegativeYen` への委譲で `Number.isSafeInteger`→`Number.isInteger` に緩和(2^53超を受理するが円金額として実害なし)。エラーメッセージ文面はルート側に統一(コードは不変)
+- domain側の `lastDayOfMonth` はルート側に委譲したことで不正な月(0/13)を明示的に拒否するようになった(domain側は従来ロールオーバー)。全呼出箇所は正常な月のみ渡すため実害なし
+- domain関数の DomainError がルート側クラスと統一され、`api/result.ts` の `DOMAIN_ERROR_MESSAGES` にないコード(VALIDATION_FAILED等)は「処理に失敗しました」+実コードで返る(従来はINTERNAL固定だった点を改善)。メッセージ追加は api 層なので本タスク範囲外
+- 未対応(別タスク): `index.ts` barrel の整理、`store.ts`/`memory-store.ts`/`service.ts` 旧世代ポートのFirestore実装または撤去、`*Entity`とルート側ドキュメント型の wire形式統一(移行作業が必要)
 ## 2026-11-02: 会計ライブラリ旧層の死コード削除(Issue #74)
 - Worktree: cleanup-old-layer
 - `src/lib/accounting/` 直下の旧層クラスタを削除。`AccountingService`(service.ts)・旧フラット `AccountingStore`/`EntityByCollection`/`CollectionName`/`IDEMPOTENT_COLLECTIONS`(store.ts)・`InMemoryAccountingStore`(memory-store.ts)・テスト用 `setup`/`expectDomainError`/`NOW`/`BIZ`/`ACTOR`(test-helpers.ts)は、import 網羅調査の結果これら5ファイル+旧serviceテスト3件の内部でしか参照されておらず、services//store//ai//actions//app//api/ 等の他層からの参照なしを確認して一括削除
@@ -1312,13 +1347,10 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - `index.ts` から `./memory-store`・`./service`・`./store` の re-export を除去(domain/* の re-export は維持)。barrel import(`@/lib/accounting` 直下)の利用者は repo 内にゼロ
 - `testing.ts` は削除せず保持。`testActor`/`setupStore`/`seedClosedPeriod` が services/*.test.ts 8件と tests/emulator/firestoreStore.test.ts から使用中で、実質新層向けテストヘルパーのため
 - 同名注意点: 旧 `store.ts`(get/list/create/remove 系フラットIF)と `store/types.ts`(新層 `AccountingStore`)は別物。`@/lib/api/store.ts` の `getStore()` は新層 `store/firestore.ts` を返しており旧層と無関係
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
 - `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(worktree作成直後は `.next/types` 未生成で `LayoutProps` エラーになるため typegen を先行)
 - `pnpm test` — 合格(40ファイル504件、skip 10)
-- `pnpm build` — 合格
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
-### 設計上の判断・備考
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ

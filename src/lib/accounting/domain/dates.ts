@@ -1,9 +1,15 @@
+import {
+  assertDateString,
+  isWithinPeriod,
+  lastDayOfMonth,
+  parseDate,
+  type DateString,
+} from "../dates";
 import { DomainError } from "./errors";
 
-export type ISODate = string;
+export type ISODate = DateString;
 export type YearMonth = string;
 
-const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const YEAR_MONTH_PATTERN = /^(\d{4})-(\d{2})$/;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -13,26 +19,19 @@ export function pad2(value: number): string {
 }
 
 export function isISODateString(value: unknown): value is ISODate {
-  if (typeof value !== "string") return false;
-  const match = ISO_DATE_PATTERN.exec(value);
-  if (!match) return false;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1) return false;
-  return day <= lastDayOfMonth(year, month);
+  try {
+    parseDate(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function assertISODate(
   value: unknown,
   field: string,
 ): asserts value is ISODate {
-  if (!isISODateString(value)) {
-    throw new DomainError(
-      "INVALID_DATE",
-      `${field} must be a real calendar date in YYYY-MM-DD format`,
-    );
-  }
+  assertDateString(value, field);
 }
 
 export function isYearMonth(value: unknown): value is YearMonth {
@@ -60,9 +59,7 @@ export function yearMonthOf(date: ISODate): YearMonth {
   return date.slice(0, 7);
 }
 
-export function lastDayOfMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
+export { isWithinPeriod as isWithinRange, lastDayOfMonth };
 
 export function toUTCEpoch(date: ISODate): number {
   assertISODate(date, "date");
@@ -78,10 +75,6 @@ export function compareISODate(a: ISODate, b: ISODate): number {
 
 export function daysBetween(from: ISODate, to: ISODate): number {
   return Math.round((toUTCEpoch(to) - toUTCEpoch(from)) / DAY_MS);
-}
-
-export function isWithinRange(date: ISODate, start: ISODate, end: ISODate): boolean {
-  return start <= date && date <= end;
 }
 
 export function todayISO(now: Date): ISODate {

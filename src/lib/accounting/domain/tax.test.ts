@@ -133,9 +133,9 @@ describe("sumTaxAmounts", () => {
 describe("isTaxableCategory", () => {
   it("taxableのみ課税取引", () => {
     expect(isTaxableCategory("taxable")).toBe(true);
-    expect(isTaxableCategory("nonTaxable")).toBe(false);
+    expect(isTaxableCategory("non_taxable")).toBe(false);
     expect(isTaxableCategory("exempt")).toBe(false);
-    expect(isTaxableCategory("outOfScope")).toBe(false);
+    expect(isTaxableCategory("out_of_scope")).toBe(false);
   });
 });
 
@@ -168,7 +168,7 @@ describe("maxPossibleTaxAmount / assertTaxAmountConsistent", () => {
   });
 
   it("非課税・免税・不課税は税額0のみ許容する", () => {
-    for (const category of ["nonTaxable", "exempt", "outOfScope"] as const) {
+    for (const category of ["non_taxable", "exempt", "out_of_scope"] as const) {
       expect(() => assertTaxAmountConsistent(category, 11_000, 0)).not.toThrow();
       expectDomainError(
         () => assertTaxAmountConsistent(category, 11_000, 1),

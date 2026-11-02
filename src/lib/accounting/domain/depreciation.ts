@@ -1,3 +1,4 @@
+import type { DepreciationMethod } from "../types";
 import { assertISODate, type ISODate } from "./dates";
 import { DomainError } from "./errors";
 import { fiscalPeriodRange, fiscalYearOf } from "./fiscal";
@@ -16,7 +17,7 @@ import { isIntegerYen } from "./money";
  *   呼び出し側が allocatedAmount で事業割合を掛けて求める
  */
 
-export type DepreciationMethod = "straightLine" | "decliningBalance";
+export type { DepreciationMethod };
 
 /** 備忘価額。償却は帳簿価額が1円になるまで行う */
 export const MEMO_BOOK_VALUE = 1;
