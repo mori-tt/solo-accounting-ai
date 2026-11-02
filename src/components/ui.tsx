@@ -527,3 +527,63 @@ export function ConfirmDialog({
 /** 一覧テーブルの共通クラス。モバイルでは overflow-x-auto のコンテナ内で使う */
 export const tableClass =
   "w-full border-collapse text-sm [&_th]:border-b [&_th]:border-zinc-200 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-xs [&_th]:font-medium [&_th]:whitespace-nowrap [&_th]:text-zinc-500 dark:[&_th]:border-zinc-800 [&_td]:border-b [&_td]:border-zinc-100 [&_td]:px-3 [&_td]:py-2 dark:[&_td]:border-zinc-800";
+
+/** 読み込み中の骨組みプレースホルダ。幅・高さは className で指定する */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`animate-pulse rounded-md bg-zinc-200 dark:bg-zinc-800 ${className}`}
+    />
+  );
+}
+
+/**
+ * 一覧テーブル風のスケルトン。
+ * ヘッダ行+データ行の矩形を並べてテーブル到着前の形を模す。
+ */
+export function TableSkeleton({
+  rows = 6,
+  className = "",
+}: {
+  rows?: number;
+  className?: string;
+}) {
+  return (
+    <Card className={`overflow-hidden p-0 ${className}`}>
+      <div className="border-b border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
+        <Skeleton className="h-3.5 w-2/3" />
+      </div>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-3 border-b border-zinc-100 px-3 py-3 last:border-b-0 dark:border-zinc-800"
+        >
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/**
+ * ページ全体のスケルトン。route の loading.tsx から使い、
+ * PageHeader+一覧テーブルの形を模したプレースホルダを表示する。
+ */
+export function ScreenSkeleton() {
+  return (
+    <div
+      className="mx-auto w-full max-w-5xl"
+      role="status"
+      aria-label="読み込み中"
+    >
+      <Skeleton className="h-7 w-48" />
+      <Skeleton className="mt-2 h-4 w-72" />
+      <TableSkeleton className="mt-6" />
+      <span className="sr-only">読み込み中...</span>
+    </div>
+  );
+}

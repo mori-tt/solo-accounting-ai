@@ -39,9 +39,15 @@ export function parseEmulatorHost(
   fallback: EmulatorEndpoint,
 ): EmulatorEndpoint {
   if (!value) return fallback;
-  const withoutScheme = value.replace(/^https?:\/\//, "");
-  const [host, portString] = withoutScheme.split(":");
+  const withoutScheme = value.trim().replace(/^https?:\/\//, "");
+  const parts = withoutScheme.split(":");
+  // "host" / "host:" / "a:8080:b" のような形式はフォールバック
+  // (IPv6 は Emulator 接続先として想定しない)
+  if (parts.length !== 2) return fallback;
+  const [host, portString] = parts;
   const port = Number(portString);
-  if (!host || !Number.isInteger(port)) return fallback;
+  if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    return fallback;
+  }
   return { host, port };
 }

@@ -1,3 +1,5 @@
+import "client-only";
+
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, type Auth } from "firebase/auth";
 import {
@@ -18,40 +20,70 @@ import {
   shouldUseEmulator,
 } from "./config";
 
-let emulatorsConnected = false;
+// 接続済みマーカーは app インスタンス側に持たせる。
+// Fast Refresh で本モジュールが再評価されても getApps()[0] 経由で
+// app インスタンスは生き残るため、モジュールスコープのフラグでは
+// HMR 後に二重接続(connectFirestoreEmulator の FAILED_PRECONDITION)
+// を引き起こす。
+type EmulatorMarkedApp = FirebaseApp & { __saiEmulatorsConnected?: boolean };
+
+/**
+ * 「既に接続済み」系のエラーは冪等成功として扱う。
+ * 前回の評価で途中まで接続していた場合の自己修復用。
+ */
+function ignoreAlreadyConnected(fn: () => void): void {
+  try {
+    fn();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // "already been started"(Firestore)/"already been used"(Auth) 等を拾う
+    if (!/already (been )?(connected|configured|started|used)/i.test(message)) {
+      throw e;
+    }
+  }
+}
 
 function connectEmulators(app: FirebaseApp): void {
-  if (emulatorsConnected) return;
-  emulatorsConnected = true;
+  const marked = app as EmulatorMarkedApp;
+  if (marked.__saiEmulatorsConnected) return;
 
   const authEndpoint = parseEmulatorHost(
     process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST,
     EMULATOR_DEFAULTS.auth,
   );
-  connectAuthEmulator(
-    getAuth(app),
-    `http://${authEndpoint.host}:${authEndpoint.port}`,
+  ignoreAlreadyConnected(() =>
+    connectAuthEmulator(
+      getAuth(app),
+      `http://${authEndpoint.host}:${authEndpoint.port}`,
+    ),
   );
 
   const firestoreEndpoint = parseEmulatorHost(
     process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST,
     EMULATOR_DEFAULTS.firestore,
   );
-  connectFirestoreEmulator(
-    getFirestore(app),
-    firestoreEndpoint.host,
-    firestoreEndpoint.port,
+  ignoreAlreadyConnected(() =>
+    connectFirestoreEmulator(
+      getFirestore(app),
+      firestoreEndpoint.host,
+      firestoreEndpoint.port,
+    ),
   );
 
   const storageEndpoint = parseEmulatorHost(
     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST,
     EMULATOR_DEFAULTS.storage,
   );
-  connectStorageEmulator(
-    getStorage(app),
-    storageEndpoint.host,
-    storageEndpoint.port,
+  ignoreAlreadyConnected(() =>
+    connectStorageEmulator(
+      getStorage(app),
+      storageEndpoint.host,
+      storageEndpoint.port,
+    ),
   );
+
+  // 全サービスの接続が終わってからマークする(途中失敗時は再試行可能にする)
+  marked.__saiEmulatorsConnected = true;
 }
 
 export function getFirebaseApp(): FirebaseApp {

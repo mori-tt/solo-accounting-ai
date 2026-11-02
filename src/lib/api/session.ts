@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import type { ActorContext } from "@/lib/accounting/services/common";
 import type { MemberRole } from "@/lib/accounting/types";
+import { roleAtLeast, toMemberRole } from "./member-role";
 import { ApiError } from "./result";
 
 /**
@@ -10,12 +11,14 @@ import { ApiError } from "./result";
  */
 export const SESSION_COOKIE = "__session";
 
-/** Cookie内のIDトークンを検証し uid を返す。未ログイン/失効時は undefined。 */
+/** Cookie内のIDトークンを検証し uid を返す。未ログイン/失効/無効化時は undefined。 */
 export async function getSessionUid(): Promise<string | undefined> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return undefined;
   try {
-    const decoded = await getAdminAuth().verifyIdToken(token);
+    // checkRevoked: アカウント無効化・パスワード変更・
+    // リフレッシュトークン失効を即座にセッションへ反映する
+    const decoded = await getAdminAuth().verifyIdToken(token, true);
     return decoded.uid;
   } catch {
     return undefined;
@@ -30,12 +33,6 @@ export async function requireUid(): Promise<string> {
   }
   return uid;
 }
-
-const ROLE_RANK: Record<MemberRole, number> = {
-  viewer: 0,
-  editor: 1,
-  owner: 2,
-};
 
 export interface MemberContext extends ActorContext {
   role: MemberRole;
@@ -60,7 +57,7 @@ export async function requireMembership(
     .doc(uid)
     .get();
 
-  let role = memberSnap.data()?.role as MemberRole | undefined;
+  let role = toMemberRole(memberSnap.data()?.role);
 
   if (role === undefined) {
     // memberドキュメントが無い場合、business所有者でもなければ非メンバー
@@ -75,7 +72,7 @@ export async function requireMembership(
     }
   }
 
-  if (ROLE_RANK[role] < ROLE_RANK[minRole]) {
+  if (!roleAtLeast(role, minRole)) {
     throw new ApiError("FORBIDDEN", "この操作を行う権限がありません");
   }
   return { uid, role };

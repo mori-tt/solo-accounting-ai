@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   signInWithEmailAndPassword,
 } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import { shouldUseEmulator } from "@/lib/firebase/config";
 import { useApp } from "@/components/auth-provider";
 import {
   Alert,
@@ -36,15 +38,41 @@ function authErrorMessage(e: unknown): string {
       case "auth/too-many-requests":
         return "試行回数が多すぎます。しばらく待ってから再試行してください";
       case "auth/network-request-failed":
-        return "認証サーバーに接続できません。Emulatorの起動を確認してください";
+        return shouldUseEmulator()
+          ? "認証サーバーに接続できません。Emulatorの起動を確認してください"
+          : "認証サーバーに接続できません。しばらく待ってから再試行してください";
     }
   }
   return "ログインに失敗しました";
 }
 
+/**
+ * next パラメータの遷移先を検証する。
+ * - 同一オリジンのパスのみ許可("//evil.com" や "/\evil.com" の
+ *   オープンリダイレクトを防ぐ)
+ * - /login 自身は除外(ログイン済みで /login に留まり続けるのを防ぐ)
+ */
+function safeNextPath(value: string | null): string | null {
+  if (
+    !value ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\") ||
+    value === "/login" ||
+    value.startsWith("/login?") ||
+    value.startsWith("/login#")
+  ) {
+    return null;
+  }
+  return value;
+}
+
 export function LoginScreen() {
   const { status } = useApp();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // 認証ゲート(AppShell)から渡された遷移先。未指定/不正値はダッシュボード
+  const nextPath = safeNextPath(searchParams.get("next")) ?? "/dashboard";
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -53,8 +81,8 @@ export function LoginScreen() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (status === "signed_in") router.replace("/dashboard");
-  }, [status, router]);
+    if (status === "signed_in") router.replace(nextPath);
+  }, [status, router, nextPath]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,14 +103,17 @@ export function LoginScreen() {
           parsed.data.password,
         );
       } else {
-        await createUserWithEmailAndPassword(
+        const cred = await createUserWithEmailAndPassword(
           auth,
           parsed.data.email,
           parsed.data.password,
         );
+        // 確認メール送信。失敗しても登録自体は完了しており、
+        // アプリ内バナーから再送できるためエラーにはしない
+        await sendEmailVerification(cred.user).catch(() => undefined);
       }
       // onIdTokenChanged がセッションCookieを同期し、status が signed_in になる
-      router.replace("/dashboard");
+      router.replace(nextPath);
     } catch (err) {
       setError(authErrorMessage(err));
       setBusy(false);

@@ -4,6 +4,8 @@ import {
   signIn,
   signOut,
   signUp,
+  signUpAndCreateBusiness,
+  TEST_PASSWORD,
 } from "./helpers";
 
 test("新規登録→事業作成→ログアウト→再ログインで事業が引き継がれる", async ({
@@ -58,7 +60,22 @@ test("誤ったパスワードではログインできずエラーメッセー�
   await expect(page).toHaveURL(/\/login$/);
 });
 
-test("未ログインで認証領域へ行くとログイン画面へ戻される", async ({ page }) => {
+test("未ログインで認証領域へ行くとログイン画面へ戻され、ログイン後に元の画面へ戻る", async ({
+  page,
+}) => {
+  const email = await signUpAndCreateBusiness(page);
+  await signOut(page);
+
+  // 未ログインで認証領域へアクセス → 行き先を next に保持して /login へ
   await page.goto("/transactions");
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\?next=%2Ftransactions$/);
+
+  // ログインすると next で指定された元の画面へ戻る
+  await page.getByLabel("メールアドレス").fill(email);
+  await page.getByLabel("パスワード").fill(TEST_PASSWORD);
+  await page
+    .locator("form")
+    .getByRole("button", { name: "ログイン" })
+    .click();
+  await expect(page).toHaveURL(/\/transactions$/, { timeout: 30_000 });
 });
