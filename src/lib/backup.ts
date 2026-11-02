@@ -42,6 +42,8 @@ export const BACKUP_COLLECTIONS = [
   "aiSuggestions",
   "monthlySummaries",
   "auditLogs",
+  "inventoryItems",
+  "inventoryCounts",
 ] as const;
 
 export type BackupCollection = (typeof BACKUP_COLLECTIONS)[number];
@@ -76,6 +78,8 @@ const FIXED_ID_COLLECTIONS: ReadonlySet<string> = new Set([
   "members",
   "fiscalPeriods",
   "monthlySummaries",
+  // fy{fiscalYear}の決定的ID(fiscalPeriodsと同じ採番)
+  "inventoryCounts",
 ]);
 
 export interface BackupDoc {
@@ -273,6 +277,9 @@ const RESTORE_ACTOR_FIELDS: Record<string, readonly string[] | undefined> = {
   closingChecks: ["createdBy", "resolvedBy"],
   fiscalPeriods: ["closedBy"],
   bills: ["createdBy"],
+
+  inventoryItems: ["createdBy"],
+  inventoryCounts: ["createdBy"],
 };
 
 /** Admin SDK専用フィールド。クライアント書き込み禁止と同じ扱いで復元時に除去 */

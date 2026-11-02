@@ -8,6 +8,7 @@ import {
   archiveReceiptAction,
   linkReceipt,
   listReceipts,
+  updateReceiptMetadataAction,
 } from "@/lib/actions/receipts";
 import {
   createTransaction,
@@ -29,6 +30,8 @@ import {
   type ReceiptExtractionPayload,
 } from "@/lib/ai/types";
 import { useAccounts } from "@/lib/hooks/use-accounts";
+import { buildReceiptsCsv, CSV_UTF8_BOM } from "@/lib/csv";
+import { filterReceipts } from "@/lib/receipt-search";
 import { formatDateTime, formatYen, todayDateString } from "@/lib/format";
 import {
   parseForm,
@@ -118,6 +121,12 @@ function ReceiptRow({
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [showMeta, setShowMeta] = useState(false);
+  const [meta, setMeta] = useState({
+    date: "",
+    amount: "",
+    counterparty: "",
+  });
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -136,6 +145,43 @@ function ReceiptRow({
   const linkedTx = receipt.transactionId
     ? transactions.find((t) => t.id === receipt.transactionId)
     : undefined;
+  const hasMeta =
+    receipt.transactionDate !== undefined ||
+    receipt.amount !== undefined ||
+    receipt.counterparty !== undefined;
+  /** 締め済み取引に紐付く証憑はサーバー側でも拒否されるため編集不可とする */
+  const metaEditable = canEdit && linkedTx?.status !== "locked";
+
+  /** 現在値をフォームへコピーして開く */
+  const openMetaForm = () => {
+    setMeta({
+      date: receipt.transactionDate ?? "",
+      amount: receipt.amount === undefined ? "" : String(receipt.amount),
+      counterparty: receipt.counterparty ?? "",
+    });
+    setShowMeta(true);
+  };
+
+  const submitMeta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      meta.amount !== "" &&
+      (!/^\d+$/.test(meta.amount) || !Number.isSafeInteger(Number(meta.amount)))
+    ) {
+      setError("金額は0円以上の整数で入力してください");
+      return;
+    }
+    await run(async () => {
+      await callApi(() =>
+        updateReceiptMetadataAction(businessId ?? "", receipt.id, {
+          transactionDate: meta.date,
+          amount: meta.amount === "" ? null : Number(meta.amount),
+          counterparty: meta.counterparty,
+        }),
+      );
+      setShowMeta(false);
+    });
+  };
 
   /** 証憑宛+紐付取引宛の提案を新しい順にまとめて表示する */
   const displayedSuggestions = useMemo(() => {
@@ -274,6 +320,77 @@ function ReceiptRow({
               ? `${linkedTx.date} / ${label(linkedTx.account)} / ${formatYen(linkedTx.amount)}`
               : receipt.transactionId}
           </p>
+        )}
+        {hasMeta && (
+          <p className="mt-1 text-xs text-zinc-500">
+            取引情報:{" "}
+            {[
+              receipt.transactionDate,
+              receipt.amount === undefined
+                ? undefined
+                : formatYen(receipt.amount),
+              receipt.counterparty,
+            ]
+              .filter((v) => v !== undefined && v !== "")
+              .join(" / ")}
+          </p>
+        )}
+        {metaEditable && !showMeta && (
+          <Button
+            variant="ghost"
+            className="mt-1"
+            onClick={openMetaForm}
+          >
+            検索用メタデータ{hasMeta ? "を編集" : "を登録"}
+          </Button>
+        )}
+        {showMeta && (
+          <form
+            onSubmit={submitMeta}
+            noValidate
+            className="mt-2 flex w-64 flex-col gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-700"
+          >
+            <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+              検索用メタデータ(取引日・金額・取引先)
+            </p>
+            <Field label="取引日">
+              <TextInput
+                type="date"
+                value={meta.date}
+                onChange={(e) => setMeta({ ...meta, date: e.target.value })}
+              />
+            </Field>
+            <Field label="金額(円)">
+              <NumberInput
+                value={meta.amount}
+                min={0}
+                step={1}
+                placeholder="例: 1280"
+                onChange={(e) => setMeta({ ...meta, amount: e.target.value })}
+              />
+            </Field>
+            <Field label="取引先">
+              <TextInput
+                value={meta.counterparty}
+                placeholder="例: 〇〇商店"
+                onChange={(e) =>
+                  setMeta({ ...meta, counterparty: e.target.value })
+                }
+              />
+            </Field>
+            <div className="flex gap-2">
+              <Button type="submit" loading={busy}>
+                保存
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowMeta(false)}
+              >
+                閉じる
+              </Button>
+            </div>
+          </form>
         )}
       </td>
       <td className="align-top">
@@ -529,6 +646,9 @@ export function ReceiptsScreen() {
   const canEdit = business?.role !== "viewer";
 
   const [statusFilter, setStatusFilter] = useState("unprocessed");
+  const [query, setQuery] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string>();
   const [file, setFile] = useState<File | null>(null);
@@ -585,13 +705,42 @@ export function ReceiptsScreen() {
     return map;
   }, [data?.txSuggestions]);
 
+  const txById = useMemo(
+    () => new Map((data?.transactions ?? []).map((t) => [t.id, t])),
+    [data?.transactions],
+  );
+
+  // 状態フィルタに加え、取引日・金額・取引先・ファイル名で絞り込む(電帳法の検索要件)
   const filtered = useMemo(
     () =>
-      (data?.receipts ?? []).filter(
-        (r) => statusFilter === "" || r.status === (statusFilter as ReceiptStatus),
+      filterReceipts(
+        (data?.receipts ?? []).filter(
+          (r) =>
+            statusFilter === "" || r.status === (statusFilter as ReceiptStatus),
+        ),
+        txById,
+        {
+          query: query || undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+        },
       ),
-    [data, statusFilter],
+    [data, statusFilter, query, startDate, endDate, txById],
   );
+
+  /** 絞り込み済みの証憑一覧をCSVでダウンロード(税務調査のダウンロードの求め対応) */
+  const exportCsv = () => {
+    const blob = new Blob(
+      [CSV_UTF8_BOM + buildReceiptsCsv(filtered, txById)],
+      { type: "text/csv;charset=utf-8" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `receipts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const upload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -640,6 +789,15 @@ export function ReceiptsScreen() {
       <PageHeader
         title="領収書確認"
         description="アップロードした領収書を確認し、取引に紐付けます"
+        actions={
+          <Button
+            variant="secondary"
+            onClick={exportCsv}
+            disabled={filtered.length === 0}
+          >
+            CSV出力
+          </Button>
+        }
       />
 
       {canEdit && (
@@ -668,7 +826,7 @@ export function ReceiptsScreen() {
         </Card>
       )}
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
           className="w-40"
           value={statusFilter}
@@ -680,7 +838,37 @@ export function ReceiptsScreen() {
           <option value="linked">紐付済み</option>
           <option value="archived">アーカイブ済み</option>
         </Select>
+        <TextInput
+          className="w-56"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="例: ファイル名 取引先 12000"
+          aria-label="検索キーワード"
+        />
+        <TextInput
+          type="date"
+          className="w-40"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          aria-label="取引日(開始)"
+        />
+        <span className="text-sm text-zinc-400">〜</span>
+        <TextInput
+          type="date"
+          className="w-40"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          aria-label="取引日(終了)"
+        />
+        {data !== undefined && (
+          <span className="text-xs text-zinc-400">
+            {filtered.length}件 / 全{data.receipts.length}件
+          </span>
+        )}
       </div>
+      <p className="mb-4 -mt-2 text-xs text-zinc-400">
+        取引日・金額・取引先は証憑メタデータと紐付取引の両方を対象に検索します
+      </p>
 
       {error ? (
         <ErrorState message={error} onRetry={reload} />

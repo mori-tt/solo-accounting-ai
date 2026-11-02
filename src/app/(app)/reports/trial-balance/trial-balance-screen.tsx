@@ -7,6 +7,8 @@ import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getTrialBalanceReport } from "../actions";
 import { useBookAccountLabel } from "../account-label";
 import { callApi } from "@/lib/api-client";
+import { buildTrialBalanceCsv } from "@/lib/csv";
+import { downloadCsv } from "@/lib/download";
 import { currentMonthKey, formatMonthKey } from "@/lib/format";
 import {
   Alert,
@@ -42,13 +44,27 @@ export function TrialBalanceScreen() {
           title="試算表"
           description="確定済みの取引から科目別の借方・貸方合計を集計します"
           actions={
-            <Button
-              variant="secondary"
-              onClick={() => window.print()}
-              disabled={!data || data.rows.length === 0}
-            >
-              印刷する
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  downloadCsv(
+                    `trial-balance-${monthKey}.csv`,
+                    data ? buildTrialBalanceCsv(data, label) : "",
+                  )
+                }
+                disabled={!data || data.rows.length === 0}
+              >
+                CSV出力
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => window.print()}
+                disabled={!data || data.rows.length === 0}
+              >
+                印刷する
+              </Button>
+            </>
           }
         />
 

@@ -51,5 +51,8 @@ describe("NavLinks", () => {
     expect(
       screen.getByRole("link", { name: "決算チェック" }).getAttribute("href"),
     ).toBe("/closing");
+    expect(
+      screen.getByRole("link", { name: "棚卸・在庫" }).getAttribute("href"),
+    ).toBe("/inventory");
   });
 });

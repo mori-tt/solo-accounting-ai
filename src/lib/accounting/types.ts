@@ -115,6 +115,14 @@ export interface Receipt {
   mimeType: string;
   transactionId?: string;
   status: ReceiptStatus;
+  /**
+   * 電帳法の検索要件(取引年月日/金額/取引先)を証憑単体で満たすための
+   * メタデータ。紐付け時に取引の値をコピーし、未紐付の証憑は手入力で補う。
+   */
+  transactionDate?: DateString;
+  /** 円・整数・0以上 */
+  amount?: number;
+  counterparty?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -281,6 +289,56 @@ export interface FixedAsset {
   disposedDate?: DateString;
   /** 最後に償却費を経費計上した会計年度(開始年)。未計上は未設定 */
   lastBookedFiscalYear?: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 棚卸品目マスタ。品目名・単位・標準単価を保持し、
+ * 年度別の期末棚卸カウント(inventoryCounts)の行を構成する。
+ */
+export interface InventoryItem {
+  id: string;
+  /** 品目名 */
+  name: string;
+  /** 単位(個・本・kg 等の任意文字列) */
+  unit: string;
+  /** 標準単価(円・整数・0以上)。カウント時の評価単価の初期値 */
+  standardUnitPrice: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 期末棚卸カウントの明細行。
+ * name/unit は保存時点の品目マスタからのスナップショット
+ * (棚卸表は期末確定資料のため、後の品目変更・削除で内容が変わらないようにする)。
+ */
+export interface InventoryCountLine {
+  itemId: string;
+  /** 保存時点の品目名スナップショット */
+  name: string;
+  /** 保存時点の単位スナップショット */
+  unit: string;
+  /** 実在庫数量(0以上。単位によっては小数可) */
+  quantity: number;
+  /** 評価単価(円・整数・0以上)。標準単価を初期値として棚卸時に確定 */
+  unitPrice: number;
+}
+
+/**
+ * 年度別の期末棚卸カウント。ドキュメントIDは `fy{fiscalYear}`
+ * (fiscalPeriods と同じ決定的採番)。期末棚卸高は lines の
+ * quantity×unitPrice 合計として都度計算する(保存しない)。
+ */
+export interface InventoryCount {
+  /** `fy{fiscalYear}` 形式のドキュメントID */
+  id: string;
+  /** 会計年度の開始年 */
+  fiscalYear: number;
+  lines: InventoryCountLine[];
   createdBy: string;
   createdAt: string;
   updatedAt: string;

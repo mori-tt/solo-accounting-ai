@@ -279,7 +279,11 @@ service cloud.firestore {
           && d.fileName is string
           && d.mimeType in ['image/jpeg', 'image/png', 'image/webp',
                             'image/heic', 'image/heif', 'application/pdf']
-          && d.status in ['unprocessed', 'linked', 'archived'];
+          && d.status in ['unprocessed', 'linked', 'archived']
+          // 電帳法の検索要件用メタデータ(任意)。設定する場合は型を検証する
+          && (!('transactionDate' in d) || dateString(d.transactionDate))
+          && (!('amount' in d) || d.amount is int)
+          && (!('counterparty' in d) || d.counterparty is string);
       }
 
       // ---------- customers ----------
@@ -517,6 +521,53 @@ service cloud.firestore {
           && d.status in ['active', 'disposed']
           && (!('disposedDate' in d) || dateString(d.disposedDate))
           && (!('lastBookedFiscalYear' in d) || d.lastBookedFiscalYear is int);
+      }
+
+      // ---------- inventoryItems ----------
+      // 棚卸品目マスタ(品目名・単位・標準単価)。棚卸カウントの明細を構成する
+      match /inventoryItems/{itemId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validInventoryItem(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && validInventoryItem(request.resource.data)
+          && unaffected(['createdBy', 'createdAt']);
+        allow delete: if isOwner(businessId);
+      }
+
+      function validInventoryItem(d) {
+        return d.name is string
+          && d.unit is string
+          && d.standardUnitPrice is int
+          && d.standardUnitPrice >= 0;
+      }
+
+      // ---------- inventoryCounts ----------
+      // 年度別の期末棚卸カウント。docIdは fy{fiscalYear} で決定的
+      // (fiscalPeriods と同じ採番)。期末棚卸高はlines(数量×評価単価)の
+      // 合計として計算するためドキュメントには保存しない。
+      // 締め済み年度のカウントは確定数値の根拠となるため変更不可
+      // (lines要素の検証はルールで反復できないためサービス層で行う)
+      match /inventoryCounts/{countId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validInventoryCount(request.resource.data, countId)
+          && request.resource.data.createdBy == request.auth.uid
+          && !periodClosed(businessId, countId);
+        allow update: if canEdit(businessId)
+          && validInventoryCount(request.resource.data, countId)
+          && unaffected(['fiscalYear', 'createdBy', 'createdAt'])
+          && !periodClosed(businessId, countId);
+        allow delete: if isOwner(businessId)
+          && !periodClosed(businessId, countId);
+      }
+
+      function validInventoryCount(d, countId) {
+        return d.fiscalYear is int
+          && countId == 'fy' + string(d.fiscalYear)
+          && d.lines is list
+          && d.lines.size() <= 500;
       }
 
       // ---------- closingChecks ----------

@@ -100,6 +100,20 @@ export function buildIncomeStatement(report: YearlyReport): IncomeStatement {
   };
 }
 
+/**
+ * 棚卸高を反映した差引金額を返す。
+ * IncomeStatement.grossIncome は 収入 - 仕入 - 経費 で棚卸を含まないため、
+ * 売上原価を 期首棚卸高 + 仕入高 - 期末棚卸高 で算定した場合の差分
+ * (- 期首 + 期末)を調整する(収支内訳書の売上原価部の算式)。
+ */
+export function grossIncomeWithInventory(
+  statement: IncomeStatement,
+  beginningInventory: number,
+  endingInventory: number,
+): number {
+  return statement.grossIncome - beginningInventory + endingInventory;
+}
+
 export interface NetIncomeInput {
   /** 差引金額(円・整数。赤字は負数) */
   grossIncome: number;

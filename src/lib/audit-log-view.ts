@@ -1,3 +1,5 @@
+import { serializeCsv } from "./csv";
+
 /**
  * 監査ログ閲覧画面の表示・絞り込みロジック(純粋関数)。
  * auditLogs は対象の識別情報(actorUid / action / targetPath / createdAt)のみを持ち、
@@ -190,4 +192,48 @@ export function filterAuditLogs<T extends AuditLogViewEntry>(
       (a, b) =>
         b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
     );
+}
+
+// ---------- CSV エクスポート ----------
+
+/**
+ * 監査ログCSVの列。電帳法の訂正削除履歴確認・税務調査の
+ * 「ダウンロードの求め」への対応として、画面表示と同じ絞り込み結果を
+ * 識別情報つきで出力する。日時はソート可能なISO 8601のまま出す。
+ */
+export const AUDIT_LOG_CSV_HEADER = [
+  "日時",
+  "ユーザー",
+  "actorUid",
+  "操作",
+  "対象種別",
+  "対象",
+  "概要",
+] as const;
+
+export interface AuditLogCsvEntry extends AuditLogViewEntry {
+  actorUid: string;
+  /** メンバーの表示名またはメールアドレス。未解決は null */
+  actorName: string | null;
+}
+
+/** 監査ログ一覧 → ヘッダー付きCSV文字列(BOMなし)。絞り込み済みの列を渡す */
+export function buildAuditLogCsv(
+  entries: readonly AuditLogCsvEntry[],
+): string {
+  return serializeCsv([
+    [...AUDIT_LOG_CSV_HEADER],
+    ...entries.map((e) => {
+      const target = parseAuditTargetPath(e.targetPath);
+      return [
+        e.createdAt,
+        e.actorName ?? "",
+        e.actorUid,
+        auditActionLabel(e.action),
+        target ? auditTargetTypeLabel(target.collection) : "",
+        e.targetPath,
+        describeAuditEntry(e),
+      ];
+    }),
+  ]);
 }

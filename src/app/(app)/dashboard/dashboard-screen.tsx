@@ -7,8 +7,10 @@ import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getDashboard } from "@/lib/actions/reports";
 import { callApi, fetchAiUsage } from "@/lib/api-client";
 import { backupFreshness } from "@/lib/backup";
+import type { FilingDeadlineAlert } from "@/lib/accounting/domain/deadlines";
 import {
   currentMonthKey,
+  formatDateJP,
   formatMonthKey,
   todayDateString,
 } from "@/lib/format";
@@ -75,6 +77,25 @@ const TYPE_LABELS: Record<string, string> = {
   income: "収入",
   expense: "支出",
   transfer: "振替",
+};
+
+/** 申告期限アラートの遷移先(種類ごとの確認画面) */
+const DEADLINE_LINKS: Record<
+  FilingDeadlineAlert["kind"],
+  { href: string; label: string }
+> = {
+  income_tax: {
+    href: "/reports/filing",
+    label: "決算・申告データを確認する",
+  },
+  consumption_tax: {
+    href: "/reports/consumption-tax",
+    label: "消費税の集計を確認する",
+  },
+  depreciable_assets: {
+    href: "/fixed-assets",
+    label: "固定資産台帳を確認する",
+  },
 };
 
 export function DashboardScreen() {
@@ -146,6 +167,26 @@ export function DashboardScreen() {
           </Link>
         </Alert>
       )}
+
+      {data.deadlineAlerts.map((a) => (
+        <Alert
+          key={a.kind}
+          tone={a.state === "overdue" ? "error" : "warning"}
+          className="mb-4"
+        >
+          {a.state === "overdue"
+            ? `${a.label}の申告期限(${formatDateJP(a.dueDate)})を${-a.daysUntil}日過ぎています。`
+            : a.daysUntil === 0
+              ? `${a.label}の申告期限(${formatDateJP(a.dueDate)})は今日です。`
+              : `${a.label}の申告期限(${formatDateJP(a.dueDate)})まであと${a.daysUntil}日です。`}
+          <Link
+            href={DEADLINE_LINKS[a.kind].href}
+            className="ml-1 font-medium underline hover:no-underline"
+          >
+            {DEADLINE_LINKS[a.kind].label}
+          </Link>
+        </Alert>
+      ))}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <SummaryCard

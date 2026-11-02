@@ -6,6 +6,7 @@ export * from "./domain/depreciation";
 export * from "./domain/errors";
 export * from "./domain/filing";
 export * from "./domain/fiscal";
+export * from "./domain/inventory";
 export * from "./domain/ledger";
 export * from "./domain/money";
 export * from "./domain/summary";
