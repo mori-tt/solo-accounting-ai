@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { APP_VERSION } from "@/lib/version";
 import { AuthRedirect } from "./auth-redirect";
 
 export const metadata: Metadata = {
@@ -388,6 +389,9 @@ export default function Home() {
             <LogoMark className="h-5 w-5" />
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
               &copy; 2026 Solo Accounting AI
+            </span>
+            <span className="text-xs text-zinc-400 dark:text-zinc-500">
+              v{APP_VERSION}
             </span>
           </div>
           <nav className="flex flex-wrap gap-x-5 gap-y-2">

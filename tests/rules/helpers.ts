@@ -82,6 +82,7 @@ export function seedBusiness(
   };
   for (const [uid, role] of Object.entries(members)) {
     writes[`businesses/${businessId}/members/${uid}`] = {
+      uid,
       role,
       invitedBy: ownerUid,
     };
@@ -165,9 +166,9 @@ export function closingCheck(status: "open" | "resolved" | "waived" = "open") {
   };
 }
 
-export function receipt(status = "unprocessed") {
+export function receipt(status = "unprocessed", id = "r1") {
   return {
-    storagePath: `receipts/${BIZ}/r1/file.png`,
+    storagePath: `receipts/${BIZ}/${id}/file.png`,
     fileName: "file.png",
     mimeType: "image/png",
     status,
