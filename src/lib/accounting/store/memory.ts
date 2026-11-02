@@ -269,6 +269,8 @@ export class MemoryStore implements AccountingStore {
       businessId,
       "withholdingRecords",
       () => true,
+    );
+  }
 
   getBill(businessId: string, id: string): Promise<Bill | undefined> {
     return this.get<Bill>(businessId, "bills", id);

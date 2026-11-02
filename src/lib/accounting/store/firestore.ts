@@ -313,6 +313,8 @@ class FirestoreAccountingReader implements AccountingReader {
   ): Promise<WithholdingRecord[]> {
     return this.readQuery<WithholdingRecord>(
       this.col(businessId, "withholdingRecords"),
+    );
+  }
 
   getBill(businessId: string, id: string): Promise<Bill | undefined> {
     return this.readDoc(businessId, "bills", id);
@@ -452,7 +454,7 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listWithholdingRecords(businessId: string) {
     return this.reader.listWithholdingRecords(businessId);
-
+  }
   getBill(businessId: string, id: string) {
     return this.reader.getBill(businessId, id);
   }
