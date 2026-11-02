@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { sendEmailVerification } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
 import { useApp } from "./auth-provider";
-import { Button } from "./ui";
+import { announce, Button } from "./ui";
 
 /** 再送ボタンの連打防止クールダウン */
 const RESEND_COOLDOWN_MS = 60_000;
@@ -68,6 +68,13 @@ export function EmailVerifyBanner() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [user]);
 
+  // 再送/反映の結果メッセージは常設ライブ領域(LiveAnnouncer)経由で
+  // スクリーンリーダーへ通知する(DOM挿入への依存を避けるため)
+  useEffect(() => {
+    const message = error ?? notice;
+    if (message) announce(message, Boolean(error));
+  }, [notice, error]);
+
   if (status !== "signed_in" || !user || user.emailVerified || verified) {
     return null;
   }
@@ -111,11 +118,11 @@ export function EmailVerifyBanner() {
   };
 
   return (
-    <div
-      role="status"
-      className="border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
-    >
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2">
+    <div className="border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+      <div
+        role="status"
+        className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2"
+      >
         <p className="min-w-0 flex-1">
           メールアドレスが未確認です。
           届いている確認メールのリンクを開いてください。
@@ -139,6 +146,7 @@ export function EmailVerifyBanner() {
           </Button>
         </div>
       </div>
+      {/* 通知テキストの読み上げは announce() 経由のため live region の外に置く */}
       {(notice || error) && (
         <p
           className={`mx-auto mt-1.5 max-w-5xl text-xs ${
@@ -146,7 +154,6 @@ export function EmailVerifyBanner() {
               ? "text-red-600 dark:text-red-400"
               : "text-amber-800 dark:text-amber-300"
           }`}
-          role={error ? "alert" : undefined}
         >
           {error ?? notice}
         </p>
