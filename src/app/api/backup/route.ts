@@ -1,4 +1,8 @@
 import { writeAuditLog } from "@/lib/api/queries";
+import {
+  backupExportRateLimiter,
+  backupRestoreRateLimiter,
+} from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireEditor, requireOwner } from "@/lib/api/session";
 import {
@@ -24,6 +28,8 @@ export async function GET(request: Request) {
       throw new ApiError("INVALID_INPUT", "businessId が必要です");
     }
     await requireEditor(businessId);
+    // 全データ読み出しの重い処理のため businessId 単位で制限
+    backupExportRateLimiter.consume(businessId);
     const backup = await exportBusinessBackup(getAdminDb(), businessId);
     const date = backup.exportedAt.slice(0, 10);
     return new Response(JSON.stringify(backup), {
@@ -64,6 +70,8 @@ export async function POST(request: Request) {
       throw new ApiError("INVALID_INPUT", "businessId が必要です");
     }
     const actor = await requireOwner(businessId);
+    // 全件書き込みを伴う復元のため businessId 単位で厳しめに制限
+    backupRestoreRateLimiter.consume(businessId);
     const parsed = backupFileSchema.safeParse(body.backup);
     if (!parsed.success) {
       throw new ApiError(

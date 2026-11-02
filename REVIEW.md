@@ -1442,6 +1442,74 @@ Firebase `sendEmailVerification` によるメールアドレス確認フロー�
 - メール確認はソフトゲート。確定操作(Server Actions)側で `email_verified` を必須にするポリシーは未導入(issue範囲外・要検討)。導入する場合は `api/session.ts` 側で idToken の claim を確認する形になる
 - 確認メールの文面・送信元は Firebase コンソール側のテンプレート設定に依存。Emulator では実メールは送られず oobCode リンクがログに出る(手動確認はそのリンクを開く)
 - バナーの再送クールダウン(60秒)はUI側のみ。連続リロード等で回避は可能だが Firebase 側のレート制限が実際の上限を担保する
+## 2026-11-02: セキュリティハードニング(Issue #78)
+- Worktree: security-hardening
+REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリティヘッダを追加し、`src/app/api/` 全ルートを監査してレート制限の適用漏れを修正した。新規依存追加なし(既存 `src/lib/api/rate-limit.ts`・`result.ts` を再利用)。
+- `next.config.ts`: `headers()` で全パスに以下を付与。`poweredByHeader: false` で `X-Powered-By` も除去
+  - `Content-Security-Policy`: nonceなしの静的CSP(middlewareを触れないIssue制約のため `node_modules/next/dist/docs` の "Without Nonces" 例に準拠)。`script-src 'self' 'unsafe-inline'`(+開発時のみ `'unsafe-eval'`)、`style-src 'self' 'unsafe-inline'`、`img-src 'self' blob: data:`、`font-src 'self'`、`object-src 'none'`、`base-uri 'self'`、`form-action 'self'`、`frame-ancestors 'none'`
+  - `connect-src`: `'self'` + 環境に応じて (a) Emulatorモード(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`): Auth/Firestore/Storage Emulator の `http://host:port`(`src/lib/firebase/config.ts` の `parseEmulatorHost`/`EMULATOR_DEFAULTS` をconfig側でも使い接続先を単一ソース化)、(b) 本番: `identitytoolkit.googleapis.com`/`securetoken.googleapis.com`/`https://{authDomain}`(クライアントSDKは firebase/auth のみ使用。firestore/storage は Admin SDK 経由のため不要)
+  - `upgrade-insecure-requests` は Emulator(http)利用時のみ除外(非localhostなemulator接続先を壊さないため)。localhost は仕様上除外対象だが環境依存を避けて明示判定とした
+  - `X-Frame-Options: DENY`(frame-ancestors 'none' と併用)、`X-Content-Type-Options: nosniff`(ユーザーアップロード証憑を inline 返却する `/api/receipts/{id}` の MIME偽装XSSにも有効)、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy: camera=(), microphone=(), geolocation=()`(証憑アップロードは file input のため camera 権限不要)
+- `src/lib/api/rate-limit.ts`: `clientIpKey(request)`(x-forwarded-for先頭→x-real-ip→"unknown")と `sessionRateLimiter`(IP単位30回/時)・`backupExportRateLimiter`(30回/時)・`backupRestoreRateLimiter`(10回/時)・`receiptUploadRateLimiter`(120回/時)・`receiptDownloadRateLimiter`(1200回/時)を追加。いずれも businessId 単位(session のみIP単位)
+### ルート監査結果(src/app/api/ 全8ハンドラ)
+| ルート | 判定 | 対応 |
+| --- | --- | --- |
+| POST /api/session | 認証系・制限なし | `sessionRateLimiter.consume(clientIpKey(request))` を verifyIdToken 前に追加 |
+| DELETE /api/session | Cookie破棄のみ・軽量 | 対象外 |
+| GET /api/backup | 全データ読出し・制限なし | `backupExportRateLimiter`(editor確認後) |
+| POST /api/backup | 全件書込み・制限なし | `backupRestoreRateLimiter`(owner確認後) |
+| POST /api/receipts | Storage課金・制限なし | `receiptUploadRateLimiter`(editor確認後) |
+| GET /api/receipts/[id] | 帯域課金・制限なし | `receiptDownloadRateLimiter`(viewer確認後) |
+| GET /api/ai/usage | 制限なし | `aiApiRateLimiter`(run枠は消費しない) |
+| GET /api/ai/receipt-ocr | 制限なし | `aiApiRateLimiter` |
+| POST /api/ai/receipt-ocr | aiRunRateLimiter 適用済 | 変更不要 |
+| GET・POST /api/ai/suggestions, PATCH [suggestionId] | 適用済 | 変更不要 |
+- `pnpm test` — 合格(43ファイル508件、skip 10。clientIpKey テスト4件追加)
+- `pnpm test:emulators` — 合格(7件) / `pnpm test:rules` — 合格(79件)
+- 実機検証: `pnpm dev` で Emulator向け `connect-src`(localhost:9099/8080/9199)+`'unsafe-eval'`+`upgrade-insecure-requests`なし、`pnpm start` で本番向け `connect-src`(googleapis)+`upgrade-insecure-requests`あり、を curl で確認
+### 設計上の判断・備考
+- `next.config.ts` から `./src/lib/firebase/config` を import している(依存ゼロの純粋モジュールのためconfig評価時に解決可。Emulator接続先の解釈を client.ts と共有)
+- IP単位の session 制限は最良努力(x-forwarded-for 偽装は防げない)。厳密な制限が必要なら rate-limit.ts のコメント通り共有ストア化が要となる
+- receipts GET の 1200回/時は一覧 `<img>` の一括要求(数十〜百件/ページ)を踏まえた緩め設定。正常利用で 429 にならない水準
+- 429 応答は `toErrorResponse` が `RateLimitError.retryAfterSec` → `Retry-After` ヘッダへ変換する既存仕組みで返る(画面側は `ApiClientError.code==="RATE_LIMITED"` のメッセージ表示)
+- 未対応(別タスク): nonceベースCSPへの移行(proxy/middleware導入が必要)、HSTS、Server Actions 側のレート制限、`api-client.ts` への 429 リトライ配慮
+## 2026-11-02: 監視基盤(Issue #83)
+- Worktree: observability
+- `src/lib/monitoring/` 新設: エラー監視抽象層と構造化ログ。Sentry SDK本体は入れず抽象層のみ
+  - `types.ts`: `MonitoringProvider`(captureException/captureMessage)、`MonitoringLevel`、`CaptureContext`(tags/extra)
+  - `logger.ts`: JSON 1行の構造化ロガー。fieldsはスカラーのみ受理し、PII・証憑・認証情報を示唆するキー名はdenylistで除去(redactedKeysにキー名のみ記録)。値のメールアドレス様文字列はマスク・長文は打切り。`LOG_LEVEL`で最小レベル制御(省略時info、呼出毎に遅延評価)。sink/clock差替え可能
+  - `provider.ts`: `createMonitoringProvider`で選択。`SENTRY_DSN`設定時は「SDK未同梱」の警告のみ出しconsoleフォールバック(DSN値自体は出力しない)、未設定時もconsoleフォールバック+外部配送no-op。`NoopMonitoringProvider`はテスト注入用
+  - `index.ts`: `captureException`/`captureMessage`公開API。プロバイダ例外を握りつぶし、監視経路の障害で本体処理を落とさない。`setMonitoringProviderForTest`/`resetMonitoringForTest`付き
+- `src/app/api/health/route.ts` 新設: 認証不要の生存確認GET。cacheComponents環境のため`connection()`でビルド時プリレンダを抑止し毎リクエスト実行。`checks.db`は`FIRESTORE_EMULATOR_HOST`設定時のみ遅延importしたadmin SDKの`listCollections()`(1秒timeout)で疎通試行、未設定時は"skipped"。疎通失敗はchecks.db="error"+warn構造化ログで表現しHTTP 200のまま返す(livenessはプロセス応答性のみ保証し、DB障害による再起動ループを誘発しない)
+- `.env.example` 末尾に `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN`/`LOG_LEVEL` を追記(末尾追記のみ)
+- 他のapi・ページ・next.configは未変更。既存ルートへの監視配線は本Issue範囲外
+- `pnpm test` — 合格(46ファイル中43実行535件、skip 10。monitoring/logger/healthの新規テスト含む)
+- `pnpm build` — 合格(`/api/health` が Dynamic ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+- PIIフィルタは多層防御であり、呼び出し側が個人情報・証憑内容をmsg/contextへ入れない設計が前提(AGENTS.md準拠)。denylistは誤検知で安全側に倒し、name/token/email/証憑関連キーを広めに除去。`businessId`等の識別子・`route`/`op`等の運用メタは通す
+- 構造化ログはfieldsをエントリへ平準化し、予約キー(level/msg/ts/err/redactedKeys)衝突は除去対象。`logger.error`と別に`logger.exception(msg, error, fields)`を設けError畳込みを明示化
+- `connection()`はリクエストストア外でthrowするため、route.test.tsでは`next/server`と`@/lib/firebase/admin`をvi.mockして疎通3分岐(skipped/ok/error)を検証
+- Sentry導入タスクでの拡張点は`createMonitoringProvider`(DSN設定時に実SDK初期化のプロバイダを返す)。`NEXT_PUBLIC_SENTRY_DSN`はクライアント捕捉の将来用で現状未使用
+## 2026-11-02: 法務ページ(Issue #79)
+- Worktree: legal-pages
+公開用の法務3ページをプレースホルダー骨組みとして新設し、アプリ各面の末尾から辿れるリンクフッターを設置。
+- `src/app/legal/terms/page.tsx`: 利用規約の条項骨組み(適用・定義・登録・サービス内容・AI提案の性質・料金・禁止事項・データ取扱・知財・免責・変更/停止・解約・規約変更・準拠法/管轄・附則)。AI提案は確定仕訳ではなく利用者の最終判断が必要、税務・会計助言ではない旨の構造を確保
+- `src/app/legal/privacy/page.tsx`: プライバシーポリシー骨組み(事業者情報・取得情報・利用目的・AI機能でのデータ取扱・第三者提供/委託・安全管理措置・保持/削除・利用者の権利・Cookie/ログ・変更・準拠法)
+- `src/app/legal/tokusho/page.tsx`: 特定商取引法に基づく表記を表形式で骨組み化(事業者名・責任者・所在地・連絡先・価格・支払・提供時期・返品/解約・動作環境・特別条件)
+- `src/app/legal/clause.tsx`: 3ページ共用の部品。`Clause`(条項セクション)と`ReviewNote`(「【要法務レビュー】」のamber破線注記)。本文は未作成で全項目にレビュー必須の注記を表示
+- `src/app/legal/layout.tsx`: max-w-3xl コンテナ + 末尾に LegalFooter(legalページ間の回遊用)
+- `src/components/legal-footer.tsx`: 新規。3ページへのリンクフッター(server component、Linkのみ)
+- `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
+- `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
+- 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
+- legal ページはリクエスト依存データを読まない完全静的のため `instant` export は不要(cacheComponents環境でもそのまま static shell 検証を通過)
+- フッターは page/layout の return 末尾・Suspense内へ追加する方式で既存行の改変ゼロを維持。AppShellに手を入れないため認証ローディング中はフッターも fallback に含まれる挙動
+- 条項本文は意図的に未作成(「要法務レビュー」注記のみ)。公開前に法務レビューで各条項を肉付けする前提
+- `app/page.tsx`・`next.config.ts`・`app-shell.tsx` はIssue指定どおり未変更
 ## 2026-11-02: リリース運用整備(Issue #85)
 - Worktree: release-ops
 - `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
@@ -1452,6 +1520,8 @@ Firebase `sendEmailVerification` によるメールアドレス確認フロー�
 - `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
 - `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm build` — 合格
 - Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
