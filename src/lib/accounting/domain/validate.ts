@@ -56,9 +56,9 @@ export const TRANSACTION_TYPES: readonly TransactionType[] = [
 
 export const TAX_CATEGORIES: readonly TaxCategory[] = [
   "taxable",
-  "nonTaxable",
+  "non_taxable",
   "exempt",
-  "outOfScope",
+  "out_of_scope",
 ];
 
 function assertNonEmptyString(value: unknown, field: string): asserts value is string {

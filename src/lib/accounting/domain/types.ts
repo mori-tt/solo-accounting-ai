@@ -1,138 +1,121 @@
+import type {
+  AuditLogEntry,
+  Customer,
+  Expense,
+  FiscalPeriod,
+  Invoice,
+  MemberRole,
+  MonthlySummary,
+  Payment,
+  Project,
+  Receipt,
+  Transaction,
+} from "../types";
 import type { ISODate, YearMonth } from "./dates";
 
-export type Role = "owner" | "editor" | "viewer";
+/**
+ * enum・プリミティブ型はルート側(../types.ts)の定義に統一し、ここでは再 export する。
+ * TaxCategory は永続化形式の snake_case(non_taxable/out_of_scope)が正。
+ */
+export type {
+  AuditAction,
+  FiscalPeriodStatus,
+  InvoiceItem,
+  InvoiceStatus,
+  ReceiptStatus,
+  TaxCategory,
+  TaxMode,
+  TransactionStatus,
+  TransactionType,
+} from "../types";
 
-export type TransactionType = "income" | "expense" | "transfer";
-export type TransactionStatus = "draft" | "confirmed" | "locked";
+export type Role = MemberRole;
 
-export type TaxCategory = "taxable" | "nonTaxable" | "exempt" | "outOfScope";
-
-export type TaxMode = "exempt" | "simple" | "standard";
-
-export type ReceiptStatus = "unprocessed" | "linked" | "archived";
-
-export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue";
-
-export type FiscalPeriodStatus = "open" | "closed";
-
-export type AuditAction = "create" | "update" | "delete" | "close";
-
-export interface TransactionEntity {
-  id: string;
-  type: TransactionType;
-  date: ISODate;
-  amount: number;
-  account: string;
-  counterparty: string;
-  description: string;
-  receiptIds: string[];
-  status: TransactionStatus;
+/**
+ * 旧世代 service.ts/store.ts 系のエンティティ型。
+ * ルート側のドキュメント型とフィールドを共有するが、タイムスタンプは
+ * ISO文字列ではなく Date、未設定値は optional ではなく null で保持する
+ * (旧世代の永続化モデルに合わせた差分のみ追加定義する)。
+ */
+export type TransactionEntity = Omit<
+  Transaction,
+  "createdAt" | "updatedAt" | "taxCategory" | "taxRate"
+> & {
   idempotencyKey: string | null;
-  createdBy: string;
   createdAt: Date;
   updatedAt: Date;
-}
+};
 
-export interface ExpenseEntity {
-  id: string;
-  transactionId: string;
-  taxCategory: TaxCategory;
-  taxAmount: number;
+export type ExpenseEntity = Omit<Expense, "paymentDueDate" | "paidAt"> & {
   paymentDueDate: ISODate | null;
   paidAt: ISODate | null;
   createdAt: Date;
   updatedAt: Date;
-}
+};
 
-export interface ReceiptEntity {
-  id: string;
-  storagePath: string;
-  fileName: string;
-  mimeType: string;
+export type ReceiptEntity = Omit<
+  Receipt,
+  "transactionId" | "createdAt" | "updatedAt"
+> & {
   transactionId: string | null;
-  status: ReceiptStatus;
   idempotencyKey: string | null;
-  createdBy: string;
   createdAt: Date;
-}
+};
 
-export interface CustomerEntity {
-  id: string;
-  name: string;
+export type CustomerEntity = Omit<
+  Customer,
+  "email" | "address" | "createdAt"
+> & {
   email: string | null;
   address: string | null;
   createdAt: Date;
   updatedAt: Date;
-}
+};
 
-export interface ProjectEntity {
-  id: string;
-  customerId: string;
-  name: string;
-  status: "active" | "done" | "archived";
+export type ProjectEntity = Omit<Project, "createdAt"> & {
   createdAt: Date;
   updatedAt: Date;
-}
+};
 
-export interface InvoiceItem {
-  description: string;
-  quantity: number;
-  unitPrice: number;
-  amount: number;
-}
-
-export interface InvoiceEntity {
-  id: string;
-  customerId: string;
+export type InvoiceEntity = Omit<
+  Invoice,
+  "projectId" | "taxAmount" | "createdAt" | "updatedAt"
+> & {
   projectId: string | null;
-  issueDate: ISODate;
-  dueDate: ISODate;
-  items: InvoiceItem[];
-  totalAmount: number;
-  status: InvoiceStatus;
   idempotencyKey: string | null;
   createdAt: Date;
   updatedAt: Date;
-}
+};
 
-export interface PaymentEntity {
-  id: string;
-  invoiceId: string;
-  date: ISODate;
-  amount: number;
+export type PaymentEntity = Omit<Payment, "transactionId" | "createdAt"> & {
   transactionId: string | null;
   idempotencyKey: string | null;
   createdAt: Date;
-}
+};
 
 export interface AccountBreakdownEntry {
   income: number;
   expense: number;
 }
 
-export interface MonthlySummaryEntity {
+export type MonthlySummaryEntity = Omit<
+  MonthlySummary,
+  "month" | "computedAt"
+> & {
   id: YearMonth;
-  totalIncome: number;
-  totalExpense: number;
-  accountBreakdown: Record<string, AccountBreakdownEntry>;
   transactionCount: number;
   computedAt: Date;
-}
+};
 
-export interface FiscalPeriodEntity {
-  id: string;
-  startDate: ISODate;
-  endDate: ISODate;
-  status: FiscalPeriodStatus;
+export type FiscalPeriodEntity = Omit<
+  FiscalPeriod,
+  "fiscalYear" | "closedAt" | "closedBy"
+> & {
   closedAt: Date | null;
   closedBy: string | null;
   createdAt: Date;
-}
+};
 
-export interface AuditLogEntity {
-  id: string;
-  actorUid: string;
-  action: AuditAction;
-  targetPath: string;
+export type AuditLogEntity = Omit<AuditLogEntry, "createdAt"> & {
   createdAt: Date;
-}
+};

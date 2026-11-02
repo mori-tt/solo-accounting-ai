@@ -1,22 +1,13 @@
-export type DomainErrorCode =
-  | "INVALID_AMOUNT"
-  | "INVALID_DATE"
-  | "VALIDATION_FAILED"
-  | "INVALID_STATE"
-  | "PERIOD_CLOSED"
-  | "NOT_FOUND"
-  | "ALREADY_EXISTS"
-  | "PAYMENT_EXCEEDS_BALANCE";
+import { DomainError } from "../errors";
 
-export class DomainError extends Error {
-  readonly code: DomainErrorCode;
-
-  constructor(code: DomainErrorCode, message: string) {
-    super(message);
-    this.name = "DomainError";
-    this.code = code;
-  }
-}
+/**
+ * DomainError はルート側(../errors.ts)の実装に統一。
+ * DomainErrorCode もルート側の union をそのまま使う
+ * (domain 固有の VALIDATION_FAILED/INVALID_STATE/ALREADY_EXISTS/
+ * PAYMENT_EXCEEDS_BALANCE はルート側 union に取り込み済み)。
+ */
+export { DomainError };
+export type { DomainErrorCode } from "../errors";
 
 export function isDomainError(error: unknown): error is DomainError {
   return error instanceof DomainError;

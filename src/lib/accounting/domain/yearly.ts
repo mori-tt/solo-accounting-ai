@@ -6,7 +6,11 @@ import {
   type ConsumptionTaxRate,
   type FilingTaxableAmounts,
 } from "./tax";
-import type { TransactionStatus, TransactionType } from "./types";
+import type {
+  TaxCategory,
+  TransactionStatus,
+  TransactionType,
+} from "./types";
 
 /**
  * 会計年度単位の集計(年次レポート・消費税区分集計)。
@@ -15,14 +19,9 @@ import type { TransactionStatus, TransactionType } from "./types";
  */
 
 /**
- * 取引の消費税区分。services 層の TaxCategory(snake_case)と同じ値。
- * domain/types.ts の同名型は旧世代の camelCase 値のため別名で定義する。
+ * 取引の消費税区分。永続化形式と同じ TaxCategory(snake_case)への別名。
  */
-export type TransactionTaxCategory =
-  | "taxable"
-  | "non_taxable"
-  | "exempt"
-  | "out_of_scope";
+export type TransactionTaxCategory = TaxCategory;
 
 /** 年次集計に必要な取引項目 */
 export interface YearlyTransaction {
