@@ -52,7 +52,8 @@ import {
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
 import { AiSuggestionCard } from "@/components/ai-suggestion-card";
-import { buildTransactionsCsv, CSV_UTF8_BOM } from "@/lib/csv";
+import { buildTransactionsCsv } from "@/lib/csv";
+import { downloadCsv } from "@/lib/download";
 import { TransactionCsvImport } from "./transaction-csv-import";
 import { TransactionForm } from "./transaction-form";
 
@@ -715,25 +716,12 @@ function TransactionsScreenInner({
           <>
             <Button
               variant="secondary"
-              onClick={() => {
-                // BOM付UTF-8でExcelでも文字化けせず開ける
-                const blob = new Blob(
-                  [
-                    CSV_UTF8_BOM +
-                      buildTransactionsCsv(
-                        data?.transactions ?? [],
-                        options,
-                      ),
-                  ],
-                  { type: "text/csv;charset=utf-8" },
-                );
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `transactions-${monthKey}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
+              onClick={() =>
+                downloadCsv(
+                  `transactions-${monthKey}.csv`,
+                  buildTransactionsCsv(data?.transactions ?? [], options),
+                )
+              }
               disabled={data === undefined}
             >
               CSV出力
