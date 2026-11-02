@@ -233,12 +233,3 @@ export async function listAuditLogsRaw(
   );
 }
 
-export async function deleteTransactionDoc(
-  businessId: string,
-  transactionId: string,
-): Promise<void> {
-  await businessDoc(getAdminDb(), businessId)
-    .collection("transactions")
-    .doc(transactionId)
-    .delete();
-}

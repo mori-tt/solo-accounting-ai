@@ -17,8 +17,10 @@ import type {
 import {
   assertDateInOpenPeriod,
   auditsFor,
+  isDateInClosedPeriod,
   newId,
   nowOf,
+  scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
 
@@ -49,7 +51,7 @@ export async function registerCustomer(
   };
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("customer", input.idempotencyKey) },
     async () => ({
       batch: {
         puts: [{ collection: "customers", id, data: customer }],
@@ -85,7 +87,7 @@ export async function registerProject(
   const id = input.id ?? newId();
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("project", input.idempotencyKey) },
     async (tx) => {
       const customer = await tx.getCustomer(businessId, input.customerId);
       if (!customer) {
@@ -134,6 +136,11 @@ export interface RegisterInvoiceInput {
   totalAmount?: number;
   /** totalAmount と同様に再計算値との一致を検証する */
   taxAmount?: number;
+}
+
+/** 請求書番号の採番形式。事業内連番を `INV-` + 6桁ゼロ埋めで表す。 */
+export function formatInvoiceNumber(seq: number): string {
+  return `INV-${String(seq).padStart(6, "0")}`;
 }
 
 /**
@@ -218,7 +225,7 @@ export async function registerInvoice(
   const at = nowOf(actor);
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("invoice", input.idempotencyKey) },
     async (tx) => {
       const periods = await tx.listFiscalPeriods(businessId);
       assertDateInOpenPeriod(issueDate, periods);
@@ -240,8 +247,21 @@ export async function registerInvoice(
         }
       }
 
+      // 請求書番号は事業ドキュメントのカウンタから連番採番する。
+      // transact 内で読み→同一バッチで書き戻すため原子的に進み、
+      // 冪等リプレイ時は work 自体が再実行されず番号を消費しない。
+      const business = await tx.getBusiness(businessId);
+      if (!business) {
+        throw new DomainError(
+          "NOT_FOUND",
+          `business ${businessId} not found`,
+        );
+      }
+      const seq = (business.invoiceCounter ?? 0) + 1;
+
       const invoice: Invoice = {
         id,
+        invoiceNumber: formatInvoiceNumber(seq),
         customerId: input.customerId,
         projectId: input.projectId,
         issueDate,
@@ -255,7 +275,14 @@ export async function registerInvoice(
       };
       return {
         batch: {
-          puts: [{ collection: "invoices", id, data: invoice }],
+          puts: [
+            { collection: "invoices", id, data: invoice },
+            {
+              collection: "businesses",
+              id: businessId,
+              data: { ...business, invoiceCounter: seq, updatedAt: at },
+            },
+          ],
           audits: auditsFor(
             businessId,
             [{ collection: "invoices", id }],
@@ -341,7 +368,7 @@ export async function registerPayment(
 
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("payment", input.idempotencyKey) },
     async (tx) => {
       const invoice = await tx.getInvoice(businessId, input.invoiceId);
       if (!invoice) {
@@ -458,6 +485,9 @@ export async function findUnpaidInvoices(
 /**
  * 発行済みで dueDate を過ぎた請求書を overdue に更新する。
  * 定期実行(job)や画面表示前のリフレッシュに使う。
+ * 発行日が締め済み期間に属する請求書は更新しない
+ * (締め済み期間のデータを変更しない。未入金・期限切れの判定自体は
+ * findUnpaidInvoices の overdue フラグで別途行える)。
  */
 export async function refreshOverdueInvoices(
   store: AccountingStore,
@@ -467,9 +497,15 @@ export async function refreshOverdueInvoices(
 ): Promise<{ updated: Invoice[] }> {
   const asOfDate = assertDateString(asOf, "asOf");
   const { value } = await store.transact(businessId, {}, async (tx) => {
-    const invoices = await tx.listInvoices(businessId);
+    const [invoices, periods] = await Promise.all([
+      tx.listInvoices(businessId),
+      tx.listFiscalPeriods(businessId),
+    ]);
     const targets = invoices.filter(
-      (i) => i.status === "issued" && i.dueDate <= asOfDate,
+      (i) =>
+        i.status === "issued" &&
+        i.dueDate <= asOfDate &&
+        !isDateInClosedPeriod(i.issueDate, periods),
     );
     const updated = targets.map((i) => ({
       ...i,

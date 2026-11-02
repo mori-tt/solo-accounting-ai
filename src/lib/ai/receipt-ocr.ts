@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ResponseInputContent } from "openai/resources/responses/responses";
+import { isReceiptStoragePathOf } from "@/lib/receipt-files";
 import { AIProcessingError, AIResponseValidationError } from "./errors";
 import { DEFAULT_OPENAI_MODEL } from "./llm-provider";
 import type { AIProvider, AIRequest } from "./provider";
@@ -250,7 +251,7 @@ export interface ReceiptOcrResolverDeps {
  * - 対象kind/receipt以外はinnerへそのまま委譲する
  * - クライアントが ocrText を指定済みの場合はそれを使う(Emulator/開発用)
  * - 未指定の場合は対象receiptのstoragePathからファイルを取得しOCRを実行する。
- *   証憑のstoragePathはサーバー登録済みの値のみ使うため、任意パス参照は起きない
+ *   storagePath は receipts/{businessId}/{receiptId}/ 接頭辞を検証してから使う
  * - OCRの失敗はAIProcessingErrorとなり、service層で needs_review として記録される
  */
 export class ReceiptOcrResolver implements AIProvider {
@@ -293,6 +294,15 @@ export class ReceiptOcrResolver implements AIProvider {
     if (!this.ocr) return "";
     const receipt = await this.getReceipt(businessId, receiptId);
     if (!receipt) {
+      throw new AIProcessingError(
+        "provider_error",
+        "receipt file unavailable",
+      );
+    }
+    // receiptドキュメントのstoragePathはクライアント書き込み可能な値。
+    // 他businessId配下やバケット内任意オブジェクトへの参照を防ぐため、
+    // サーバー登録形式(receipts/{businessId}/{receiptId}/)を強制する(R2-1)
+    if (!isReceiptStoragePathOf(receipt.storagePath, businessId, receiptId)) {
       throw new AIProcessingError(
         "provider_error",
         "receipt file unavailable",

@@ -256,6 +256,9 @@ export class MemoryStore implements AccountingStore {
     }
 
     const { batch, value } = await work(this);
+    for (const del of batch.deletes ?? []) {
+      this.docs.delete(this.key(businessId, del.collection, del.id));
+    }
     for (const put of batch.puts) {
       this.docs.set(this.key(businessId, put.collection, put.id), clone(put.data));
     }

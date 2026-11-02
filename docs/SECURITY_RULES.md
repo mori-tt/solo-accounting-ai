@@ -31,6 +31,9 @@ Firebase Security Rules(Firestore / Storage)の方針。
 - `members` 自身の書き込みはownerのみ許可する(権限昇格防止)
   - 例外: business作成と同一バッチで、作成者本人を`owner`として登録する
     ブートストラップのみ許可(`getAfter()`で`ownerUid`を検証)
+  - 基点owner(`ownerUid`)のmemberドキュメントはクライアントから変更・削除不可。
+    rulesではowner数を数えられないため、最後のowner判定(複数owner・
+    フォールバックを含む実効owner数の確認)はアプリ層のServer Actionが担う
 - editorのdelete「制限あり」の具体化:
   - transactions: `status='draft'` のみ削除可
   - invoices: `status='draft'` のみ削除可
@@ -49,6 +52,9 @@ Firebase Security Rules(Firestore / Storage)の方針。
   update/deleteを拒否する
 - `status` を `locked` に変更する操作自体もクライアントからは不可(Admin SDKのみ)
 - `receipts` は紐付くTransactionがlockedならupdate/deleteを拒否する
+- `invoices` は `issueDate`、`payments` は `date` が締め済み期間に属する場合
+  create/update/deleteを拒否する(期間IDは business の `fiscalYearStartMonth`
+  から `fy{会計年度}` を導出。締め後の正当な更新はAdmin SDK経由のため影響しない)
 - `fiscalPeriods` の作成・更新(締め)はownerのみ。`closed` になった期間は
   クライアントから再オープン・削除不可
 - `closingChecks` の `fiscalPeriodId` / `type` / `targetPath` は作成後に変更不可

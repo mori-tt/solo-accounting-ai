@@ -54,6 +54,30 @@ describe("registerFixedAsset", () => {
     expect(saved?.name).toBe("複合機");
   });
 
+  it("取得日が締め済み期間の資産は登録できない", async () => {
+    const { store, businessId, actor } = await setupStore();
+    await seedClosedPeriod(store, businessId, {
+      id: "fy2025",
+      fiscalYear: 2025,
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    });
+    await expect(
+      registerFixedAsset(store, businessId, actor, {
+        idempotencyKey: "fa-closed",
+        ...base,
+        acquiredDate: "2025-06-01",
+      }),
+    ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+    // 期間外なら登録できる
+    const ok = await registerFixedAsset(store, businessId, actor, {
+      idempotencyKey: "fa-open",
+      ...base,
+      acquiredDate: "2026-01-10",
+    });
+    expect(ok.asset.status).toBe("active");
+  });
+
   it("不正な値を拒否する", async () => {
     const { store, businessId, actor } = await setupStore();
     const cases: [Partial<typeof base>, string][] = [
@@ -151,6 +175,60 @@ describe("updateFixedAsset / disposeFixedAsset", () => {
     await expect(
       disposeFixedAsset(store, businessId, actor, "missing", "2026-01-01"),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("締め済み期間の資産は更新・除却できない", async () => {
+    const { store, businessId, actor, asset } = await makeAsset();
+    await seedClosedPeriod(store, businessId, {
+      id: "fy2025",
+      fiscalYear: 2025,
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    });
+    // 既存の取得日がclosed期間内 → 更新拒否
+    await expect(
+      updateFixedAsset(store, businessId, actor, asset.id, base),
+    ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+    // 翌年取得の資産をclosed期間の取得日へ書き換えるのも拒否
+    const { asset: later } = await registerFixedAsset(
+      store,
+      businessId,
+      actor,
+      {
+        idempotencyKey: "fa-later",
+        ...base,
+        acquiredDate: "2026-02-01",
+      },
+    );
+    await expect(
+      updateFixedAsset(store, businessId, actor, later.id, {
+        ...base,
+        acquiredDate: "2025-06-01",
+      }),
+    ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+    // 除却日がclosed期間内 → 除却拒否(取得日より後でclosed期間内の日付が必要)
+    const { asset: older } = await registerFixedAsset(
+      store,
+      businessId,
+      actor,
+      {
+        idempotencyKey: "fa-older",
+        ...base,
+        acquiredDate: "2024-06-01",
+      },
+    );
+    await expect(
+      disposeFixedAsset(store, businessId, actor, older.id, "2025-06-01"),
+    ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+    // 除却日が期間外なら除却できる
+    const { asset: disposed } = await disposeFixedAsset(
+      store,
+      businessId,
+      actor,
+      later.id,
+      "2026-03-01",
+    );
+    expect(disposed.status).toBe("disposed");
   });
 });
 

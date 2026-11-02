@@ -105,13 +105,19 @@ export interface PutOp {
   data: unknown;
 }
 
+export interface DeleteOp {
+  collection: CollectionName;
+  id: string;
+}
+
 /**
  * 1コマンド分の原子書き込み。
- * puts と audits は同一トランザクションで適用される。
+ * puts・deletes・audits は同一トランザクションで適用される。
  */
 export interface CommitBatch {
   puts: PutOp[];
   audits: AuditLogEntry[];
+  deletes?: DeleteOp[];
 }
 
 export interface TransactResult<T> {

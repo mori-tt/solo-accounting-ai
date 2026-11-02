@@ -28,7 +28,17 @@ export const CSV_UTF8_BOM = "\uFEFF";
 
 // ---------- 生成 ----------
 
+/**
+ * スプレッドシートの数式解釈を防ぐ危険な先頭文字。
+ * `=` `+` `-` `@` とタブ・改行(行内式注入)を `'` プレフィックスで無害化する
+ * (取引先・摘要などのユーザー入力がセル先頭に来た場合のCSVインジェクション対策)。
+ */
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
 function escapeField(value: string): string {
+  if (FORMULA_PREFIX.test(value)) {
+    value = `'${value}`;
+  }
   if (/[",\r\n]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
   }

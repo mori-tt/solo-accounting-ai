@@ -10,7 +10,10 @@ import {
   OTHER_BIZ,
   OUTSIDER,
   OWNER,
+  receipt,
+  seed,
   seedBusiness,
+  tx,
   VIEWER,
   createTestEnv,
 } from "./helpers";
@@ -126,9 +129,62 @@ describe("ファイル制限", () => {
     for (const [file, contentType] of [
       ["a.jpg", "image/jpeg"],
       ["a.webp", "image/webp"],
+      ["a.heic", "image/heic"],
+      ["a.heif", "image/heif"],
       ["a.pdf", "application/pdf"],
     ] as const) {
       await assertSucceeds(put(storage, path(BIZ, file), png, contentType));
     }
+  });
+});
+
+describe("証憑docの状態による既存ファイルの保護(R2-8)", () => {
+  const rDoc = (id: string) => `businesses/${BIZ}/receipts/${id}`;
+  const rPath = (id: string, file = "f.png") => `receipts/${BIZ}/${id}/${file}`;
+
+  // クロスサービス参照(firestore.get)はmemberDocと同じタイミングで
+  // 作成しておく必要がある(直前の書き込みが照会に間に合わないことがある)
+  beforeEach(async () => {
+    await seed(testEnv, {
+      [rDoc("r-unproc")]: receipt("unprocessed", "r-unproc"),
+      [rDoc("r-linked")]: receipt("linked", "r-linked"),
+      [rDoc("r-arch")]: receipt("archived", "r-arch"),
+      [`businesses/${BIZ}/transactions/tx-locked`]: tx("locked"),
+      [rDoc("r-lockedtx")]: {
+        ...receipt("linked", "r-lockedtx"),
+        transactionId: "tx-locked",
+      },
+    });
+  });
+
+  it("証憑docが未登録のファイルは上書き・削除できる", async () => {
+    await seedFile(rPath("r-free"));
+    const storage = userStorage(EDITOR);
+    await assertSucceeds(put(storage, rPath("r-free"), png, "image/png"));
+    await assertSucceeds(storage.ref(rPath("r-free")).delete());
+  });
+
+  it("未処理の証憑は上書き・削除できる", async () => {
+    await seedFile(rPath("r-unproc"));
+    const storage = userStorage(EDITOR);
+    await assertSucceeds(put(storage, rPath("r-unproc"), png, "image/png"));
+    await assertSucceeds(storage.ref(rPath("r-unproc")).delete());
+  });
+
+  it("処理済み(linked/archived)の証憑は上書き・削除できない", async () => {
+    await seedFile(rPath("r-linked"));
+    await seedFile(rPath("r-arch"));
+    const storage = userStorage(EDITOR);
+    await assertFails(put(storage, rPath("r-linked"), png, "image/png"));
+    await assertFails(storage.ref(rPath("r-linked")).delete());
+    await assertFails(put(storage, rPath("r-arch"), png, "image/png"));
+    await assertFails(storage.ref(rPath("r-arch")).delete());
+  });
+
+  it("締め済みtransactionに紐付く証憑は上書き・削除できない", async () => {
+    await seedFile(rPath("r-lockedtx"));
+    const storage = userStorage(OWNER);
+    await assertFails(put(storage, rPath("r-lockedtx"), png, "image/png"));
+    await assertFails(storage.ref(rPath("r-lockedtx")).delete());
   });
 });
