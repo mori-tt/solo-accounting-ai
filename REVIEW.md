@@ -1354,9 +1354,32 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: 初回セットアップウィザード(Issue #80)
+- Worktree: onboarding
+### 実装内容
+`app/(app)/onboarding/` に5ステップのセットアップウィザードを新設。事業情報(事業名+課税方式)→会計年度開始月→期首残高(現金/預金/売掛金プリセット)→勘定科目確認→完了の順に案内し、既存 Server Action(`createBusiness`/`updateBusinessSettings`/`getOpeningBalances`/`saveOpeningBalances`)をそのまま再利用した。actions/types の改変なし。
+- `onboarding-screen.tsx`: クライアント側のステップマシン。各入力は null=未編集のドラフト方式で既存 `business` 値を初期表示に使う(opening-balances画面と同パターン)
+- 事業情報+開始月はステップ2の「次へ」時点でまとめて保存。事業なし=`createBusiness`(idempotencyKey付き)、既存事業=差分があるときのみ `updateBusinessSettings`(無変更なら呼ばず監査ログを汚染しない)
+- 期首残高は保存対象年度(開始月から `fiscalPeriodOf(today)` で導出)のプリセット3科目のみ入力で置き換え、それ以外の既存レコードは `saveOpeningBalances` の全置換仕様に合わせて維持マージ。未入力科目は登録しない。入力なし・削除対象なしなら呼び出し自体を省略。全空でも「後で設定する」でスキップ可
+- 勘定科目ステップは `getAccountOptions` で標準+カスタム科目を種別グループの Badge 表示(確認のみ、編集は勘定科目画面へのリンクで誘導)
+- 完了ステップは設定内容のサマリ(事業名/課税方式/開始月/期首残高件数)とダッシュボード導線
+- `savedBusiness` state で作成済み事業IDと最終保存入力を保持し、戻る→次への再実行や context 反映前の遅延でも事業の二重作成を防止
+- 既存事業で非オーナーは実行不可(business-delete と同じ警告ガード)。`businessId` 解決前は LoadingBlock
+- `dashboard-screen.tsx`: PageHeader の `actions` に `/onboarding` への「セットアップウィザード」リンク1箇所を追加
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(初回は `MyBusiness.taxMode` が string 型のため `Record<TaxMode,string>` の index エラー。ラベル map を `Record<string,string>` に修正)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格(/onboarding ルート生成を確認)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。既存actionの呼び出しのみ)
+### 設計上の判断・備考
+- 事業0件のユーザーは app-shell の `BusinessOnboarding` が children を覆うため現状このページへは到達しないが、ステップ仕様(事業作成)に合わせ createBusiness 経路も実装済み(shell側からの直接リンク追加等でそのまま使える)
+- 期首残高ステップの年度は現在日付を含む会計年度に自動決定(初期セットアップ用途のため年度選択UIは設けず)。締め済み年度の不変条件は `saveOpeningBalances` 側の既存チェックに委譲
+- `businessSchema.pick({name,taxMode})` でステップ0の先行検証を行い、開始月の検証は保存時にまとめる(未表示フィールドのエラーを先出ししないため)
+- E2E・単体テストのウィザードカバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)
 ## 2026-11-02: LP/SEO整備(Issue #81)
 - Worktree: lp-seo
-### 実装内容
 - `src/app/page.tsx`: サーバーredirectのみだった `/` をランディングページに刷新。構成はヒーロー(キャッチコピー・CTA・画面イメージのCSSモック)/機能紹介6項目/安心設計3項目/利用手順3ステップ/CTAバンド/フッタ。日本語・Tailwindで、アプリ本体と同じ indigo/zinc 配色とダークモード対応に統一
 - リダイレクト挙動: ログイン済みで `/` を開いた場合は引き続き `/dashboard` へ戻す。新設 `src/app/auth-redirect.tsx` が `useApp().status === "signed_in"` で `router.replace`(login-screenと同パターン)。未ログインはLPを表示し、CTAから `/login` へ進む導線に変更(旧: サーバー `redirect("/dashboard")` 固定)
 - `src/app/layout.tsx`: metadata整備。`metadataBase`・title template(`%s | Solo Accounting AI`)・`applicationName`・Open Graph(ja_JP/website)・Twitter summary card を追加
@@ -1366,15 +1389,10 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `src/app/manifest.ts` 新設: name/description/`lang: "ja"`/theme_color `#4f46e5` + `/app-icon.svg` アイコン
 - `src/app/icon.svg` 新設、`src/app/favicon.ico` 削除(create-next-app既定のNextロゴをブランドSVGに置換)。manifest用に `public/app-icon.svg`(512px viewBox)も配置
 - フッタに `/legal/terms`・`/legal/privacy`・`/legal/tokusho` リンク追加(ルート本体は別タスク)
-### 実行したテスト
-- `pnpm install --frozen-lockfile` — 成功
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
-- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格(`/` は static プリレンダ、`/robots.txt` `/sitemap.xml` `/manifest.webmanifest` `/icon.svg` 生成確認)
 - `next start` で実レスポンス確認 — `/` 200・title/description/canonical/OGタグ・manifest link 出力、robots/sitemap XML・manifest JSON・icon.svg(200, image/svg+xml)を目視確認
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
-### 設計上の判断・備考
 - 「既存リダイレクト挙動は保持」の解釈: 旧実装の無条件 `redirect("/dashboard")` を残すとLP自体が表示されないため、「ログイン済みユーザーはアプリへ戻る」側を保持し、未ログインにはLPを表示する構成とした
 - e2e/home.spec.ts(「未認証で `/` → `/login`」を期待)は本変更で失敗する。touch範囲外のため未修正。未認証時の `/` 到達先がLPへ変わる仕様変更のため、別タスクでspec更新が必要
 - robots の disallow は (app) ルートグループのパスを列挙する方式(URLプレフィックスを持たないため allow/deny の優先度ルールに頼れない)。アプリ画面追加時は PRIVATE_PATHS への追記が必要
