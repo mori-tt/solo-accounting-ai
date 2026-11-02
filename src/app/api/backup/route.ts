@@ -1,3 +1,4 @@
+import { FieldValue } from "firebase-admin/firestore";
 import { writeAuditLog } from "@/lib/api/queries";
 import {
   backupExportRateLimiter,
@@ -11,6 +12,7 @@ import {
   restoreBusinessBackup,
 } from "@/lib/backup";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { captureException } from "@/lib/monitoring";
 
 /** 復元リクエストのJSONボディ上限(暴走防止。証憑メタのみのため十分な上限) */
 const MAX_BACKUP_BODY_BYTES = 64 * 1024 * 1024;
@@ -31,6 +33,16 @@ export async function GET(request: Request) {
     // 全データ読み出しの重い処理のため businessId 単位で制限
     backupExportRateLimiter.consume(businessId);
     const backup = await exportBusinessBackup(getAdminDb(), businessId);
+    // 最終バックアップ日時を記録(ダッシュボードの鮮度アラート用)。
+    // 記録の失敗でダウンロード自体を落とさないため別tryで捕捉する
+    try {
+      await getAdminDb()
+        .collection("businesses")
+        .doc(businessId)
+        .update({ lastBackupAt: FieldValue.serverTimestamp() });
+    } catch (e) {
+      captureException(e, { tags: { feature: "backup" } });
+    }
     const date = backup.exportedAt.slice(0, 10);
     return new Response(JSON.stringify(backup), {
       headers: {

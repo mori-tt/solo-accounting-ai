@@ -1588,3 +1588,29 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - Firebase Emulator tests — 実施せず(rules・データ書き込み経路の変更なし。加えて別worktreeの Emulator が port 8080/9199/4400 を占有中で AGENTS.md の1系統制約により起動不可)
 ### 備考
 - 表示は `v1.0.0` 形式で統一。server component(LegalFooter・LP)と client component(settings)双方から import するが、version.ts は依存ゼロのため問題なし
+## 2026-11-02: 配線/運用の後始末(Issue #99 項目2-5)
+- Worktree: wiring-ops(項目1のversion表示は別コミットで対応済)
+### 監視配線(項目2)
+- `src/lib/api/result.ts`: `toActionError` の想定外エラー分岐(INTERNAL化する落口)で `captureException(e, { tags: { source: "api-error-path" } })` を呼ぶよう配線。Route Handler の `toErrorResponse` と Server Action の `run` の双方がこの関数へ集約されるため1箇所でカバー。ApiError/DomainError 等の想定内エラーは捕捉しない(ユーザー起因の失敗を監視通知しない)
+- `src/app/error.tsx`・`src/app/(app)/error.tsx`: `useEffect` 内の `console.error` を `captureException` へ置換。context は `tags.boundary`(root-error/app-error)と `extra.digest`(サーバーログ対応付け用識別子)のみで個人情報・証憑内容は含めない
+- monitoring層は process.env ポリフィル(クライアントでは空オブジェクト、env.ts のコメント参照)前提でクライアントバンドル入りしても安全。SENTRY_DSN 未設定時は構造化ログへフォールバックする従来動作のまま
+- `global-error.tsx` は Issue 指定の「error.tsx×2」外のため未変更(ルートレイアウト崩壊時の最終境界。今後の拡張候補)
+### dev dep 監査(項目3)
+- `pnpm ls @testing-library/dom` で direct devDependency だが import は全て `@testing-library/react` 経由と確認。pnpm は peer dependency を自動導入するため直接指定は不要と判断し `pnpm remove` で package.json/pnpm-lock.yaml から除去。除去後も lockfile 整合・全テスト合格(10.4.2 は react の peer として引き続き解決される)
+### バックアップ鮮度アラート(項目4)
+- `Business`/`MyBusiness` に `lastBackupAt?: string` を追加し `listMyBusinesses` で populate
+- `GET /api/backup`: エクスポート成功後に business doc へ `lastBackupAt: FieldValue.serverTimestamp()` を記録。ダウンロード本体を落とさないよう別 try/catch + captureException(feature: backup)でベストエフォート化
+- `src/lib/backup.ts`: `backupFreshness(lastBackupAt, now)` を追加。never(未取得/不正日付・安全側)/stale(30日超過)/fresh を返す純粋関数。`BACKUP_STALE_DAYS = 30`
+- ダッシュボード: `business` ロード済みかつ never/stale の場合に警告Alert+/backupリンクを表示(business未取得の一瞬に誤警告しないよう undefined は保留)。backup.test.ts に freshness テスト3件追加
+- `docs/FIRESTORE_SCHEMA.md`: businesses テーブルに lastBackupAt 行を追記
+### CI Emulator キャッシュ(項目5)
+- `.github/workflows/ci.yml` test-rules ジョブに `actions/cache@v4` で `~/.cache/firebase/emulators` をキャッシュ(key は pnpm-lock.yaml ハッシュ+restore-keys フォールバック)。Emulator JAR ダウンロード時間を CI から除去
+### 実行したテスト
+- `pnpm lint` — 合格(既存 `<img>` warning 1件のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(45ファイル542件、skip 10。backupFreshness +3)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(rules・データ経路の rules 非依存変更のみ。別 worktree の Emulator が port 占有中で AGENTS.md の1系統制約により起動不可)
+### 備考
+- lastBackupAt は `*At` 接尾辞のため store 経由の書き込みでは `toStore` が Timestamp 化するが、今回は FieldValue.serverTimestamp() を直接書くため型不整合なし(FIRESTORE_SCHEMA.md も Timestamp で記載)
+- エクスポートJSONの business 部分には直前の lastBackupAt が含まれうるが、復元時は name/fiscalYearStartMonth/taxMode のみ適用されるため書き戻されない

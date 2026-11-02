@@ -44,6 +44,8 @@ export interface MyBusiness {
   customAccounts?: CustomAccount[];
   /** 家事按分の事業割合(科目コード→0-100)。未設定科目は100%扱い */
   allocationRatios?: Record<string, number>;
+  /** 最終バックアップ(エクスポート)日時。未取得は undefined */
+  lastBackupAt?: string;
 }
 
 /** ログインユーザーが所属する事業一覧 */
@@ -75,6 +77,7 @@ export async function listMyBusinesses(): Promise<
         taxMode: business.taxMode,
         customAccounts: business.customAccounts,
         allocationRatios: business.allocationRatios,
+        lastBackupAt: business.lastBackupAt,
       });
     }
     return result;

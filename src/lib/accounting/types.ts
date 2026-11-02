@@ -60,6 +60,8 @@ export interface Business {
   allocationRatios?: Record<string, number>;
   /** 年度ごとの期首残高(資産系科目+任意コード)。未設定は空扱い */
   openingBalances?: OpeningBalance[];
+  /** 最終バックアップ(エクスポート)日時。未取得は undefined */
+  lastBackupAt?: string;
   createdAt: string;
   updatedAt: string;
 }

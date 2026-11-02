@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BACKUP_VERSION,
   backupFileSchema,
+  backupFreshness,
   planRestore,
   summarizeBackup,
   type ParsedBackupFile,
@@ -311,5 +312,32 @@ describe("planRestore", () => {
     const result = plan(backup);
     expect(result.writes).toHaveLength(1);
     expect(result.writes[0].collection).toBe("transactions");
+  });
+});
+
+describe("backupFreshness", () => {
+  const NOW = new Date("2026-11-02T00:00:00.000Z").getTime();
+
+  it("未取得(undefined)は never", () => {
+    expect(backupFreshness(undefined, NOW)).toBe("never");
+  });
+
+  it("不正な日付文字列は安全側で never", () => {
+    expect(backupFreshness("not-a-date", NOW)).toBe("never");
+  });
+
+  it("30日以内は fresh、30日超過は stale", () => {
+    expect(
+      backupFreshness("2026-10-10T00:00:00.000Z", NOW),
+    ).toBe("fresh");
+    expect(
+      backupFreshness("2026-10-03T00:00:00.000Z", NOW),
+    ).toBe("fresh");
+    expect(
+      backupFreshness("2026-10-02T00:00:00.000Z", NOW),
+    ).toBe("stale");
+    expect(
+      backupFreshness("2026-01-01T00:00:00.000Z", NOW),
+    ).toBe("stale");
   });
 });
