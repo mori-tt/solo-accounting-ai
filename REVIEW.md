@@ -2323,3 +2323,42 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   - firestore.rules 変更なし(追加は読み取り経路のみ・サーバー側Admin SDK)
   - getDashboard に getBusiness+listFixedAssets の読み取り2件を追加。
     listFixedAssets は status+取得日の既存複合indexを利用
+
+## 2026-11-02: Dependabotグループ化 + 法務E2E flaky修正(Issue #144)
+- Worktree: ops-guard
+### 実装内容
+- `.github/dependabot.yml` に `groups` を追加
+  - npm: `react`(react/react-dom/@types/react/@types/react-dom。分離PRで
+    片方のみ更新→実行時不整合となる事故 #127 の再発防止が本Issue主目的)、
+    `next`(next+eslint-config-next。同一リポジトリから同バージョンで
+    リリースされるため併せて更新)、`eslint`、`firebase`(firebase*+
+    @firebase/*)、`test`(vitest/playwright/testing-library/jsdom/
+    @vitejs/*)、`tailwind` の6グループ
+  - github-actions: `actions`(`*`で全Actions更新を1PRに集約)
+  - グループ非該当の依存(typescript/openai/zod等)は従来通り個別PR
+- `e2e/legal.spec.ts` の「法務ページ間をフッターナビで回遊できる」flaky修正
+  (CIで3回 click timeout)
+### 原因分析(flaky)
+- AppProvider が root layout にマウントされるため /legal/* でも
+  `connectAuthEmulator` が走り、`.firebase-emulator-warning` バナーは
+  Emulator接続完了後に「非同期」で body へ挿入される
+- 旧 `removeEmulatorBanner` は呼出時点の既存要素しか除去しないため、
+  除去→クリックの隙間にバナーが挿入されると actionability チェック
+  (ポインタイベント遮蔽)が15sリトライしても回復せず click timeout。
+  低速なCIでのみ顕在化するレースコンディションだった
+### 対応
+- `suppressEmulatorBanner` に改名し、既存要素の除去に加えて
+  `page.addStyleTag` で `.firebase-emulator-warning{display:none!important}`
+  を注入。挿入タイミング非依存で遮蔽を防ぐ(CSPは style-src 'unsafe-inline'
+  のため適用可)
+- 回遊テスト: nav・各リンクの `toBeVisible` 待機を追加し、遷移ごとに
+  遷移先 heading の描画確認を挟んでから次のリンクを操作
+- ログイン画面フッター遷移テストも同レースを持つため同関数を適用し、
+  goBack後に legalNav の再描画待機を追加
+### Checks
+- `pnpm lint` — 合格(0 errors、既存warning1件: receiptsの<img>)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(61ファイル757件、skip 10)
+- `pnpm build` — 合格
+- E2E(legal.spec.ts, Firebase Emulator + JAVA_HOME=openjdk@21, E2E_PORT=3100)
+  — 合格(5件 + `--repeat-each=3` で15件連続合格)
