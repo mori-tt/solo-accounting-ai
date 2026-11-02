@@ -10,7 +10,12 @@ import {
   type ActorContext,
 } from "./common";
 
-const TAX_MODES: readonly TaxMode[] = ["exempt", "simple", "standard"];
+const TAX_MODES: readonly TaxMode[] = [
+  "exempt",
+  "simple",
+  "standard",
+  "special20",
+];
 
 /** 適格請求書発行事業者の登録番号(T+13桁) */
 const INVOICE_REGISTRATION_NUMBER = /^T\d{13}$/;
