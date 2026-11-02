@@ -1354,9 +1354,31 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: 監視基盤(Issue #83)
+- Worktree: observability
+### 実装内容
+- `src/lib/monitoring/` 新設: エラー監視抽象層と構造化ログ。Sentry SDK本体は入れず抽象層のみ
+  - `types.ts`: `MonitoringProvider`(captureException/captureMessage)、`MonitoringLevel`、`CaptureContext`(tags/extra)
+  - `logger.ts`: JSON 1行の構造化ロガー。fieldsはスカラーのみ受理し、PII・証憑・認証情報を示唆するキー名はdenylistで除去(redactedKeysにキー名のみ記録)。値のメールアドレス様文字列はマスク・長文は打切り。`LOG_LEVEL`で最小レベル制御(省略時info、呼出毎に遅延評価)。sink/clock差替え可能
+  - `provider.ts`: `createMonitoringProvider`で選択。`SENTRY_DSN`設定時は「SDK未同梱」の警告のみ出しconsoleフォールバック(DSN値自体は出力しない)、未設定時もconsoleフォールバック+外部配送no-op。`NoopMonitoringProvider`はテスト注入用
+  - `index.ts`: `captureException`/`captureMessage`公開API。プロバイダ例外を握りつぶし、監視経路の障害で本体処理を落とさない。`setMonitoringProviderForTest`/`resetMonitoringForTest`付き
+- `src/app/api/health/route.ts` 新設: 認証不要の生存確認GET。cacheComponents環境のため`connection()`でビルド時プリレンダを抑止し毎リクエスト実行。`checks.db`は`FIRESTORE_EMULATOR_HOST`設定時のみ遅延importしたadmin SDKの`listCollections()`(1秒timeout)で疎通試行、未設定時は"skipped"。疎通失敗はchecks.db="error"+warn構造化ログで表現しHTTP 200のまま返す(livenessはプロセス応答性のみ保証し、DB障害による再起動ループを誘発しない)
+- `.env.example` 末尾に `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN`/`LOG_LEVEL` を追記(末尾追記のみ)
+- 他のapi・ページ・next.configは未変更。既存ルートへの監視配線は本Issue範囲外
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(46ファイル中43実行535件、skip 10。monitoring/logger/healthの新規テスト含む)
+- `pnpm build` — 合格(`/api/health` が Dynamic ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+### 設計上の判断・備考
+- PIIフィルタは多層防御であり、呼び出し側が個人情報・証憑内容をmsg/contextへ入れない設計が前提(AGENTS.md準拠)。denylistは誤検知で安全側に倒し、name/token/email/証憑関連キーを広めに除去。`businessId`等の識別子・`route`/`op`等の運用メタは通す
+- 構造化ログはfieldsをエントリへ平準化し、予約キー(level/msg/ts/err/redactedKeys)衝突は除去対象。`logger.error`と別に`logger.exception(msg, error, fields)`を設けError畳込みを明示化
+- `connection()`はリクエストストア外でthrowするため、route.test.tsでは`next/server`と`@/lib/firebase/admin`をvi.mockして疎通3分岐(skipped/ok/error)を検証
+- Sentry導入タスクでの拡張点は`createMonitoringProvider`(DSN設定時に実SDK初期化のプロバイダを返す)。`NEXT_PUBLIC_SENTRY_DSN`はクライアント捕捉の将来用で現状未使用
 ## 2026-11-02: 法務ページ(Issue #79)
 - Worktree: legal-pages
-### 実装内容
 公開用の法務3ページをプレースホルダー骨組みとして新設し、アプリ各面の末尾から辿れるリンクフッターを設置。
 - `src/app/legal/terms/page.tsx`: 利用規約の条項骨組み(適用・定義・登録・サービス内容・AI提案の性質・料金・禁止事項・データ取扱・知財・免責・変更/停止・解約・規約変更・準拠法/管轄・附則)。AI提案は確定仕訳ではなく利用者の最終判断が必要、税務・会計助言ではない旨の構造を確保
 - `src/app/legal/privacy/page.tsx`: プライバシーポリシー骨組み(事業者情報・取得情報・利用目的・AI機能でのデータ取扱・第三者提供/委託・安全管理措置・保持/削除・利用者の権利・Cookie/ログ・変更・準拠法)
@@ -1366,14 +1388,10 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `src/components/legal-footer.tsx`: 新規。3ページへのリンクフッター(server component、Linkのみ)
 - `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
 - `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
 - `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
-### 設計上の判断・備考
 - 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
 - legal ページはリクエスト依存データを読まない完全静的のため `instant` export は不要(cacheComponents環境でもそのまま static shell 検証を通過)
 - フッターは page/layout の return 末尾・Suspense内へ追加する方式で既存行の改変ゼロを維持。AppShellに手を入れないため認証ローディング中はフッターも fallback に含まれる挙動
