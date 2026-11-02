@@ -275,7 +275,11 @@ service cloud.firestore {
           && d.fileName is string
           && d.mimeType in ['image/jpeg', 'image/png', 'image/webp',
                             'image/heic', 'image/heif', 'application/pdf']
-          && d.status in ['unprocessed', 'linked', 'archived'];
+          && d.status in ['unprocessed', 'linked', 'archived']
+          // 電帳法の検索要件用メタデータ(任意)。設定する場合は型を検証する
+          && (!('transactionDate' in d) || dateString(d.transactionDate))
+          && (!('amount' in d) || d.amount is int)
+          && (!('counterparty' in d) || d.counterparty is string);
       }
 
       // ---------- customers ----------

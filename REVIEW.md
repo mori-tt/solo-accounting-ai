@@ -96,6 +96,42 @@
 - `inventoryCounts` の復元は FIXED_ID_COLLECTIONS で既存維持skipとなるため、
   別事業への復元で棚卸カウントを引き継ぐには新しい年度環境である必要がある
 - Emulator利用: `JAVA_HOME` 設定後 `test:rules`/`test:emulators` を実行(ポート衝突なし)
+## 2026-11-02: 電子帳簿保存法コンプライアンス・e-Tax連携可否調査(Issue #135)
+- Worktree: compliance
+### 調査: 電帳法要件との比較(詳細は docs/ELECTRONIC_BOOKKEEPING.md)
+| 要件 | 状況 |
+|---|---|
+| 検索(取引年月日・金額・取引先) | 帳簿側(`/search`)は既存で対応。証憑側はメタデータがなかったため本Issueで追加 |
+| 訂正削除履歴 | append-only監査ログで既に対応。識別情報のみ記録(内容スナップショットなし)で要件上は「履歴を確認できるシステム」として機能。CSVエクスポートを本Issueで追加 |
+| タイムスタンプ | システム時刻(Firestore Timestamp、監査ログはrequest.time±1h検証)。認定タイムスタンプは未対応だが訂正削除履歴システム措置で代替可 |
+| ダウンロードの求め | JSONバックアップ・取引CSVは既存。証憑一覧CSV・監査ログCSVを追加。証憑ファイル一括DLは残ギャップ |
+| 優良電子帳簿 | 検索・履歴要件は概ね充足だが「すべての国税関係帳簿の備付け」等の確認が必要で認定取得支援はスコープ外 |
+- `Receipt`型に検索要件メタデータ `transactionDate`/`amount`/`counterparty`(いずれもoptional)を追加。紐付け(`linkReceipt`)時に取引値をコピー
+- `services/receipts.ts` に `updateReceiptMetadata` を追加(冪等再実行許容、紐付取引が締め済み期間ならPERIOD_CLOSED拒否、監査ログ `update` 記録)
+- `actions/receipts.ts` に `updateReceiptMetadataAction`(requireEditor+zod再検証)を追加
+- `firestore.rules`: `validReceipt` にメタデータ3項目の型検証追加(transactionDate: YYYY-MM-DD文字列、amount: int>=0、counterparty: string)。rules test に検証ケース追加
+- `src/lib/receipt-search.ts`(新規): 証憑フィルタの純粋関数(キーワード=ファイル名/証憑メタデータ/紐付取引の摘要・取引先・金額、取引日範囲=証憑メタデータと紐付取引日の両方を対象)
+- `csv.ts` に `buildReceiptsCsv`/`RECEIPT_CSV_HEADER` 追加(既存 serializeCsv 経由で数式注入対策済み)
+- `audit-log-view.ts` に `buildAuditLogCsv`/`AUDIT_LOG_CSV_HEADER`/`AuditLogCsvEntry` 追加(識別情報のみ: 日時・実行者・操作・対象種別・対象パス・概要。証憑内容を含まない)
+- `/receipts`: キーワード+取引日範囲フィルタ、証憑ごとのメタデータ表示・編集フォーム(紐付取引ロック時は無効化)、フィルタ済み一覧のCSV出力ボタン
+- `/audit-log`: 表示中フィルタ済みログのCSV出力ボタン(全件・ページングなし)
+- `docs/FIRESTORE_SCHEMA.md`: receipts のメタデータ3フィールド追記
+- `docs/ELECTRONIC_BOOKKEEPING.md`(新規): 電帳法要件マッピング・残ギャップ
+- `docs/ETAX.md`(新規): e-Tax連携可否調査
+### e-Tax連携の可否(詳細は docs/ETAX.md)
+**アプリ単体での実装不可。** 理由:
+1. e-Tax公式API(HTTP・APIキーはNTAへ申請制)は参照系のみ(登録済み基本情報・税目情報・受信データ参照)。「認証や申告等データ送信はAPI一覧にない操作で対応していない」と公式明記
+2. 申告送信は受付システムIF仕様書+帳票XML仕様書への自前対応が必要(仕様書は所得税関係だけで約8MB)
+3. 申告送信には利用者の電子署名(電子証明書: マイナンバーカード等)が必須で、ブラウザアプリ単体ではICカードへアクセスするローカル署名コンポーネントが実現できない
+代替手段: `/reports/filing` 集計の確定申告書等作成コーナー転記、CSV/JSONバックアップの税理士・他ソフト受け渡し、証憑/監査ログCSVの資料化。REQUIREMENTS.mdのスコープ外記載と整合
+- `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
+- `pnpm test` — 合格(52ファイル635件、skip 10。`receipt-search.test.ts` 9件、`buildReceiptsCsv` 3件、`buildAuditLogCsv` 2件、`updateReceiptMetadata` 5件を含む新規)
+- `pnpm build` — 合格
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル112件。receiptメタデータ検証ケース含む)
+- 証憑メタデータは紐付け時点のスナップショットであり取引編集に自動追従しない(検索は両方の値を対象とするため探索可能性は維持)。追従が必要になった場合は紐付取引の更新フックで連動させる設計変更を検討
+- 監査ログCSVは識別情報のみ(actorNameは表示名、パスから証憑内容は推測されない)。内容スナップショットを含める要件が出た場合は個人情報取り扱い方針(docs/SECURITY_RULES.md)との整合確認が必要
+- 「ダウンロードの求め」への完全対応には証憑ファイル本体の一括エクスポートが残っている。個別DL+一覧CSV+JSONバックアップで代替可能だが、必要なら別Issue化
+- e-Tax「電子証明書必須」は現行の電子署名要件。署名コンポーネントを外部化(署名モジュールIF)する構想があっても、帳票XML対応と併せ大規模開発になる
 
 ## 2026-11-02: 減価償却(固定資産台帳)(Issue #58)
 - Worktree: depreciation

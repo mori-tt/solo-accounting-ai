@@ -1447,6 +1447,55 @@ describe("receipts の storagePath/mimeType(R2-1)", () => {
       editor.doc(rPath(BIZ, "r1")).update({ transactionId: "tx-locked" }),
     );
   });
+
+  it("検索要件メタデータ(取引日/金額/取引先)を設定・更新できる", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor.doc(rPath(BIZ, "r9")).set({
+        ...receipt("unprocessed", "r9"),
+        createdBy: EDITOR,
+        transactionDate: "2026-10-15",
+        amount: 12000,
+        counterparty: "テスト商店",
+      }),
+    );
+    await seed(testEnv, { [rPath(BIZ, "r1")]: receipt("unprocessed", "r1") });
+    await assertSucceeds(
+      editor.doc(rPath(BIZ, "r1")).update({
+        transactionDate: "2026-10-20",
+        amount: 3000,
+        counterparty: "別商店",
+      }),
+    );
+  });
+
+  it("不正な型のメタデータは設定できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    // 日付形式でない transactionDate は不可
+    await assertFails(
+      editor.doc(rPath(BIZ, "r9")).set({
+        ...receipt("unprocessed", "r9"),
+        createdBy: EDITOR,
+        transactionDate: "2026/10/15",
+      }),
+    );
+    // 数値以外の amount は不可
+    await assertFails(
+      editor.doc(rPath(BIZ, "r9")).set({
+        ...receipt("unprocessed", "r9"),
+        createdBy: EDITOR,
+        amount: "12000",
+      }),
+    );
+    // 文字列以外の counterparty は不可
+    await assertFails(
+      editor.doc(rPath(BIZ, "r9")).set({
+        ...receipt("unprocessed", "r9"),
+        createdBy: EDITOR,
+        counterparty: 123,
+      }),
+    );
+  });
 });
 
 describe("closed期間の日付保護(R2-3)", () => {

@@ -2,7 +2,11 @@ import type {
   JournalEntry,
   TrialBalance,
 } from "@/lib/accounting/domain/ledger";
-import type { Transaction, TransactionType } from "@/lib/accounting/types";
+import type {
+  Receipt,
+  Transaction,
+  TransactionType,
+} from "@/lib/accounting/types";
 import {
   ACCOUNT_OPTIONS,
   accountLabelIn,
@@ -220,6 +224,72 @@ export function buildTransactionsCsv(
   return serializeCsv([
     [...TRANSACTION_CSV_HEADER],
     ...transactions.map((t) => transactionToCsvRow(t, options)),
+  ]);
+}
+
+// ---------- 証憑一覧CSV ----------
+
+/**
+ * 証憑一覧のエクスポート列。電帳法の検索要件(取引年月日/金額/取引先)と
+ * 「ダウンロードの求め」への対応として、証憑メタデータと紐付取引の
+ * 双方の値を出力する。
+ */
+export const RECEIPT_CSV_HEADER = [
+  "証憑ID",
+  "ファイル名",
+  "状態",
+  "取引日",
+  "取引金額",
+  "取引先",
+  "紐付取引ID",
+  "紐付取引日",
+  "紐付取引金額",
+  "紐付取引先",
+  "MIME",
+  "storagePath",
+  "アップロード日時",
+  "更新日時",
+] as const;
+
+const RECEIPT_STATUS_TO_LABEL: Record<Receipt["status"], string> = {
+  unprocessed: "未処理",
+  linked: "紐付済み",
+  archived: "アーカイブ",
+};
+
+/** 証憑1件 → CSV行(エクスポート列順)。紐付取引が解決できる場合はその値も出す */
+export function receiptToCsvRow(r: Receipt, tx?: Transaction): string[] {
+  return [
+    r.id,
+    r.fileName,
+    RECEIPT_STATUS_TO_LABEL[r.status] ?? r.status,
+    r.transactionDate ?? "",
+    r.amount === undefined ? "" : String(r.amount),
+    r.counterparty ?? "",
+    r.transactionId ?? "",
+    tx?.date ?? "",
+    tx === undefined ? "" : String(tx.amount),
+    tx?.counterparty ?? "",
+    r.mimeType,
+    r.storagePath,
+    r.createdAt,
+    r.updatedAt,
+  ];
+}
+
+/** 証憑一覧 → ヘッダー付きCSV文字列(BOMなし) */
+export function buildReceiptsCsv(
+  receipts: readonly Receipt[],
+  txById: ReadonlyMap<string, Transaction> = new Map(),
+): string {
+  return serializeCsv([
+    [...RECEIPT_CSV_HEADER],
+    ...receipts.map((r) =>
+      receiptToCsvRow(
+        r,
+        r.transactionId ? txById.get(r.transactionId) : undefined,
+      ),
+    ),
   ]);
 }
 
