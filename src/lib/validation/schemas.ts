@@ -212,6 +212,17 @@ export const transactionSearchSchema = z
   });
 export type TransactionSearchInput = z.infer<typeof transactionSearchSchema>;
 
+/**
+ * 証憑の検索用メタデータ(電帳法の検索要件: 取引年月日/取引金額/取引先)。
+ * 更新フォームは3項目を常に送り、空文字・nullはフィールドの削除を意味する。
+ */
+export const receiptMetadataSchema = z.object({
+  transactionDate: z.union([dateString, z.literal("")]),
+  amount: z.union([nonNegativeYen, z.null()]),
+  counterparty: z.string().max(500, "取引先は500文字以内で入力してください"),
+});
+export type ReceiptMetadataFormInput = z.infer<typeof receiptMetadataSchema>;
+
 export const expenseSchema = z.object({
   date: dateString,
   amount: yenAmount,

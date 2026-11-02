@@ -112,6 +112,14 @@ export interface Receipt {
   mimeType: string;
   transactionId?: string;
   status: ReceiptStatus;
+  /**
+   * 電帳法の検索要件(取引年月日/金額/取引先)を証憑単体で満たすための
+   * メタデータ。紐付け時に取引の値をコピーし、未紐付の証憑は手入力で補う。
+   */
+  transactionDate?: DateString;
+  /** 円・整数・0以上 */
+  amount?: number;
+  counterparty?: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
