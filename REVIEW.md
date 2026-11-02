@@ -1411,7 +1411,6 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `/api/session` の same-origin・トークン長・revocation の route レベル単体テストは未追加(Route Handler のテスト基盤が未整備)。必要になれば別タスクで
 - `unauthorized()` 等 Next.js 16 の実験的APIは見送り(現行のクライアント側 auth gate で要件を満たす)
 ## 2026-11-02: メール確認フロー(Issue #84)
-- Worktree: auth-polish
 
 Firebase `sendEmailVerification` によるメールアドレス確認フローを追加。確認はソフトゲート(機能ブロックせずバナーで促す)とし、サインアップ直後の送信・未確認バナー・再送・確認済み反映を実装した。
 
@@ -1434,16 +1433,26 @@ Firebase `sendEmailVerification` によるメールアドレス確認フロー�
 - `app/signup/` ディレクトリは存在せず、新規登録は login-screen のトグル内(touch範囲の app/login/ 内で対応済み)
 - E2E 副作用: バナーのメールアドレス表示が `getByText(email)` と重複する件はバナー側からメール表示を除いて解消(テスト・app-shell 非改変)
 
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(42ファイル514件、skip 10。email-verify-banner.test.tsx 5件新規)
-- `pnpm build` — 合格
 - `JAVA_HOME=... E2E_PORT=3101 pnpm test:e2e` — 合格(31件。Auth emulator が sendEmailVerification の oobCode リンクを出力し実送信動作を確認)
 - `pnpm test:rules` / `pnpm test:emulators` — 前回タスクで合格済み(rules・サーバー書込み経路の変更なし)
 
-### 判断事項・次の担当者への注意事項
 - メール確認はソフトゲート。確定操作(Server Actions)側で `email_verified` を必須にするポリシーは未導入(issue範囲外・要検討)。導入する場合は `api/session.ts` 側で idToken の claim を確認する形になる
 - 確認メールの文面・送信元は Firebase コンソール側のテンプレート設定に依存。Emulator では実メールは送られず oobCode リンクがログに出る(手動確認はそのリンクを開く)
 - バナーの再送クールダウン(60秒)はUI側のみ。連続リロード等で回避は可能だが Firebase 側のレート制限が実際の上限を担保する
+## 2026-11-02: リリース運用整備(Issue #85)
+- Worktree: release-ops
+- `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
+- `src/lib/version.ts`(新規): `APP_VERSION` を `package.json` から import して export するバージョン一元化モジュール。フッター等の表示はこの値を使う想定(`resolveJsonModule` 有効のため型安全)
+- `CHANGELOG.md`(新設): REVIEW.md のエントリ群から機能リリースノートを `## [1.0.0]` として要約(機能 / 基盤・改善の2区分)
+- `firebase.json`: `hosting` セクション新設。`/_next/static/**`(ハッシュ付き)を `public, max-age=31536000, immutable` の長期キャッシュ、それ以外(HTMLを含む `**`)を `public, max-age=0, must-revalidate` の短い再検証に。Hosting のヘッダールールは last match wins のため catch-all → 個別の順で記述
+- `firebase.json` `emulators.hosting.port`: 5005 に固定。hosting 追加により `pnpm emulators` で Hosting Emulator も起動するようになるが、デフォルト 5000 は macOS AirPlay Receiver(ControlCe 実在確認済み・LISTEN中)と衝突するため変更
+- `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
+### 備考
+- version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
+- `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
