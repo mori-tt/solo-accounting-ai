@@ -31,6 +31,14 @@ describe("serializeCsv", () => {
   it("クォートのみ・空フィールドを正しく処理する", () => {
     expect(serializeCsv([[""], ['"'], [" "]])).toBe('\r\n""""\r\n ');
   });
+
+  it("スプレッドシートで数式解釈される先頭文字を ' で無害化する", () => {
+    expect(
+      serializeCsv([
+        ["=1+1", "+SUM(A1:A2)", "-2+3", "@cmd", "\t=1", "=cmd,1", "normal"],
+      ]),
+    ).toBe("'=1+1,'+SUM(A1:A2),'-2+3,'@cmd,'\t=1,\"'=cmd,1\",normal");
+  });
 });
 
 describe("parseCsv", () => {
@@ -148,6 +156,22 @@ describe("buildTransactionsCsv", () => {
     expect(rows[2][7]).toBe("確定");
     expect(rows[3][1]).toBe("振替");
     expect(rows[3][7]).toBe("締め済み");
+  });
+
+  it("取引先・摘要の数式インジェクションをエスケープする", () => {
+    const csv = buildTransactionsCsv([
+      {
+        ...transactionFixture,
+        counterparty: '=HYPERLINK("https://evil.example","x")',
+        description: "+cmd|' /C calc'!A1",
+      },
+    ]);
+    const dataLine = csv.split("\r\n")[1];
+    // counterpartyは , " を含むためクォート+ "" エスケープされ、先頭 ' は残る
+    expect(dataLine).toContain(
+      '"\'=HYPERLINK(""https://evil.example"",""x"")"',
+    );
+    expect(dataLine).toContain("'+cmd|' /C calc'!A1");
   });
 });
 

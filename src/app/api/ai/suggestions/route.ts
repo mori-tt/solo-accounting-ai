@@ -4,7 +4,11 @@ import {
 } from "@/lib/api/ai";
 import { aiApiRateLimiter, aiRunRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
-import { requireEditor, requireViewer } from "@/lib/api/session";
+import {
+  requireEditor,
+  requireUid,
+  requireViewer,
+} from "@/lib/api/session";
 import {
   listSuggestionQuerySchema,
   parseForm,
@@ -52,6 +56,8 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
+    // ボディ解析前に認証のみ先行(R2-5)。businessId依存のロール検証は後続
+    await requireUid();
     const body: unknown = await request.json().catch(() => {
       throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
     });

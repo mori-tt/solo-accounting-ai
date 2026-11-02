@@ -3,7 +3,9 @@ rules_version = '2';
 // docs/SECURITY_RULES.md に基づく認可ルール。
 // - すべての事業データは businesses/{businessId} 配下にスコープする
 // - members/{uid} の role(owner/editor/viewer)で認可する
-// - status = 'locked' のTransaction(締め済み)はクライアントから変更不可
+// - 締め済み期間(closed)に属するデータはクライアントから変更不可。
+//   status='locked'のドキュメント保護に加え、日付から fy{year} を導出して
+//   closed期間への作成・更新・削除も rules 層で拒否する(R2-3)
 // - aiSuggestion フィールドはAdmin SDKのみ書き込み可(クライアント禁止)
 // - auditLogs はappend-only
 service cloud.firestore {
@@ -21,6 +23,22 @@ service cloud.firestore {
 
     function memberDoc(businessId, uid) {
       return /databases/$(database)/documents/businesses/$(businessId)/members/$(uid);
+    }
+
+    function fiscalPeriodDoc(businessId, periodId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/fiscalPeriods/$(periodId);
+    }
+
+    function txDoc(businessId, txId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/transactions/$(txId);
+    }
+
+    function invoiceDoc(businessId, invoiceId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/invoices/$(invoiceId);
+    }
+
+    function receiptDoc(businessId, receiptId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/receipts/$(receiptId);
     }
 
     // memberドキュメントの存在を確認してからロールを取得する
@@ -44,6 +62,11 @@ service cloud.firestore {
       return hasRole(businessId, ['owner', 'editor']);
     }
 
+    // businessドキュメントの ownerUid(真のオーナー)
+    function ownerUid(businessId) {
+      return get(businessDoc(businessId)).data.get('ownerUid', '');
+    }
+
     // update時に指定フィールドが変更されていないことを確認する
     function unaffected(keys) {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
@@ -59,31 +82,48 @@ service cloud.firestore {
       return value is string && value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
     }
 
-    function txDoc(businessId, txId) {
-      return /databases/$(database)/documents/businesses/$(businessId)/transactions/$(txId);
-    }
-
     // 紐付くTransactionが締め済み(locked)かどうか
     function txLocked(businessId, txId) {
       return exists(txDoc(businessId, txId))
         && get(txDoc(businessId, txId)).data.get('status', '') == 'locked';
     }
 
-    function fiscalPeriodDoc(businessId, periodId) {
-      return /databases/$(database)/documents/businesses/$(businessId)/fiscalPeriods/$(periodId);
+    // 日付(YYYY-MM-DD)が属する会計年度の fiscalPeriod が closed か。
+    // periodId は fy{会計年度開始年}。fiscalYearStartMonth 未満の月は
+    // 前年度に属する。期間ドキュメントが存在しなければ closed ではない
+    // (期間は締め処理が必ず作成するため、未作成期間への混入は起きない)
+    function inClosedPeriod(businessId, dateStr) {
+      let startMonth =
+        get(businessDoc(businessId)).data.get('fiscalYearStartMonth', 1);
+      let y = int(dateStr.split('-')[0]);
+      let m = int(dateStr.split('-')[1]);
+      let fy = m >= startMonth ? y : y - 1;
+      return exists(fiscalPeriodDoc(businessId, 'fy' + string(fy)))
+        && get(fiscalPeriodDoc(businessId, 'fy' + string(fy)))
+          .data.get('status', '') == 'closed';
     }
 
-    // dateStr(YYYY-MM-DD)の属する会計期間がclosedかどうか。
-    // 期間IDはサービス層の決定的ID `fy{fiscalYear}`(periods.ts)と同じ規則で導く。
-    // 会計年度 = 「月 >= fiscalYearStartMonth なら当年、未満なら前年」。
-    // 形式不正な日付は split/int の評価エラーで拒否側に倒れる。
-    function dateInClosedPeriod(businessId, dateStr) {
-      let parts = dateStr.split('-');
-      let startMonth = get(businessDoc(businessId)).data.get('fiscalYearStartMonth', 1);
-      let fiscalYear = int(parts[1]) >= startMonth ? int(parts[0]) : int(parts[0]) - 1;
-      let periodId = 'fy' + string(fiscalYear);
+    // 指定した fiscalPeriod が closed か(closingChecks の対象期間検証用)
+    function periodClosed(businessId, periodId) {
       return exists(fiscalPeriodDoc(businessId, periodId))
-        && get(fiscalPeriodDoc(businessId, periodId)).data.get('status', '') == 'closed';
+        && get(fiscalPeriodDoc(businessId, periodId))
+          .data.get('status', '') == 'closed';
+    }
+
+    // リンク先transactionIdが実在し締め済みでないこと(create/update用)。
+    // transactionId未設定は許可、存在しないtxへのリンクは拒否する
+    function linkedTxExistsUnlocked(businessId, d) {
+      return !('transactionId' in d)
+        || (d.transactionId is string
+          && exists(txDoc(businessId, d.transactionId))
+          && !txLocked(businessId, d.transactionId));
+    }
+
+    // リンク先transactionIdが締め済みでないこと(delete用。
+    // tx不存在=既に消えた参照は許可しなければdocが削除不能になる)
+    function linkedTxNotLocked(businessId, d) {
+      return !('transactionId' in d)
+        || !txLocked(businessId, d.transactionId);
     }
 
     // ---------- users ----------
@@ -111,6 +151,11 @@ service cloud.firestore {
         allow get, list: if isMember(businessId);
         allow create: if signedIn()
           && request.resource.data.role in ['owner', 'editor', 'viewer']
+          // uidフィールドをdoc IDと一致させる(不一致は幽霊member・
+          // listMyBusinessIdsのcollectionGroup(uid==)とisMemberの解釈分岐を招く)
+          && request.resource.data.uid == uid
+          // 帰属の偽装を防ぐ
+          && request.resource.data.invitedBy == request.auth.uid
           && (
             // business作成と同一バッチで、作成者が自分をownerとして登録するブートストラップ。
             // getAfter()でバッチ適用後のbusinessドキュメントを検証する
@@ -121,14 +166,16 @@ service cloud.firestore {
             || isOwner(businessId)
           );
         // 権限昇格防止のためmember管理はownerのみ。
-        // 基点owner(ownerUid)のmemberドキュメントは変更・削除できない。
-        // rulesではowner数を数えられないため最後のowner判定はアプリ層で行い、
-        // ここでは基点ownerの喪失(=事業の実効owner不在化)だけを防ぐ
+        // business.ownerUid のmemberはownerロール維持を強制する
+        // (自分・別オーナーによる降格で不可逆ロックアウトになるため)
         allow update: if isOwner(businessId)
           && request.resource.data.role in ['owner', 'editor', 'viewer']
-          && uid != get(businessDoc(businessId)).data.ownerUid;
+          && request.resource.data.get('uid', uid) == uid
+          && unaffected(['invitedBy'])
+          && !(uid == ownerUid(businessId)
+            && request.resource.data.role != 'owner');
         allow delete: if isOwner(businessId)
-          && uid != get(businessDoc(businessId)).data.ownerUid;
+          && uid != ownerUid(businessId);
       }
 
       // ---------- transactions ----------
@@ -137,14 +184,19 @@ service cloud.firestore {
         allow create: if canEdit(businessId)
           && validTransaction(request.resource.data)
           && noAiSuggestion()
-          && request.resource.data.createdBy == request.auth.uid;
-        // 締め済み(locked)は変更不可。status='locked'への変更はAdmin SDKのみ
+          && request.resource.data.createdBy == request.auth.uid
+          && !inClosedPeriod(businessId, request.resource.data.date);
+        // 締め済み(locked)は変更不可。status='locked'への変更はAdmin SDKのみ。
+        // closed期間内のdateへの変更・closed期間内docの変更も不可
         allow update: if canEdit(businessId)
           && resource.data.status != 'locked'
           && validTransaction(request.resource.data)
-          && unaffected(['aiSuggestion', 'createdBy', 'createdAt']);
+          && unaffected(['aiSuggestion', 'createdBy', 'createdAt'])
+          && !inClosedPeriod(businessId, request.resource.data.date)
+          && !inClosedPeriod(businessId, resource.data.date);
         // editorはdraftのみ削除可、ownerはlocked以外を削除可
         allow delete: if resource.data.status != 'locked'
+          && !inClosedPeriod(businessId, resource.data.date)
           && (isOwner(businessId)
             || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'));
       }
@@ -161,52 +213,69 @@ service cloud.firestore {
         allow get, list: if isMember(businessId);
         allow create: if canEdit(businessId)
           && validExpense(request.resource.data)
-          && request.resource.data.createdBy == request.auth.uid;
+          && request.resource.data.createdBy == request.auth.uid
+          && linkedTxExistsUnlocked(businessId, request.resource.data)
+          && linkedReceiptExists(businessId, request.resource.data);
+        // status未設定のドキュメント(サーバー作成)は比較が評価エラーとなり
+        // denyとなる(fail-closed)。リンク先txがlockedなら変更・削除不可
         allow update: if canEdit(businessId)
           && resource.data.status != 'locked'
           && validExpense(request.resource.data)
-          && unaffected(['transactionId', 'receiptId', 'createdBy', 'createdAt']);
-        allow delete: if resource.data.status != 'locked'
-          && (isOwner(businessId)
-            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'));
+          && unaffected(['transactionId', 'receiptId', 'createdBy', 'createdAt'])
+          && linkedTxNotLocked(businessId, resource.data);
+        // editorの削除は仕様外のためownerのみ(SECURITY_RULES.md)
+        allow delete: if isOwner(businessId)
+          && resource.data.status != 'locked'
+          && linkedTxNotLocked(businessId, resource.data);
       }
 
       function validExpense(d) {
         return (!('transactionId' in d) || d.transactionId is string)
           && (!('receiptId' in d) || d.receiptId is string)
+          // statusはドメインが持たないため省略可。設定する場合はenum検証
+          && (!('status' in d) || d.status in ['draft', 'confirmed'])
           && d.taxCategory is string
-          && d.taxAmount is int
-          && d.status in ['draft', 'confirmed'];
+          && d.taxAmount is int;
+      }
+
+      // expenseのreceiptId参照先が実在すること(設定されている場合)
+      function linkedReceiptExists(businessId, d) {
+        return !('receiptId' in d)
+          || (d.receiptId is string
+            && exists(receiptDoc(businessId, d.receiptId)));
       }
 
       // ---------- receipts ----------
       match /receipts/{receiptId} {
         allow get, list: if isMember(businessId);
         allow create: if canEdit(businessId)
-          && validReceipt(request.resource.data)
+          && validReceipt(request.resource.data, receiptId)
           && noAiSuggestion()
           && request.resource.data.createdBy == request.auth.uid
-          && linkedTxNotLocked(request.resource.data);
+          && linkedTxExistsUnlocked(businessId, request.resource.data);
+        // storagePath/fileName/mimeTypeは登録後不変
+        // (ダウンロードAPIがdoc値でバケット参照・Content-Type決定するため)
         allow update: if canEdit(businessId)
-          && validReceipt(request.resource.data)
-          && unaffected(['aiSuggestion', 'createdBy', 'createdAt'])
-          && linkedTxNotLocked(request.resource.data)
-          && linkedTxNotLocked(resource.data);
+          && validReceipt(request.resource.data, receiptId)
+          && unaffected(['aiSuggestion', 'storagePath', 'fileName',
+                         'mimeType', 'createdBy', 'createdAt'])
+          && linkedTxExistsUnlocked(businessId, request.resource.data)
+          && linkedTxNotLocked(businessId, resource.data);
         allow delete: if (isOwner(businessId)
             || (hasRole(businessId, ['editor']) && resource.data.status == 'unprocessed'))
-          && linkedTxNotLocked(resource.data);
+          && linkedTxNotLocked(businessId, resource.data);
       }
 
-      function validReceipt(d) {
+      function validReceipt(d, rid) {
         return d.storagePath is string
+          // storagePathは自事業・自証憑配下のみ(ダウンロードAPI/OCRの
+          // 任意オブジェクト参照・他証憑への差し替えを防ぐ)
+          && d.storagePath.matches(
+            'receipts/' + businessId + '/' + rid + '/.+')
           && d.fileName is string
-          && d.mimeType is string
+          && d.mimeType in ['image/jpeg', 'image/png', 'image/webp',
+                            'image/heic', 'image/heif', 'application/pdf']
           && d.status in ['unprocessed', 'linked', 'archived'];
-      }
-
-      // transactionId未紐付け(nullable)は許可、紐付いている場合はlock判定
-      function linkedTxNotLocked(d) {
-        return !('transactionId' in d) || !txLocked(businessId, d.transactionId);
       }
 
       // ---------- customers ----------
@@ -217,7 +286,8 @@ service cloud.firestore {
         allow update: if canEdit(businessId)
           && request.resource.data.name is string
           && unaffected(['createdAt']);
-        allow delete: if canEdit(businessId);
+        // editorの削除は仕様外のためownerのみ
+        allow delete: if isOwner(businessId);
       }
 
       // ---------- projects ----------
@@ -228,7 +298,7 @@ service cloud.firestore {
         allow update: if canEdit(businessId)
           && validProject(request.resource.data)
           && unaffected(['customerId', 'createdAt']);
-        allow delete: if canEdit(businessId);
+        allow delete: if isOwner(businessId);
       }
 
       function validProject(d) {
@@ -238,22 +308,24 @@ service cloud.firestore {
       }
 
       // ---------- invoices ----------
-      // issueDate が締め済み期間に属する請求書はクライアントから変更不可
-      // (入金など締め後の正当な更新はAdmin SDK経由のため影響しない)
       match /invoices/{invoiceId} {
         allow get, list: if isMember(businessId);
         allow create: if canEdit(businessId)
           && validInvoice(request.resource.data)
-          && !dateInClosedPeriod(businessId, request.resource.data.issueDate);
+          && !inClosedPeriod(businessId, request.resource.data.issueDate);
+        // 発行済み(issued以降)の請求内容・statusはクライアントから変更不可。
+        // 消込/overdue化はサーバー側の処理(支払登録・期限超過検出)で行う
         allow update: if canEdit(businessId)
           && validInvoice(request.resource.data)
           && unaffected(['createdAt'])
-          && !dateInClosedPeriod(businessId, resource.data.issueDate)
-          && !dateInClosedPeriod(businessId, request.resource.data.issueDate);
-        // 発行済み・入金済み請求書の削除はownerのみ
+          && (resource.data.status == 'draft'
+            || (request.resource.data.status == resource.data.status
+              && unaffected(['customerId', 'projectId', 'items', 'issueDate',
+                             'dueDate', 'totalAmount', 'taxAmount'])));
+        // 発行済み・入金済み請求書の削除はownerのみ。closed期間の発行日は削除不可
         allow delete: if (isOwner(businessId)
             || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'))
-          && !dateInClosedPeriod(businessId, resource.data.issueDate);
+          && !inClosedPeriod(businessId, resource.data.issueDate);
       }
 
       function validInvoice(d) {
@@ -265,20 +337,25 @@ service cloud.firestore {
       }
 
       // ---------- payments ----------
-      // 入金日が締め済み期間に属する入金はクライアントから変更不可
       match /payments/{paymentId} {
         allow get, list: if isMember(businessId);
+        // invoiceIdは消込先の実在請求書のみ(偽造paymentでpaidTotalを
+        // 汚染して請求書をpaid化されるのを防ぐ)
         allow create: if canEdit(businessId)
           && validPayment(request.resource.data)
-          && !dateInClosedPeriod(businessId, request.resource.data.date);
-        // 消込先invoiceIdの付け替えは禁止(監査上の整合性)
+          && exists(invoiceDoc(businessId, request.resource.data.invoiceId))
+          && !inClosedPeriod(businessId, request.resource.data.date)
+          && (!('transactionId' in request.resource.data)
+            || (request.resource.data.transactionId is string
+              && exists(txDoc(businessId,
+                              request.resource.data.transactionId))));
+        // 消込確定後の金額・日付・消込先は不変(監査上の整合性)
         allow update: if canEdit(businessId)
           && validPayment(request.resource.data)
-          && unaffected(['invoiceId', 'createdAt'])
-          && !dateInClosedPeriod(businessId, resource.data.date)
-          && !dateInClosedPeriod(businessId, request.resource.data.date);
-        allow delete: if canEdit(businessId)
-          && !dateInClosedPeriod(businessId, resource.data.date);
+          && unaffected(['invoiceId', 'amount', 'date', 'transactionId',
+                         'createdAt']);
+        allow delete: if isOwner(businessId)
+          && !inClosedPeriod(businessId, resource.data.date);
       }
 
       function validPayment(d) {
@@ -288,19 +365,24 @@ service cloud.firestore {
       }
 
       // ---------- journalEntries ----------
-      // status='draft' は仕訳候補、'confirmed' が確定仕訳
+      // status='draft' は仕訳候補、'confirmed' が確定仕訳、'locked' が締め済み。
+      // confirmed仕訳はクライアントから変更・削除不可(確定データの改ざん防止)
       match /journalEntries/{journalEntryId} {
         allow get, list: if isMember(businessId);
         allow create: if canEdit(businessId)
           && validJournalEntry(request.resource.data)
-          && request.resource.data.createdBy == request.auth.uid;
+          && request.resource.data.createdBy == request.auth.uid
+          && !inClosedPeriod(businessId, request.resource.data.date);
         allow update: if canEdit(businessId)
-          && resource.data.status != 'locked'
+          && resource.data.status == 'draft'
           && validJournalEntry(request.resource.data)
-          && unaffected(['aiSuggestionId', 'createdBy', 'createdAt']);
-        allow delete: if resource.data.status != 'locked'
-          && (isOwner(businessId)
-            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'));
+          && unaffected(['aiSuggestionId', 'sourceType', 'sourceId',
+                         'createdBy', 'createdAt'])
+          && !inClosedPeriod(businessId, request.resource.data.date)
+          && !inClosedPeriod(businessId, resource.data.date);
+        allow delete: if isOwner(businessId)
+          && resource.data.status != 'locked'
+          && !inClosedPeriod(businessId, resource.data.date);
       }
 
       function validJournalEntry(d) {
@@ -321,7 +403,7 @@ service cloud.firestore {
         allow update: if canEdit(businessId)
           && validRecurringTemplate(request.resource.data)
           && unaffected(['createdBy', 'createdAt']);
-        allow delete: if canEdit(businessId);
+        allow delete: if isOwner(businessId);
       }
 
       function validRecurringTemplate(d) {
@@ -348,7 +430,7 @@ service cloud.firestore {
         allow update: if canEdit(businessId)
           && validFixedAsset(request.resource.data)
           && unaffected(['createdBy', 'createdAt']);
-        allow delete: if canEdit(businessId);
+        allow delete: if isOwner(businessId);
       }
 
       function validFixedAsset(d) {
@@ -374,12 +456,20 @@ service cloud.firestore {
         allow create: if canEdit(businessId)
           && validClosingCheck(request.resource.data)
           && request.resource.data.status == 'open'
-          && request.resource.data.createdBy == request.auth.uid;
+          && request.resource.data.createdBy == request.auth.uid
+          && exists(fiscalPeriodDoc(businessId,
+              request.resource.data.fiscalPeriodId))
+          && !periodClosed(businessId, request.resource.data.fiscalPeriodId);
         allow update: if canEdit(businessId)
           && validClosingCheck(request.resource.data)
-          && unaffected(['fiscalPeriodId', 'type', 'targetPath', 'createdBy', 'createdAt']);
+          && unaffected(['fiscalPeriodId', 'type', 'targetPath',
+                         'createdBy', 'createdAt'])
+          // 解決者の帰属は実行者自身のみ(他人名義の解決を防ぐ)
+          && (!('resolvedBy' in request.resource.data)
+            || request.resource.data.resolvedBy == request.auth.uid)
+          && !periodClosed(businessId, resource.data.fiscalPeriodId);
         allow delete: if isOwner(businessId)
-          || (hasRole(businessId, ['editor']) && resource.data.status == 'open');
+          && !periodClosed(businessId, resource.data.fiscalPeriodId);
       }
 
       function validClosingCheck(d) {
@@ -402,7 +492,7 @@ service cloud.firestore {
           && request.resource.data.decidedBy == request.auth.uid
           && unaffected(['kind', 'target', 'payload', 'confidence', 'reason',
                          'issues', 'attempts', 'retriable', 'lastError',
-                         'createdBy', 'createdAt']);
+                         'decidedAt', 'createdBy', 'createdAt']);
       }
 
       // ---------- monthlySummaries ----------
@@ -420,23 +510,41 @@ service cloud.firestore {
           && request.resource.data.status == 'open'
           && dateString(request.resource.data.startDate)
           && dateString(request.resource.data.endDate);
-        // closedになった期間はクライアントから再オープン・変更不可
+        // closedになった期間はクライアントから再オープン・変更不可。
+        // fiscalYear・期間は不変。close時のclosedByは実行者自身のみ
+        // (open維持の更新ではclosedBy/closedAtを書き換えさせない)
         allow update: if isOwner(businessId)
           && resource.data.status == 'open'
           && request.resource.data.status in ['open', 'closed']
-          && unaffected(['startDate', 'endDate']);
+          && unaffected(['startDate', 'endDate', 'fiscalYear'])
+          && (request.resource.data.status == 'open'
+            ? unaffected(['closedBy', 'closedAt'])
+            : request.resource.data.closedBy == request.auth.uid);
         // 監査証跡保持のためクライアントからの削除は不可
         allow delete: if false;
       }
 
       // ---------- auditLogs ----------
-      // append-only。内容スナップショットではなく識別情報のみ記録する
+      // append-only。内容スナップショットではなく識別情報のみ記録する。
+      // viewerの追記は不可(読み取り専用)、targetPathは自事業配下に限定し、
+      // createdAtは現在時刻±1hのみとして日付偽装を防ぐ
+      // (serverTimestampはrequest.timeに解決されるが、emulatorでは微小な
+      // ずれがありうるため等価比較ではなく範囲で検証する)
       match /auditLogs/{logId} {
         allow get, list: if isMember(businessId);
-        allow create: if isMember(businessId)
+        allow create: if canEdit(businessId)
           && request.resource.data.actorUid == request.auth.uid
-          && request.resource.data.action in ['create', 'update', 'delete', 'close', 'approve_ai']
-          && request.resource.data.targetPath is string;
+          && request.resource.data.action in ['create', 'update', 'delete',
+                                              'close', 'run_ai',
+                                              'approve_ai', 'reject_ai']
+          && request.resource.data.targetPath is string
+          && request.resource.data.targetPath
+            .matches('businesses/' + businessId + '/.+')
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.createdAt
+            > request.time - duration.value(1, 'h')
+          && request.resource.data.createdAt
+            < request.time + duration.value(1, 'h');
         allow update, delete: if false;
       }
     }

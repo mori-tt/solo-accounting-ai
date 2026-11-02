@@ -1,7 +1,7 @@
 import { getAISuggestionService } from "@/lib/api/ai";
 import { aiApiRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
-import { requireEditor } from "@/lib/api/session";
+import { requireEditor, requireUid } from "@/lib/api/session";
 import { decideSuggestionSchema, parseForm } from "@/lib/validation/schemas";
 
 /**
@@ -17,6 +17,8 @@ export async function PATCH(
 ) {
   try {
     const { suggestionId } = await params;
+    // ボディ解析前に認証のみ先行(R2-5)。businessId依存のロール検証は後続
+    await requireUid();
     const body: unknown = await request.json().catch(() => {
       throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
     });

@@ -1,10 +1,11 @@
+import { readRequestText } from "@/lib/api/body";
 import { writeAuditLog } from "@/lib/api/queries";
 import {
   backupExportRateLimiter,
   backupRestoreRateLimiter,
 } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
-import { requireEditor, requireOwner } from "@/lib/api/session";
+import { requireEditor, requireOwner, requireUid } from "@/lib/api/session";
 import {
   backupFileSchema,
   exportBusinessBackup,
@@ -52,18 +53,20 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const contentLength = Number(
-      request.headers.get("content-length") ?? "0",
-    );
-    if (contentLength > MAX_BACKUP_BODY_BYTES) {
-      throw new ApiError(
-        "INVALID_INPUT",
-        "バックアップファイルが大きすぎます",
-      );
-    }
-    const body = (await request.json().catch(() => {
-      throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
-    })) as { businessId?: unknown; backup?: unknown };
+    // ボディ解析前に認証のみ先行(R2-5)。実バイト数の上限は
+    // ストリーム読みで強制する(content-length は迂回可能)
+    await requireUid();
+    const text = await readRequestText(request, MAX_BACKUP_BODY_BYTES);
+    const body = (() => {
+      try {
+        return JSON.parse(text) as {
+          businessId?: unknown;
+          backup?: unknown;
+        };
+      } catch {
+        throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
+      }
+    })();
     const businessId =
       typeof body?.businessId === "string" ? body.businessId : "";
     if (!businessId) {
