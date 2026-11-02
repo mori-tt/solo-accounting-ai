@@ -1822,6 +1822,43 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
 - rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約
+## 2026-11-02: lib整合性(経費の金額検証・barrel export・スキーマ文書同期)
+- Worktree: lib-consistency
+- Issue #113
+
+### 実装内容
+
+- `src/lib/accounting/services/expenses.ts`: `registerExpense` の入力検証を `domain/validate.ts` の `validateExpenseInput` と同じルールへ寄せた(残課題「新世代 services 側の税額チェックが nonNegative のみ」の解消)
+  - `assertTaxAmountConsistent`(domain/tax.ts)を適用: 非課税・免税・不課税は taxAmount=0 固定、課税は `amount×10%`(税抜標準税率)を上限。負数・非整数は従来どおり INVALID_AMOUNT、整合性違反は VALIDATION_FAILED
+  - ローカルの `TAX_CATEGORIES` 定数を削除し `domain/validate.ts` の定数を import
+  - `account` は空白のみも拒否、`counterparty`/`description` の string 型チェックを追加(validateTransactionInput の assertNonEmptyString 相当)
+- `src/lib/accounting/services/transactions.ts`: 同じくローカルの `TAX_CATEGORIES`/`TRANSACTION_TYPES` を `domain/validate.ts` の import へ置き換え(値は同一のため挙動不変。services/・domain/・local で三重定義だったものを一元化)
+- `src/lib/accounting/index.ts`: domain 配下で未 export だった `depreciation`/`filing`/`ledger`/`yearly` を追加(アルファベット順)。4モジュールはいずれも barrel 構築後に追加されたもので deep import(`@/lib/accounting/domain/*`)経由で reports/periods/fixedAssets 等から利用中。export 名の衝突なし・barrel(`@/lib/accounting` 直下)の利用者は repo 内にゼロのため影響なし
+- `docs/FIRESTORE_SCHEMA.md`: 現行型との差分を同期
+  - transactions に `taxCategory`/`taxRate` を追記(欠落していた税フィールド)
+  - expenses 表を `Expense` 型へ合わせて書き換え(型に存在しない receiptId/status/createdBy/createdAt/updatedAt を除去、transactionId を必須に修正)
+  - receipts/invoices に `updatedAt`、members に `uid`、users に `lastLoginAt`、aiSuggestions に `businessId` を追記
+  - コレクション構成ツリーに `idempotencyKeys` を追加。共通規約の createdAt/updatedAt/createdBy 記述を実態(一部コレクションのみ保持)に合わせて修正
+  - `journalEntries`/`closingChecks` は Security Rules・バックアップ対象の定義のみで書き込み経路が未実装である旨を注記(仕訳は domain/ledger が都度計算する仮想仕訳、締めチェックは closingChecklist が都度計算)
+
+### 設計上の判断
+
+- エラーコードは service 層の既存慣行(INVALID_INPUT/INVALID_AMOUNT)を維持し、税額整合性違反のみ domain 側の VALIDATION_FAILED がそのまま返る。画面経路は zod で先行検証されるため通常到達しない
+- `validateExpenseInput` をそのまま呼ぶ形は取らず、service 層のコード規約(冪等キー・store.transact・エラーコード)を保ったまま domain のチェック関数を呼ぶ構成とした
+- `normalizeTransactionTax`(transactions.ts)は expenses とは別ルール(taxCategory 任意・taxRate 正規化)のため定数の共有のみに留め、ロジックは未変更
+
+### 実行したテスト
+
+- `pnpm lint` — 合格(既存 warning 1件のみ)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(50ファイル595件、skip 10。新規テスト1件: 税区分と税額の不整合拒否)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(rules/画面/API 未変更のため対象外)
+
+### 未解決事項・次の担当者への注意事項
+
+- `VALIDATION_FAILED` は `api/result.ts` の `DOMAIN_ERROR_MESSAGES` に対応文言がなく、到達時は汎用「処理に失敗しました」になる。zod の expenseSchema 側でも税区分×税額の整合性を検証(superRefine)すればフォーム UX を改善できるが、本タスクは service 層の整合のみを範囲とした
+- `domain/`(旧世代)と `services/`+ルート側 `*.ts`(新世代)の2系統併存は継続。barrel は domain 層のファサードであり、ルート側モジュール(types/money/dates/services 等)は従来どおり deep import 前提(統合整理は別タスク)
 ## 2026-11-02: Issue #112 セキュリティヘッダー強化(HSTS + nonce CSP 調査)
 - Worktree: headers-hardening
 - 対応: `src/proxy.ts` 新設 + `next.config.ts` コメント整理
@@ -1870,7 +1907,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   cacheComponents 非採用の構成変更時
 
 ### チェック
-- `pnpm lint` — 合格(既存 warning 1件のみ)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(50ファイル593件、skip 10)
 - `pnpm build` — 合格(`ƒ Proxy (Middleware)` 登録確認)
@@ -1887,7 +1923,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm lint` — 合格(既存warning 1件: receipts-screen `<img>`)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(51ファイル609件、skip 10。api-client.test.ts 16件新規)
-- `pnpm build` — 合格
 - Emulator系(`test:rules`/`test:emulators`)・`next dev` — 未実施(Issue制約で画面・サーバー経路に変更なし。firestore.rules 未変更)
 ### 判断事項・備考
 - 429リトライの対象をGET/HEADに限定したのは、POST/PATCHの副作用リクエストがサーバー側で実行済みか判別できないため(consume()は処理前に走る設計だが、経路全体での冪等性をクライアントが保証できない)

@@ -1,9 +1,10 @@
 import { assertDateString } from "../dates";
+import type { ConsumptionTaxRate } from "../domain/tax";
+import { TAX_CATEGORIES, TRANSACTION_TYPES } from "../domain/validate";
 import { DomainError } from "../errors";
 import { assertYenAmount } from "../money";
 import type { AccountingStore } from "../store/types";
 import { docPath } from "../store/types";
-import type { ConsumptionTaxRate } from "../domain/tax";
 import type {
   TaxCategory,
   Transaction,
@@ -17,19 +18,6 @@ import {
   scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
-
-const TRANSACTION_TYPES: readonly TransactionType[] = [
-  "income",
-  "expense",
-  "transfer",
-];
-
-const TAX_CATEGORIES: readonly TaxCategory[] = [
-  "taxable",
-  "non_taxable",
-  "exempt",
-  "out_of_scope",
-];
 
 const TAX_RATES: readonly ConsumptionTaxRate[] = ["standard", "reduced"];
 
