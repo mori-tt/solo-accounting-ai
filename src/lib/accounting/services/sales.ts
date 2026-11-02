@@ -136,6 +136,11 @@ export interface RegisterInvoiceInput {
   taxAmount?: number;
 }
 
+/** 請求書番号の採番形式。事業内連番を `INV-` + 6桁ゼロ埋めで表す。 */
+export function formatInvoiceNumber(seq: number): string {
+  return `INV-${String(seq).padStart(6, "0")}`;
+}
+
 /**
  * 明細を検証し、税率の既定値適用と消費税額(税込の内税)を付与した
  * 正規化済み明細と合計を返す。税額算出は invoice-tax 経由で
@@ -240,8 +245,21 @@ export async function registerInvoice(
         }
       }
 
+      // 請求書番号は事業ドキュメントのカウンタから連番採番する。
+      // transact 内で読み→同一バッチで書き戻すため原子的に進み、
+      // 冪等リプレイ時は work 自体が再実行されず番号を消費しない。
+      const business = await tx.getBusiness(businessId);
+      if (!business) {
+        throw new DomainError(
+          "NOT_FOUND",
+          `business ${businessId} not found`,
+        );
+      }
+      const seq = (business.invoiceCounter ?? 0) + 1;
+
       const invoice: Invoice = {
         id,
+        invoiceNumber: formatInvoiceNumber(seq),
         customerId: input.customerId,
         projectId: input.projectId,
         issueDate,
@@ -255,7 +273,14 @@ export async function registerInvoice(
       };
       return {
         batch: {
-          puts: [{ collection: "invoices", id, data: invoice }],
+          puts: [
+            { collection: "invoices", id, data: invoice },
+            {
+              collection: "businesses",
+              id: businessId,
+              data: { ...business, invoiceCounter: seq, updatedAt: at },
+            },
+          ],
           audits: auditsFor(
             businessId,
             [{ collection: "invoices", id }],

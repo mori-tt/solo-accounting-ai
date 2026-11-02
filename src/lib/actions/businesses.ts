@@ -44,6 +44,12 @@ export interface MyBusiness {
   customAccounts?: CustomAccount[];
   /** 家事按分の事業割合(科目コード→0-100)。未設定科目は100%扱い */
   allocationRatios?: Record<string, number>;
+  /** 適格請求書発行事業者の登録番号(T+13桁)。未登録は未設定 */
+  invoiceRegistrationNumber?: string;
+  /** 請求書の発行者名。未設定時は事業名を使う */
+  issuerName?: string;
+  /** 請求書に記載する発行者住所 */
+  issuerAddress?: string;
 }
 
 /** ログインユーザーが所属する事業一覧 */
@@ -75,6 +81,9 @@ export async function listMyBusinesses(): Promise<
         taxMode: business.taxMode,
         customAccounts: business.customAccounts,
         allocationRatios: business.allocationRatios,
+        invoiceRegistrationNumber: business.invoiceRegistrationNumber,
+        issuerName: business.issuerName,
+        issuerAddress: business.issuerAddress,
       });
     }
     return result;
@@ -98,6 +107,10 @@ export async function createBusiness(
       ownerUid: uid,
       fiscalYearStartMonth: parsed.data.fiscalYearStartMonth,
       taxMode: parsed.data.taxMode,
+      invoiceRegistrationNumber:
+        parsed.data.invoiceRegistrationNumber || undefined,
+      issuerName: parsed.data.issuerName || undefined,
+      issuerAddress: parsed.data.issuerAddress || undefined,
       idempotencyKey: input.idempotencyKey,
     });
     await putMember(business.id, {
@@ -140,6 +153,17 @@ export async function updateBusinessSettings(
       // 按分タブからの保存時のみ上書き。未指定(従来の設定画面)は現値を維持する
       if (parsed.data.allocationRatios !== undefined) {
         next.allocationRatios = parsed.data.allocationRatios;
+      }
+      // インボイス関連項目も未指定は現値維持。空文字は未設定(クリア)扱い
+      if (parsed.data.invoiceRegistrationNumber !== undefined) {
+        next.invoiceRegistrationNumber =
+          parsed.data.invoiceRegistrationNumber || undefined;
+      }
+      if (parsed.data.issuerName !== undefined) {
+        next.issuerName = parsed.data.issuerName || undefined;
+      }
+      if (parsed.data.issuerAddress !== undefined) {
+        next.issuerAddress = parsed.data.issuerAddress || undefined;
       }
       return {
         batch: {

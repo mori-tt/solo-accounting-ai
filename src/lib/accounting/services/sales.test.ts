@@ -280,6 +280,56 @@ describe("registerInvoice", () => {
     expect(b.invoice.id).toBe(a.invoice.id);
     expect(await store.listInvoices(businessId)).toHaveLength(1);
   });
+
+  it("請求書番号を事業内連番で採番し、事業ドキュメントのカウンタを進める", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    const first = await registerInvoice(store, businessId, actor, {
+      idempotencyKey: "inv-seq-1",
+      customerId: "c",
+      issueDate: "2025-06-01",
+      dueDate: "2025-06-30",
+      items,
+    });
+    const second = await registerInvoice(store, businessId, actor, {
+      idempotencyKey: "inv-seq-2",
+      customerId: "c",
+      issueDate: "2025-06-02",
+      dueDate: "2025-06-30",
+      items,
+    });
+    expect(first.invoice.invoiceNumber).toBe("INV-000001");
+    expect(second.invoice.invoiceNumber).toBe("INV-000002");
+    const business = await store.getBusiness(businessId);
+    expect(business?.invoiceCounter).toBe(2);
+    const saved = await store.getInvoice(businessId, second.invoice.id);
+    expect(saved?.invoiceNumber).toBe("INV-000002");
+  });
+
+  it("冪等リプレイでは採番カウンタを消費しない", async () => {
+    const env = await setupStore();
+    const { store, businessId, actor } = env;
+    await registerCustomer(store, businessId, actor, { id: "c", name: "X" });
+    const a = await registerInvoice(store, businessId, actor, {
+      idempotencyKey: "inv-replay",
+      customerId: "c",
+      issueDate: "2025-06-01",
+      dueDate: "2025-06-30",
+      items,
+    });
+    const b = await registerInvoice(store, businessId, actor, {
+      idempotencyKey: "inv-replay",
+      customerId: "c",
+      issueDate: "2025-06-01",
+      dueDate: "2025-06-30",
+      items,
+    });
+    expect(b.replayed).toBe(true);
+    expect(b.invoice.invoiceNumber).toBe(a.invoice.invoiceNumber);
+    const business = await store.getBusiness(businessId);
+    expect(business?.invoiceCounter).toBe(1);
+  });
 });
 
 describe("registerPayment / 未入金チェック", () => {

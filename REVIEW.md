@@ -1573,3 +1573,30 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: 適格請求書対応(Issue #94)
+- Worktree: invoice-compliance
+- `src/lib/accounting/types.ts`: `Business` に `invoiceRegistrationNumber`(T+13桁)・`issuerName`・`issuerAddress`・`invoiceCounter`(内部連番カウンタ)、`Invoice` に `invoiceNumber` を追加。いずれもオプショナルで既存データは後方互換
+- `src/lib/validation/schemas.ts`: `businessSchema` に3項目追加。登録番号は `/^T\d{13}$/`(空文字=未設定扱い)。`undefined` は現値維持で、発行項目のない画面(按分タブ・オンボーディング)からの保存で消えない設計
+- `src/lib/accounting/services/business.ts`: `registerBusiness` が発行者3項目を受理し、登録番号は `isInvoiceRegistrationNumber` でサービス層でも検証(zodとの多層防御)
+- `src/lib/accounting/services/sales.ts`: `registerInvoice` で請求書番号を `INV-`+6桁連番で採番。カウンタは事業ドキュメントの `invoiceCounter` を transact 内で読み→同一バッチで書き戻す方式(Firestoreトランザクションの read-before-write・競合リトライで原子的)。冪等リプレイは work 自体が走らないため番号を消費しない
+- `src/lib/actions/businesses.ts`: `MyBusiness` に3項目追加し `listMyBusinesses` でクライアントへ供給。`updateBusinessSettings` は `!== undefined` ガード(指定時のみ上書き・空文字はクリア)、`createBusiness` は `|| undefined` で正規化して通す
+- `src/app/(app)/settings/settings-screen.tsx`: 事業情報カードに「適格請求書(インボイス)発行情報」セクション(登録番号・発行者名・発行者住所)を追加。非オーナー表示側にも3項目のdl行を追加
+- `src/app/(app)/invoices/invoice-sheet.tsx`(新規): 適格請求書の記載事項を備えた帳票コンポーネント。発行者名(issuerNameまたは事業名)・住所・登録番号、請求書番号・発行日・支払期日、交付先(顧客名御中+住所)、税率別対象金額・消費税額の内訳表、軽減税率対象品目の※印。`print-sheet` クラスで画面プレビューと印刷を共用
+- `src/lib/accounting/invoice-tax.ts`: 税率区分ごとの合計金額・消費税額を返す `invoiceAmountsByRate` を追加(明細の保存済み taxAmount 優先・未保存は内税計算)
+- `src/app/(app)/invoices/invoices-screen.tsx`: 一覧の請求書番号列を `invoiceNumber ?? id` 表示に変更し、各行に「印刷プレビュー」リンクを追加。表示中は一覧を丸ごと帳票に差し替え、ツールバーのみ `no-print`(globals.css の印刷ルールで帳票のみ出力)
+- `docs/FIRESTORE_SCHEMA.md`: businesses/invoices に新規4フィールドを追記
+### 確認した穴の整理
+- 採番方式: 専用カウンタdoc案もあったが、rules非改変・store層非拡張で済む事業ドキュメント内カウンタを選択(transactが既に read-then-write をトランザクション化するため原子性は同等)
+- 採番タイミングは Issue 指定どおり「作成時」(draftに付番)。draftが発行されず残っても番号は消費済みとなり連番に欠番が生じうるが、番号の再利用はしない
+- バックアップ復元: `backupBusinessSchema` のホワイトリスト外のため `invoiceRegistrationNumber` 等と `invoiceCounter` は復元対象外。merge型復元で既存値は保持されるため連番の巻き戻りは発生しない。別事業のinvoiceを復元した場合に invoiceNumber 文字列が重複しうるが、既存のIDリマップ設計と同じく「参照は張り替えるが表示値はそのまま」の範囲(別タスク要検討)
+- 印刷時の画面制御: `window.print()` 前に一覧を非表示にするため、既存の「.no-print で囲む」規約に合わせ一覧自体を差し替える実装とした(reports系帳票の「帳票以外を no-print」と同型)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(作業前は `LayoutProps` の生成型欠落でtypecheck失敗。worktree直後は typegen が必要。AGENTS.md に追記推奨)
+- `pnpm lint` — 合格(新規warningなし。receipts-screen の `<img>` warning は既存)
+- `pnpm test` — 合格(46ファイル548件、skip 10。business.test.ts 新規5件・sales.test.ts 連番2件・invoice-tax.test.ts 税率別集計3件追加)
+- `pnpm build` — 合格
+- `JAVA_HOME=... pnpm test:emulators` — 合格(7件)
+- `JAVA_HOME=... pnpm test:rules` — 合格(79件。validInvoiceは必須項目のみ検査のため新規フィールド追加の影響なし)
+### 判断事項・次の担当者への注意事項
+- 免税事業者(登録番号未設定)でも帳票は出力できるが登録番号行は省略される。適格請求書として交付するには設定画面での登録番号入力が前提
+- 請求書番号のフォーマットは `INV-`+6桁固定(prefix・桁数は formatInvoiceNumber に集約)。年頭リセットや任意接頭辞は未対応(要望があれば別タスク)
+- e2e は未実施(同時起動1系統の制約)。帳票プレビューは単体レンダリングのため DOM 構造は invoice-sheet.tsx を参照
