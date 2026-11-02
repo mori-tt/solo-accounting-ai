@@ -213,6 +213,9 @@ export function recurringInvoiceTemplate(
     dueDays: 30,
     active: true,
     generatedCount: 0,
+    ...extra,
+  };
+}
 
 export function inventoryItem(extra: Record<string, unknown> = {}) {
   return {

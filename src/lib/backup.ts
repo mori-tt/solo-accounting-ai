@@ -386,7 +386,7 @@ const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
     recurringInvoiceTemplates: [
       ["customerId", "customers"],
       ["projectId", "projects"],
-
+    ],
     billPayments: [
       ["billId", "bills"],
       ["transactionId", "transactions"],
