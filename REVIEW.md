@@ -16,6 +16,34 @@
 
 ## Log
 
+## 2026-11-02: 請求書メール送信導線(mailto)とサポート連絡先(Issue #146)
+- Worktree: mail-support
+請求書一覧・帳票プレビューからユーザーのメーラーで請求書送付メールの下書きを開く導線と、LPフッター・設定画面へのサポート連絡先を追加。送信基盤は外部サービス不要の mailto 実装のみで、将来の SendGrid 等接続に備えて送信インターフェースを抽象化。依存追加なし。
+### 実装内容
+- `src/lib/mail/`(新規): メール送信の抽象化レイヤ
+  - `sender.ts` — `MailMessage`(to?/subject/body)、`MailSendResult`、`MailSender` インターフェース(`kind` + `send(message): Promise<MailSendResult>`)。将来の外部送信基盤はこのインターフェースの別実装として接続する想定
+  - `mailto.ts` — `buildMailtoUrl`(RFC 6068。subject/body は encodeURIComponent で percent-encoding。空白が `+` になる URLSearchParams は件名表示崩れを避けるため不使用)と `MailtoMailSender`(既定メーラーで下書きを開くだけでアプリ自身は送信しない。URL遷移は `location.assign`、テスト用に navigate 関数を注入可能)。メーラー有無・起動成否はブラウザから検知不可のため遷移発行できれば ok
+  - `invoice-mail.ts` — `buildInvoiceMail`: 件名 `【ご請求】請求書 {番号} のお知らせ`、本文に宛名(顧客名 御中)・請求書番号・発行日・お支払期日・ご請求金額(formatYen/税込)・発行者名。宛先は顧客 `email`(未登録時は空で利用者がメーラー上で入力)。invoiceNumber 無しの旧データは id を番号代用。mailto では添付不可のため「送信前に請求書ファイルの添付と内容をご確認ください」の注意書きを末尾に付記
+  - `support.ts` — `SUPPORT_EMAIL`(`NEXT_PUBLIC_SUPPORT_EMAIL` から静的参照で読取、未設定時 `support@example.com`)、`SUPPORT_CATEGORIES`(5種)、`buildSupportMail`: 種別を件名に含め、本文末尾にアプリバージョンのみ自動付記
+  - `index.ts` — `getMailSender()` ファクトリ(現状は常に MailtoMailSender を返す。外部基盤導入時はここで差し替え)+ 各型・関数の re-export
+- `src/app/(app)/invoices/invoices-screen.tsx`: `sendInvoiceMail(row)` を追加(顧客の name/email・発行者名 business.issuerName||business.name を解決して buildInvoiceMail → getMailSender().send。失敗時は既存 actionError 欄に表示)。一覧の各行に「請求書」「納品書」と並ぶ「メール」リンク、帳票プレビュー(詳細)の no-print ツールバーに「メールを作成」ボタン(請求書帳票のみ)を追加。viewer 含め全ロールで利用可(データ変更を伴わずユーザーのメーラーを開くだけのため)
+- `src/app/(app)/settings/settings-screen.tsx`: 「サポート・お問い合わせ」カードを最下部に追加。窓口アドレスの mailto リンク表示 + 種別 Select・内容 Textarea のフォーム枠組みから buildSupportMail で定型メールを組み立ててメーラー起動
+- `src/app/page.tsx`(LP): フッターナビに法務リンクと並ぶ「お問い合わせ」mailto リンクを追加
+- `.env.example`: `NEXT_PUBLIC_SUPPORT_EMAIL` を追記(未設定時はプレースホルダー、公開前に正式設定が必要と注記)
+- 個人情報・ログ方針: 送信メール・問い合わせメールとも console 等へのログ出力なし。問い合わせ本文への自動付記はアプリバージョンのみ(ユーザーのメールアドレス・businessId・顧客情報は自動では含めない。送信者情報は利用者のメーラー側が付与し、利用者自身が内容を確認して送信する)
+### Checks
+- `pnpm install --frozen-lockfile` — 成功・依存追加なし
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(64ファイル774件、skip 10。新規: `mail/mailto.test.ts` 7件、`mail/invoice-mail.test.ts` 6件、`mail/support.test.ts` 4件)
+- `pnpm build` — 合格
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル156件。ルール変更なし・退行確認のみ)
+### 判断事項・次の担当者への注意事項
+- mailto はファイル添付を渡せないため、請求書メール本文に「送信前に請求書ファイルの添付と内容をご確認ください」を自動付記している。実際の請求書は帳票プレビューから印刷/PDF保存して添付する運用
+- 送信はすべてユーザーの既定メーラー任せ。メーラー未設定の環境では mailto 遷移が何も起きない場合があるが、ブラウザから検知できないため現状はエラー表示なし(将来 SendGrid 等のサーバー送信実装を追加する場合は `getMailSender()` の差し替えで対応する設計)
+- `SUPPORT_EMAIL` の既定値は `support@example.com`(IANA予約のプレースホルダー)。法務ページ同様プレースホルダー状態のため、公開前に `NEXT_PUBLIC_SUPPORT_EMAIL` で正式な窓口アドレスを必ず設定すること
+- 請求書メールの導線は下書き請求書を含む全ステータスで表示(メーラー上の下書きは編集可能で、送信自体はアプリのデータ変更を伴わないため)
+
 ## 2026-11-02: 帳票発行(見積書・見積→請求変換・納品書・領収書・請求書PDF)(Issue #129)
 - Worktree: docs-issuance
 見積書コレクション新設、見積→請求転換、請求書ベースの納品書・入金ベースの発行領収書の帳票追加、印刷/PDF導線の改善。依存追加なし。
@@ -2358,3 +2386,38 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm build` — 合格(/reports/compare ルート生成)
 - Firebase Emulator tests — 未実施(firestore.rules/firestore書き込み経路の
   変更なし。追加はAdmin SDK経由の読み取りのみ)
+## 2026-11-02: Dependabotグループ化 + 法務E2E flaky修正(Issue #144)
+- Worktree: ops-guard
+- `.github/dependabot.yml` に `groups` を追加
+  - npm: `react`(react/react-dom/@types/react/@types/react-dom。分離PRで
+    片方のみ更新→実行時不整合となる事故 #127 の再発防止が本Issue主目的)、
+    `next`(next+eslint-config-next。同一リポジトリから同バージョンで
+    リリースされるため併せて更新)、`eslint`、`firebase`(firebase*+
+    @firebase/*)、`test`(vitest/playwright/testing-library/jsdom/
+    @vitejs/*)、`tailwind` の6グループ
+  - github-actions: `actions`(`*`で全Actions更新を1PRに集約)
+  - グループ非該当の依存(typescript/openai/zod等)は従来通り個別PR
+- `e2e/legal.spec.ts` の「法務ページ間をフッターナビで回遊できる」flaky修正
+  (CIで3回 click timeout)
+### 原因分析(flaky)
+- AppProvider が root layout にマウントされるため /legal/* でも
+  `connectAuthEmulator` が走り、`.firebase-emulator-warning` バナーは
+  Emulator接続完了後に「非同期」で body へ挿入される
+- 旧 `removeEmulatorBanner` は呼出時点の既存要素しか除去しないため、
+  除去→クリックの隙間にバナーが挿入されると actionability チェック
+  (ポインタイベント遮蔽)が15sリトライしても回復せず click timeout。
+  低速なCIでのみ顕在化するレースコンディションだった
+### 対応
+- `suppressEmulatorBanner` に改名し、既存要素の除去に加えて
+  `page.addStyleTag` で `.firebase-emulator-warning{display:none!important}`
+  を注入。挿入タイミング非依存で遮蔽を防ぐ(CSPは style-src 'unsafe-inline'
+  のため適用可)
+- 回遊テスト: nav・各リンクの `toBeVisible` 待機を追加し、遷移ごとに
+  遷移先 heading の描画確認を挟んでから次のリンクを操作
+- ログイン画面フッター遷移テストも同レースを持つため同関数を適用し、
+  goBack後に legalNav の再描画待機を追加
+- `pnpm lint` — 合格(0 errors、既存warning1件: receiptsの<img>)
+- `pnpm test` — 合格(61ファイル757件、skip 10)
+- `pnpm build` — 合格
+- E2E(legal.spec.ts, Firebase Emulator + JAVA_HOME=openjdk@21, E2E_PORT=3100)
+  — 合格(5件 + `--repeat-each=3` で15件連続合格)

@@ -27,6 +27,7 @@ import {
   invoiceSettlement,
 } from "@/lib/payment-matching";
 import { formatYen, todayDateString } from "@/lib/format";
+import { buildInvoiceMail, getMailSender } from "@/lib/mail";
 import {
   invoiceSchema,
   parseForm,
@@ -532,6 +533,22 @@ export function InvoicesScreen() {
     }
   };
 
+  // 請求書送付メールの下書きをメーラーで開く(実送信はメーラー任せ)
+  const sendInvoiceMail = async (row: InvoiceRow) => {
+    const customer = data?.customers.find(
+      (c) => c.id === row.invoice.customerId,
+    );
+    const result = await getMailSender().send(
+      buildInvoiceMail({
+        invoice: row.invoice,
+        customerName: customer?.name,
+        customerEmail: customer?.email,
+        issuerName: business?.issuerName || business?.name,
+      }),
+    );
+    if (!result.ok) setActionError(result.error);
+  };
+
   // 帳票プレビュー表示中は一覧を丸ごと差し替え、ツールバーのみ no-print にする
   if (printView) {
     const { row } = printView;
@@ -549,6 +566,14 @@ export function InvoicesScreen() {
       <div className="mx-auto max-w-4xl">
         <div className="no-print mb-4 flex items-center gap-2">
           <Button onClick={() => window.print()}>印刷 / PDFで保存</Button>
+          {printView.kind === "invoice" && (
+            <Button
+              variant="secondary"
+              onClick={() => void sendInvoiceMail(row)}
+            >
+              メールを作成
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => setPrintView(null)}>
             一覧に戻る
           </Button>
@@ -689,6 +714,13 @@ export function InvoicesScreen() {
                           }}
                         >
                           納品書
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs font-normal text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+                          onClick={() => void sendInvoiceMail(row)}
+                        >
+                          メール
                         </button>
                       </div>
                     </td>
