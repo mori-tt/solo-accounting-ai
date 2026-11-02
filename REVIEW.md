@@ -45,6 +45,23 @@
 - 繰越対象科目はプリセット3科目+登録済み科目に限定し、売掛・買掛の自動判定等は行わない(明示的な期首残高として登録された科目のみを信頼する設計)。負債科目(マイナス残高)も計算値が正しくない限り生成しないが、0円レコードは作成しない
 - 翌年度に期首残高が既存の場合の上書きは confirm() 確認あり、かつ締めと同時のみ実行。締め後に期首残高を直接編集する場合は既存の opening-balances 画面がそのまま使える(開いている期間のみ編集可の既存ガードに従う)
 - `family_salary` を使った取引が過去年度に存在しても当該年度の収支内訳書では正しく年度内合計のみ初期表示される(集計は年間 accountTotals ベース)
+## 2026-11-02: 帳簿の印刷出力(仕訳帳・元帳・試算表)(Issue #59)
+- Worktree: ledger-print
+`reports/journal`・`reports/ledger`・`reports/trial-balance` の3画面に `window.print()` 印刷対応。依存追加なし。
+- `src/app/globals.css`: `@media print` ブロックを新設(filing-screen の局所 `<style>` と同型のルールをグローバル化+拡張)。`aside`/`header`/`.no-print` を非表示、`main` のpadding除去、`.print-sheet`(カード装飾リセット)、`.print-only`(画面 hidden の印刷専用要素)、`.print-header`(帳票ヘッダ下線)、`.print-table`(罫線濃色化・`thead`/`tfoot` の各ページ繰返し・`tr` 改ページ回避・合計行 `tfoot` の太線強調)を追加。dark mode でも白地黒字で出るよう `body` の色を固定
+- `src/app/(app)/reports/print-header.tsx`(新規): 印刷時だけ出る帳票ヘッダ(帳票名・対象期間・事業名・印刷日)。`hidden`+`.print-only` で画面非表示/印刷表示を両立
+- 3画面とも `PageHeader`+フィルタ(MonthNav/科目Select)・ローディング/エラー/空状態を `.no-print` で囲み、`PageHeader.actions` に「印刷する」ボタン(データなし/0件では disabled)を追加。帳票部は `PrintHeader` + `Card.print-sheet` + `table.print-table`。ledger の対象期間は「月 / 科目名」
+- `src/app/(app)/reports/print-header.test.tsx`(新規): 帳票名・期間・事業名・印刷日の出力と `hidden`/`print-only`/`print-header` クラスを検証
+- `pnpm install --frozen-lockfile` — 成功。依存追加なし
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(38ファイル485件、skip 10。print-header.test.tsx 2件追加)
+- `pnpm build` — 合格(3ルートとも静的生成)
+- Emulator系は未実施(タスク指定により起動禁止。rules 未変更)
+- `@media print` がグローバル化されたため、**全ページ**の印刷で aside/header が非表示になる(元々帳票以外の印刷は想定されていなかったため影響は軽微)。filing-screen の局所 `<style>` は重複するが残置き(変更範囲外)
+- monthly/filing の確認: filing は Issue #42 で印刷対応済み(window.print+no-print+print-sheet)。monthly は印刷ボタン/no-print 指定なしで未対応だが、今回の変更範囲外のため確認のみ(グローバル化によりナビ類は消えるが画面UIはそのまま出る)。対応する場合は別タスクで
+- 印刷日は `todayDateString()` のレンダー時点値(印刷実行時刻とは厳密には異なる)
+- 帳票の @page(用紙サイズ/余白)指定は未追加。ブラウザ既定のまま
 
 ## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
 - Worktree: custom-accounts
@@ -1149,3 +1166,27 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 全角元号アルファベット(Ｒ等)は数字のみ半角化するため列名・日付ともに対象外(半角表記のみ受理)
 - `api-client.ts`・`csv.ts`・`accounts.ts`・`firestore.rules`・設定画面は変更なし(許容範囲内で不要だった)
 - E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク
+## 2026-11-02: 取引の一括操作(Issue #64)
+- Worktree: bulk-ops
+### 実装内容
+取引一覧 `/transactions` に下書き取引への一括操作を追加。変更は `transactions-screen.tsx` のみ(`api-client.ts`・他画面・domain・rules等は変更不要だった)。依存追加なし。
+- 選択列: `canEdit`(viewer以外)時のみテーブル先頭にチェック列を追加。ヘッダのチェックで表示中の下書き行を全選択/全解除(一部選択時は indeterminate 表示)。行チェックは `stopPropagation` で展開トグルと分離
+- 選択不可行: confirmed は「確定済みの取引は一括操作できません(行の展開から個別に操作してください)」、locked(締め済み期間)は「締め済み期間の取引は一括操作できません」を `title` ツールチップ+`aria-label`で表示し disabled チェックボックスを描画。選択可能行は `status === "draft"` のみ(`toggleSelect` ガードと操作対象の派生フィルタで二重に防御)
+- 操作バー(`BulkActionBar` コンポーネント): 選択中のみ表示し「N件選択中」「科目select→科目を一括変更」「一括削除」「選択解除」を提供。実行中は全操作をロックし `Spinner` + `done/total 件を処理中…` の進捗を表示
+- 一括削除: `ConfirmDialog` で件数確認後、行ごとに `deleteTransaction` を順次呼出し(既存CSV取込・明細インポートと同じ部分失敗モデル)
+- 科目一括変更: 選択行の `type` 全てに適用できる科目の共通部分(`optionsFor` の積集合。混在時は kind=any のみ)を選択肢として提示し、行ごとに `updateTransaction` を順次呼出し。taxCategory/taxRate は省略(=サーバー側で既存値保持)
+- 結果表示: `Alert` で「N件成功 / M件失敗(失敗分は選択したまま)」+先頭の失敗メッセージを表示し、手動で閉じられる。失敗行のみ選択を残して再実行可能
+- 月送り・種別/状態フィルタ変更時は選択と結果をリセット(onChangeで明示実行)し、非表示行への誤操作を防止。選択対象は「表示中かつdraft」の派生集合なので、リロード後に確定・削除された行は自然に対象外となる
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(37ファイル483件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(Issue制約でEmulator起動禁止。rules・サーバー書き込み経路の変更なし)
+### 設計上の判断・備考
+- 一括操作は draft のみ対象とし、confirmed はIssue仕様どおり選択不可(確定データの一括変更は個別操作に限定)。締め済みは `status === "locked"` で判定(締め処理は期間内draft残存を拒否するため、closed期間内のdraftは存在しない)
+- `react-hooks/set-state-in-effect` が有効なため、選択リセットは useEffect ではなく各フィルタの onChange から呼ぶ方式とした
+- 一括処理は全件トランザクションではなく行ごとの逐次呼出しで部分失敗を許容(既存のCSV取込/明細インポートと同設計)。実行中はチェック・操作類を disabled にして選択の変更を防ぐ
+- 行ごとの既存操作(確定・AI提案・編集・削除)は無変更。展開行の colSpan は canEdit 時 7/非表示時 6 に調整
+- E2E・単体テストの一括操作カバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)
