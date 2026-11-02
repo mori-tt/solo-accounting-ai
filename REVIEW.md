@@ -1573,3 +1573,31 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: ナビゲーションのグルーピング+検索結果から取引へのdeep link(Issue #98)
+- Worktree: nav-search-ux
+
+### ナビゲーションのグルーピング
+- `src/components/nav-links.tsx`(新規): app-shell.tsx からナビ定義を分離。24項目を用途別5セクション(ダッシュボード単独 + 記帳/売上・請求/レポート/決算・管理)にグルーピングし `<h2>` のセクション見出しを付与。各グループ内の項目順・リンク文言・アクティブ判定(`pathname.startsWith`)は変更前と同一。項目数が増えた分 `overflow-y-auto` を nav に追加し縦スクロールを担保
+- `src/components/app-shell.tsx`: NAV_ITEMS/NavLinks を nav-links.tsx へ移しただけ(既存ロジック改変なし)
+- `src/components/nav-links.test.tsx`(新規): グループ見出し表示・リンク24件・アクティブ/非アクティブのクラス付与・href の3件
+
+### 検索結果→取引のdeep link
+- `src/lib/format.ts`: `parseMonthKeyParam`(?month= の YYYYMM 検証。月01-12範囲外・桁数違い・null は undefined)と `transactionDeepLink`(`/transactions?month=YYYYMM&focus=<id>` 生成。id は encodeURIComponent)を追加。`src/lib/format.test.ts`(新規)で両関数+dateToMonthKey をカバー
+- `src/app/(app)/search/search-screen.tsx`: 結果行のリンクを `/transactions` 一律遷移から `transactionDeepLink(t)` へ変更(文言「取引一覧」→「詳細」)
+- `src/app/(app)/transactions/transactions-screen.tsx`:
+  - `TransactionsScreen` は useSearchParams で `?month`/`?focus` を読み、`month/focus` を key に持つ `TransactionsScreenInner` へ委譲。パラメータ変更時は再マウントで初期値を反映する設計(react-hooks/set-state-in-effect を踏まないためeffectによるsetStateを避けた)。再マウントに伴い useApiData の再取得が走る
+  - `monthKey` 初期値: 有効な `?month` があればそれ、なければ当月。`focusId` は `?focus` を初期値とし、月送り・種別/状態フィルタ変更・通知の「閉じる」で手動クリア
+  - 対象行は `id=transaction-<id>` で特定し `scrollIntoView({block:"center"})` で画面中央へスクロール、`focused` prop で初期展開+indigo強調(展開の手動解除は可)
+  - focus対象が表示月の一覧に無い場合は info Alert「指定された取引はN年M月の一覧に見つかりませんでした」を閉じるボタン付きで表示(削除済み・月指定誤り等)
+
+### 実行したチェック
+- `pnpm lint` — 合格(既存の img 警告1件のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(worktree作成直後は typegen が必要)
+- `pnpm test` — 合格(47ファイル549件、skip 10。新規 format.test.ts 7件・nav-links.test.tsx 3件)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路・Server Action の変更なし)
+
+### 備考
+- 未対応(範囲外): 未ログイン状態で deep link を踏むと AppShell の `next` パラメータが pathname のみ保持のためクエリが落ち、ログイン後は /transactions の当月へ着地する(従来仕様。クエリ保持は AppShell 側の改修が必要)
+- focus は locked 取引にも有効(閲覧のみ。操作ボタンは従来どおり非表示)
+- ナビ項目の追加・削除は nav-links.tsx の NAV_GROUPS のみを編集する

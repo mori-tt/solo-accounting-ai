@@ -61,6 +61,27 @@ export function shiftMonthKey(monthKey: string, delta: number): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}`;
 }
 
+/**
+ * URLクエリ ?month= の値を検証し、有効な monthKey("YYYYMM")のみ返す。
+ * 不正値(桁数違い・月が01-12範囲外・null)は undefined。
+ */
+export function parseMonthKeyParam(value: string | null): string | undefined {
+  if (value === null || !/^\d{6}$/.test(value)) return undefined;
+  const month = Number(value.slice(4, 6));
+  if (month < 1 || month > 12) return undefined;
+  return value;
+}
+
+/** 取引一覧で特定の取引を開くディープリンク(検索結果等からの遷移用) */
+export function transactionDeepLink(transaction: {
+  id: string;
+  date: string;
+}): string {
+  const month = dateToMonthKey(transaction.date);
+  const focus = encodeURIComponent(transaction.id);
+  return `/transactions?month=${month}&focus=${focus}`;
+}
+
 /** monthKey → その月の日付範囲 {startDate, endDate} */
 export function monthKeyDateRange(monthKey: string): {
   startDate: string;

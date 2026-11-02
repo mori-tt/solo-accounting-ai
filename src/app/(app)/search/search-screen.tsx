@@ -8,6 +8,7 @@ import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { useAccounts } from "@/lib/hooks/use-accounts";
 import { searchTransactions } from "@/lib/actions/search";
 import { callApi } from "@/lib/api-client";
+import { transactionDeepLink } from "@/lib/format";
 import type { TransactionSearchInput } from "@/lib/validation/schemas";
 import {
   Alert,
@@ -187,10 +188,10 @@ export function SearchScreen() {
                     </td>
                     <td className="whitespace-nowrap">
                       <Link
-                        href="/transactions"
+                        href={transactionDeepLink(t)}
                         className="text-indigo-600 hover:underline dark:text-indigo-400"
                       >
-                        取引一覧
+                        詳細
                       </Link>
                     </td>
                   </tr>
