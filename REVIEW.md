@@ -1378,6 +1378,184 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - 期首残高ステップの年度は現在日付を含む会計年度に自動決定(初期セットアップ用途のため年度選択UIは設けず)。締め済み年度の不変条件は `saveOpeningBalances` 側の既存チェックに委譲
 - `businessSchema.pick({name,taxMode})` でステップ0の先行検証を行い、開始月の検証は保存時にまとめる(未表示フィールドのエラーを先出ししないため)
 - E2E・単体テストのウィザードカバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)
+## 2026-11-02: LP/SEO整備(Issue #81)
+- Worktree: lp-seo
+- `src/app/page.tsx`: サーバーredirectのみだった `/` をランディングページに刷新。構成はヒーロー(キャッチコピー・CTA・画面イメージのCSSモック)/機能紹介6項目/安心設計3項目/利用手順3ステップ/CTAバンド/フッタ。日本語・Tailwindで、アプリ本体と同じ indigo/zinc 配色とダークモード対応に統一
+- リダイレクト挙動: ログイン済みで `/` を開いた場合は引き続き `/dashboard` へ戻す。新設 `src/app/auth-redirect.tsx` が `useApp().status === "signed_in"` で `router.replace`(login-screenと同パターン)。未ログインはLPを表示し、CTAから `/login` へ進む導線に変更(旧: サーバー `redirect("/dashboard")` 固定)
+- `src/app/layout.tsx`: metadata整備。`metadataBase`・title template(`%s | Solo Accounting AI`)・`applicationName`・Open Graph(ja_JP/website)・Twitter summary card を追加
+- `src/app/site.ts` 新設: `siteUrl`/`siteName`/`siteDescription` を一元管理。siteUrl は環境変数 `NEXT_PUBLIC_SITE_URL`、未設定時 `http://localhost:3000` にフォールバック
+- `src/app/robots.ts` 新設: `/`・`/legal/*` を許可、認証必須のアプリ画面・`/api`・`/login` 等は disallow を列挙 + sitemap URL
+- `src/app/sitemap.ts` 新設: `/` と `/legal/{terms,privacy,tokusho}` の4URL
+- `src/app/manifest.ts` 新設: name/description/`lang: "ja"`/theme_color `#4f46e5` + `/app-icon.svg` アイコン
+- `src/app/icon.svg` 新設、`src/app/favicon.ico` 削除(create-next-app既定のNextロゴをブランドSVGに置換)。manifest用に `public/app-icon.svg`(512px viewBox)も配置
+- フッタに `/legal/terms`・`/legal/privacy`・`/legal/tokusho` リンク追加(ルート本体は別タスク)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm build` — 合格(`/` は static プリレンダ、`/robots.txt` `/sitemap.xml` `/manifest.webmanifest` `/icon.svg` 生成確認)
+- `next start` で実レスポンス確認 — `/` 200・title/description/canonical/OGタグ・manifest link 出力、robots/sitemap XML・manifest JSON・icon.svg(200, image/svg+xml)を目視確認
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
+- 「既存リダイレクト挙動は保持」の解釈: 旧実装の無条件 `redirect("/dashboard")` を残すとLP自体が表示されないため、「ログイン済みユーザーはアプリへ戻る」側を保持し、未ログインにはLPを表示する構成とした
+- e2e/home.spec.ts(「未認証で `/` → `/login`」を期待)は本変更で失敗する。touch範囲外のため未修正。未認証時の `/` 到達先がLPへ変わる仕様変更のため、別タスクでspec更新が必要
+- robots の disallow は (app) ルートグループのパスを列挙する方式(URLプレフィックスを持たないため allow/deny の優先度ルールに頼れない)。アプリ画面追加時は PRIVATE_PATHS への追記が必要
+- `NEXT_PUBLIC_SITE_URL` は新規環境変数。本番デプロイ時に設定すること(.env.example への追記はtouch範囲外のため未実施)
+- manifest icons は SVG(`sizes: "any"`)。PNG版(192/512)が必要になれば別タスクで `public/` へ追加
+- `export const instant = false` は削除。旧ページはサーバーredirectで動的だったが、新LPは完全静的でプリレンダ可能なため(ビルド出力でも ○ Static を確認)
+## 2026-11-02: UX仕上げ(スケルトン/空状態/loading)(Issue #82)
+- Worktree: ux-polish
+`app/(app)` 配下の全24 route に `loading.tsx` を追加し、`components/ui.tsx` にスケルトン系コンポーネントを末尾追記。空状態は全一覧画面で既に `EmptyState` 統一済みだったため画面側の変更は不要だった。
+- `components/ui.tsx`: `Skeleton`(骨組み矩形・`animate-pulse`)・`TableSkeleton`(ヘッダ+行を模した一覧用プレースホルダ・`Card` 利用)・`ScreenSkeleton`(PageHeader+テーブル形状のページ全体プレースホルダ・`role="status"`+`sr-only` で読み込み中を通知)を末尾追記。`EmptyState` は既存のため追加せず、既存 export は一切変更なし
+- `loading.tsx`: `app/(app)` 配下の全 route(dashboard/transactions/transactions-import/receipts/invoices/customers/projects/accounts/allocations/audit-log/backup/business-delete/closing/expenses-new/fixed-assets/opening-balances/recurring/reports-6件/search/settings)に `ScreenSkeleton` を返す `Loading` を配置。`cacheComponents`+`partialPrefetching` 有効のため、この fallback はプリフェッチされる App Shell の一部となり client navigation 時に即時表示される。詳細 route(`[id]` 動的セグメント)は本アプリに存在しないため一覧+レポートが対象
+- 空状態の確認: transactions/receipts/invoices/customers/projects/accounts/fixed-assets/recurring/audit-log/opening-balances/expenses-new/search/settings/dashboard/closing/全レポート画面は既に `EmptyState` 使用済み。残余の「まだ/なし」表記は成功メッセージ(`問題ありません`等)・帳票行(`(収入なし)`等の収支内訳書様式行)・select option・フォーム内ヒントであり空状態ではないため置換対象外と判断
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm build` — 合格(37 route 生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動は worktree 横断で1系統の制約あり)
+- 各画面の内部ローディング(`useApiData` の `initialLoading` → `LoadingBlock` スピナー)は従来どおり。`loading.tsx` は route segment 境界のフォールバックであり、画面内のデータ取得中表示とは別層として共存する
+## 2026-11-02: 認証まわりの調査と修正(auth-polish)
+- Worktree: auth-polish
+
+認証経路(Firebase Auth `onIdTokenChanged` → IDトークン→Cookie 同期 → `__session` Cookie 検証 → メンバーシップ・ロール認可 → ログイン/ログアウト/パスワードリセット画面 → AppShell の未ログインリダイレクト)を通して調査し、発見した問題を修正した。
+
+### 重要度の高い発見
+
+**`src/lib/env.ts`: クライアントで常に EnvValidationError が投げられる(main 由来の既存バグ)**
+
+`assertFirebaseClientEnvOnce` → `missingFirebaseClientEnv(env = process.env)` が `env[key]` の動的参照で必須キーを検査していた。クライアントバンドルでは `process.env` オブジェクト自体がポリフィル(中身が空)に置き換わり、インライン化されるのは `process.env.KEY` 形式の**静的参照のみ**のため、環境変数が正しく設定されていてもブラウザでは全キー「未設定」と誤判定 → `AppProvider.useEffect` で throw → エラーバウンダリで全画面がエラー表示になりログイン画面すら描画されない。env.ts 導入(1112673、Issue #34)以降 e2e が一度も実行されていなかったため検出漏れしていた。dev の `/_next/static/chunks` のコンパイル結果で `env = process-polyfill.env` 化していることを確認し、同チャンク内の静的参照(`getFirebaseConfig` 等)はリテラルに正しく展開されていることも併せて検証。
+- 修正: `currentEnv()` を新設し、確認対象キーを `process.env.NEXT_PUBLIC_*` の静的参照で展開したスナップショットを各関数のデフォルト引数に変更。テストからの env 注入経路は維持
+- 副次的影響: `warnIfProductionWithEmulatorHost` のサーバー側 env(FIRESTORE_EMULATOR_HOST 等)はクライアントでは常に undefined になるが、それらはブラウザに出ない値であり警告対象として NEXT_PUBLIC_ 系の残存を検査するのが本来の目的と整合する
+
+### セキュリティ・認証の修正
+
+- `src/lib/api/session.ts`: `verifyIdToken(token, true)` に変更し失効(revocation)チェックを有効化。`members/{uid}.role` を `MemberRole` へ安易にキャストしていた問題を修正し、任意文字列を拒否する `toMemberRole` パーサと `roleAtLeast` ランク比較を `src/lib/api/member-role.ts`(新規)に抽出
+- `src/app/api/session/route.ts`: POST/DELETE とも `assertSameOrigin`(Sec-Fetch-Site / Origin host と Host の一致)でクロスサイトからのセッション固定(ログインCSRF)を拒否。`idToken` の長さ上限 16KB を追加。発行時にも `verifyIdToken(token, true)` で失効チェック
+- `src/lib/api/queries.ts` `upsertUserProfile`: `createdAt` がログインのたび `serverTimestamp()` で上書きされていた問題を修正(既存ドキュメントがあれば維持)。代わりに `lastLoginAt` を毎回更新
+- `src/app/reset-password/reset-password-screen.tsx`: `auth/user-not-found` を別メッセージで出していたアカウント列挙を修正し、未登録メールにも一律「送信しました」系の成功メッセージを返すように
+- `src/app/api/receipts/[receiptId]/route.ts`: ダウンロード応答に `X-Content-Type-Options: nosniff` を追加
+- `src/lib/firebase/admin.ts`: `server-only` を追加しクライアントバンドル混入をビルド時に防止。未参照の死コード `src/lib/firebase/server.ts` を削除
+- `src/lib/firebase/client.ts`: `client-only` を追加(config.ts との対称性)
+
+### 認証 UX・信頼性の修正
+
+- `src/components/app-shell.tsx`: 未ログイン時に `/login?next=<現在パス>` へリダイレクト(`/dashboard` 以外)。ログアウト処理を `try/finally` 化し失敗時も `signingOut` が戻るように
+- `src/app/login/login-screen.tsx`: `useSearchParams` で `next` を読み、ログイン成功後に元の画面へ戻る。検証: `/` 始まりのみ受理、`//`・バックスラッシュ・`/login` 自身(`?`/`#` 付き含む)を拒否しオープンリダイレクトとループを防止
+- `src/lib/api-client.ts` `refreshSession`: `getIdToken()`/`fetch()` の例外がそのまま呼出元へ漏れていたのを `try/catch` で `false` 返しに正規化
+- `src/lib/firebase/config.ts` `parseEmulatorHost`: `localhost:`(ポート空→0)、負数、65535超、余分なコロン、空ホストを拒否。1〜65535 の境界を正しく受理するようバリデーション強化
+- `src/lib/firebase/client.ts` `connectEmulators`: 冪等化。接続済みマーカーをモジュールスコープではなく app インスタンス(`__saiEmulatorsConnected`)へ移し Fast Refresh/HMR 後の二重接続(FAILED_PRECONDITION)を防止。「already been started/used」等のエラーは `ignoreAlreadyConnected` で冪等成功として扱い、全サービス接続完了後にのみマークする
+- `src/lib/accounting/store/firestore.ts`: `getAdminDb()` のデフォルト引数を廃止し、store 生成時に明示的に `getAdminDb()` を渡す形へ(シングルトンへの暗黙依存を排除)
+- ログイン/リセットのネットワーク系エラーメッセージで Emulator 言及を `shouldUseEmulator()` 時のみに条件化
+
+### テスト追加・E2E整備
+
+- `src/lib/api/member-role.test.ts`(新規): `toMemberRole` の正常値/不正値、`roleAtLeast` のランク比較
+- `src/lib/firebase/config.test.ts`: `parseEmulatorHost` のエッジケース(空ポート・負数・65535超・余分コロン・境界値1/65535)を追加
+- `e2e/auth.spec.ts`: 未ログインで `/transactions` へアクセス → `/login?next=%2Ftransactions` へリダイレクト → ログイン後 `/transactions` へ戻る、を検証
+- `e2e/helpers.ts`: URL アサーションを `?next=` 付き遷移に対応
+- `playwright.config.ts`: `E2E_PORT` 環境変数でポートを変更可能に(`const port = process.env.E2E_PORT ?? "3000"`)。ローカルに別プロジェクトの dev server が :3000 を占有していても E2E を実行できるように(実際に :3000 が別アプリ orooro-ginza で占有されており、初回 E2E が誤ってそちらを叩いて失敗した経緯あり)
+
+- `pnpm test` — 合格(41ファイル509件、skip 10)
+- `pnpm build` — 合格
+- `JAVA_HOME=... pnpm test:rules` — 合格(2ファイル79件)
+- `JAVA_HOME=... pnpm test:emulators` — 合格(2ファイル7件)
+- `JAVA_HOME=... E2E_PORT=3100 pnpm test:e2e` — 合格(31件)
+
+### 判断事項・次の担当者への注意事項
+- E2E の初回失敗は「:3000 が別プロジェクトの dev server に占有されていた」ことが原因。`reuseExistingServer` が別アプリを拾う罠があるため、worktree 運用では `E2E_PORT` を指定するか対象 worktree のサーバーが起動していることを確認してから実行すること
+- 2回目の失敗(EnvValidationError)は当初「Playwright 起動の `pnpm exec next dev` が .env.development を読めていない」と疑ったが、実際にはサーバー側は env ロード済みで、env.ts の動的 `process.env` 参照が原因の main 由来バグだった。`pnpm dev` と `pnpm exec next dev` の差ではない
+- `assertSameOrigin` は `Host` ヘッダとの一致で判定するため、リバースプロキシ等で `Origin`/`Host` が異なる構成(別ドメインからプロキシ)では要検証。現状のデプロイ想定では問題ないが、本番構成変更時に確認する
+- `/api/session` の same-origin・トークン長・revocation の route レベル単体テストは未追加(Route Handler のテスト基盤が未整備)。必要になれば別タスクで
+- `unauthorized()` 等 Next.js 16 の実験的APIは見送り(現行のクライアント側 auth gate で要件を満たす)
+## 2026-11-02: メール確認フロー(Issue #84)
+
+Firebase `sendEmailVerification` によるメールアドレス確認フローを追加。確認はソフトゲート(機能ブロックせずバナーで促す)とし、サインアップ直後の送信・未確認バナー・再送・確認済み反映を実装した。
+
+- `src/components/email-verify-banner.tsx`(新規): `(app)` レイアウト上部に常駐する未確認バナー
+  - 表示条件: `status === "signed_in"` かつ `user.emailVerified === false`(ローカルの `verified` state と併用。`user.reload()` は同一オブジェクトを更新するだけで context の `setUser` が再描画を起こさないため、ローカルでも確認済みを保持する)
+  - 「確認を反映」: `user.reload()` → 確認済みなら `getIdToken(true)` でIDトークンの `email_verified` claim を更新(onIdTokenChanged 経由でセッションCookieも再同期)しバナーを閉じる。未確認なら案内メッセージ
+  - 「確認メールを再送」: `sendEmailVerification(user)`。送信後60秒クールダウンで連打防止。`auth/too-many-requests` は専用メッセージ
+  - マウント時・タブ復帰時(`visibilitychange`)に `user.reload()` で自動チェック(15秒スロットル。StrictMode の二重effectも抑制)。別タブ/メールアプリで確認リンクを開いて戻ったケースを拾う
+  - バナーにはメールアドレスを表示しない(ヘッダーのメール表示と重複し、e2e の `getByText(email)` が strict mode で2件ヒットするため。アカウントはヘッダーで確認可能)
+- `src/app/(app)/layout.tsx`: `<EmailVerifyBanner />` を Suspense 内・AppShell の直上に追加(追加のみ)
+- `src/app/login/login-screen.tsx`: サインアップ成功時に `sendEmailVerification(cred.user)` を送信。失敗は catch して握りつぶす(登録自体は完了しておりバナーから再送できるため、登録エラーとは区別)
+- `src/components/email-verify-banner.test.tsx`(新規): 非表示条件・バナー表示・再送(sendEmailVerification呼出+通知+クールダウン)・確認反映(確認済みでバナー消去+getIdToken(true)/未確認で案内メッセージ)の5件
+
+### 確認した穴の整理
+- 未確認ユーザーのログイン: ログイン自体は許可し、遷移先でバナーが常駐表示される設計(Issue仕様どおりソフトゲート)。ログイン画面側での追加案内は不要(即リダイレクトのため見えない)
+- 旧ユーザ(本機能以前に登録し確認メール未送信): バナーの「確認メールを再送」で回復可能
+- 確認済み反映: Firebase は emailVerified を push しないため reload が必要。マウント時/タブ復帰/手動ボタンの3経路でカバー
+- `/reset-password`: パスワードリセットはメール確認状態と無関係に動作するのが正しいため変更不要(確認)
+- `app/signup/` ディレクトリは存在せず、新規登録は login-screen のトグル内(touch範囲の app/login/ 内で対応済み)
+- E2E 副作用: バナーのメールアドレス表示が `getByText(email)` と重複する件はバナー側からメール表示を除いて解消(テスト・app-shell 非改変)
+
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(42ファイル514件、skip 10。email-verify-banner.test.tsx 5件新規)
+- `JAVA_HOME=... E2E_PORT=3101 pnpm test:e2e` — 合格(31件。Auth emulator が sendEmailVerification の oobCode リンクを出力し実送信動作を確認)
+- `pnpm test:rules` / `pnpm test:emulators` — 前回タスクで合格済み(rules・サーバー書込み経路の変更なし)
+
+- メール確認はソフトゲート。確定操作(Server Actions)側で `email_verified` を必須にするポリシーは未導入(issue範囲外・要検討)。導入する場合は `api/session.ts` 側で idToken の claim を確認する形になる
+- 確認メールの文面・送信元は Firebase コンソール側のテンプレート設定に依存。Emulator では実メールは送られず oobCode リンクがログに出る(手動確認はそのリンクを開く)
+- バナーの再送クールダウン(60秒)はUI側のみ。連続リロード等で回避は可能だが Firebase 側のレート制限が実際の上限を担保する
+## 2026-11-02: セキュリティハードニング(Issue #78)
+- Worktree: security-hardening
+REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリティヘッダを追加し、`src/app/api/` 全ルートを監査してレート制限の適用漏れを修正した。新規依存追加なし(既存 `src/lib/api/rate-limit.ts`・`result.ts` を再利用)。
+- `next.config.ts`: `headers()` で全パスに以下を付与。`poweredByHeader: false` で `X-Powered-By` も除去
+  - `Content-Security-Policy`: nonceなしの静的CSP(middlewareを触れないIssue制約のため `node_modules/next/dist/docs` の "Without Nonces" 例に準拠)。`script-src 'self' 'unsafe-inline'`(+開発時のみ `'unsafe-eval'`)、`style-src 'self' 'unsafe-inline'`、`img-src 'self' blob: data:`、`font-src 'self'`、`object-src 'none'`、`base-uri 'self'`、`form-action 'self'`、`frame-ancestors 'none'`
+  - `connect-src`: `'self'` + 環境に応じて (a) Emulatorモード(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`): Auth/Firestore/Storage Emulator の `http://host:port`(`src/lib/firebase/config.ts` の `parseEmulatorHost`/`EMULATOR_DEFAULTS` をconfig側でも使い接続先を単一ソース化)、(b) 本番: `identitytoolkit.googleapis.com`/`securetoken.googleapis.com`/`https://{authDomain}`(クライアントSDKは firebase/auth のみ使用。firestore/storage は Admin SDK 経由のため不要)
+  - `upgrade-insecure-requests` は Emulator(http)利用時のみ除外(非localhostなemulator接続先を壊さないため)。localhost は仕様上除外対象だが環境依存を避けて明示判定とした
+  - `X-Frame-Options: DENY`(frame-ancestors 'none' と併用)、`X-Content-Type-Options: nosniff`(ユーザーアップロード証憑を inline 返却する `/api/receipts/{id}` の MIME偽装XSSにも有効)、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy: camera=(), microphone=(), geolocation=()`(証憑アップロードは file input のため camera 権限不要)
+- `src/lib/api/rate-limit.ts`: `clientIpKey(request)`(x-forwarded-for先頭→x-real-ip→"unknown")と `sessionRateLimiter`(IP単位30回/時)・`backupExportRateLimiter`(30回/時)・`backupRestoreRateLimiter`(10回/時)・`receiptUploadRateLimiter`(120回/時)・`receiptDownloadRateLimiter`(1200回/時)を追加。いずれも businessId 単位(session のみIP単位)
+### ルート監査結果(src/app/api/ 全8ハンドラ)
+| ルート | 判定 | 対応 |
+| --- | --- | --- |
+| POST /api/session | 認証系・制限なし | `sessionRateLimiter.consume(clientIpKey(request))` を verifyIdToken 前に追加 |
+| DELETE /api/session | Cookie破棄のみ・軽量 | 対象外 |
+| GET /api/backup | 全データ読出し・制限なし | `backupExportRateLimiter`(editor確認後) |
+| POST /api/backup | 全件書込み・制限なし | `backupRestoreRateLimiter`(owner確認後) |
+| POST /api/receipts | Storage課金・制限なし | `receiptUploadRateLimiter`(editor確認後) |
+| GET /api/receipts/[id] | 帯域課金・制限なし | `receiptDownloadRateLimiter`(viewer確認後) |
+| GET /api/ai/usage | 制限なし | `aiApiRateLimiter`(run枠は消費しない) |
+| GET /api/ai/receipt-ocr | 制限なし | `aiApiRateLimiter` |
+| POST /api/ai/receipt-ocr | aiRunRateLimiter 適用済 | 変更不要 |
+| GET・POST /api/ai/suggestions, PATCH [suggestionId] | 適用済 | 変更不要 |
+- `pnpm test` — 合格(43ファイル508件、skip 10。clientIpKey テスト4件追加)
+- `pnpm test:emulators` — 合格(7件) / `pnpm test:rules` — 合格(79件)
+- 実機検証: `pnpm dev` で Emulator向け `connect-src`(localhost:9099/8080/9199)+`'unsafe-eval'`+`upgrade-insecure-requests`なし、`pnpm start` で本番向け `connect-src`(googleapis)+`upgrade-insecure-requests`あり、を curl で確認
+- `next.config.ts` から `./src/lib/firebase/config` を import している(依存ゼロの純粋モジュールのためconfig評価時に解決可。Emulator接続先の解釈を client.ts と共有)
+- IP単位の session 制限は最良努力(x-forwarded-for 偽装は防げない)。厳密な制限が必要なら rate-limit.ts のコメント通り共有ストア化が要となる
+- receipts GET の 1200回/時は一覧 `<img>` の一括要求(数十〜百件/ページ)を踏まえた緩め設定。正常利用で 429 にならない水準
+- 429 応答は `toErrorResponse` が `RateLimitError.retryAfterSec` → `Retry-After` ヘッダへ変換する既存仕組みで返る(画面側は `ApiClientError.code==="RATE_LIMITED"` のメッセージ表示)
+- 未対応(別タスク): nonceベースCSPへの移行(proxy/middleware導入が必要)、HSTS、Server Actions 側のレート制限、`api-client.ts` への 429 リトライ配慮
+## 2026-11-02: 監視基盤(Issue #83)
+- Worktree: observability
+- `src/lib/monitoring/` 新設: エラー監視抽象層と構造化ログ。Sentry SDK本体は入れず抽象層のみ
+  - `types.ts`: `MonitoringProvider`(captureException/captureMessage)、`MonitoringLevel`、`CaptureContext`(tags/extra)
+  - `logger.ts`: JSON 1行の構造化ロガー。fieldsはスカラーのみ受理し、PII・証憑・認証情報を示唆するキー名はdenylistで除去(redactedKeysにキー名のみ記録)。値のメールアドレス様文字列はマスク・長文は打切り。`LOG_LEVEL`で最小レベル制御(省略時info、呼出毎に遅延評価)。sink/clock差替え可能
+  - `provider.ts`: `createMonitoringProvider`で選択。`SENTRY_DSN`設定時は「SDK未同梱」の警告のみ出しconsoleフォールバック(DSN値自体は出力しない)、未設定時もconsoleフォールバック+外部配送no-op。`NoopMonitoringProvider`はテスト注入用
+  - `index.ts`: `captureException`/`captureMessage`公開API。プロバイダ例外を握りつぶし、監視経路の障害で本体処理を落とさない。`setMonitoringProviderForTest`/`resetMonitoringForTest`付き
+- `src/app/api/health/route.ts` 新設: 認証不要の生存確認GET。cacheComponents環境のため`connection()`でビルド時プリレンダを抑止し毎リクエスト実行。`checks.db`は`FIRESTORE_EMULATOR_HOST`設定時のみ遅延importしたadmin SDKの`listCollections()`(1秒timeout)で疎通試行、未設定時は"skipped"。疎通失敗はchecks.db="error"+warn構造化ログで表現しHTTP 200のまま返す(livenessはプロセス応答性のみ保証し、DB障害による再起動ループを誘発しない)
+- `.env.example` 末尾に `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN`/`LOG_LEVEL` を追記(末尾追記のみ)
+- 他のapi・ページ・next.configは未変更。既存ルートへの監視配線は本Issue範囲外
+- `pnpm test` — 合格(46ファイル中43実行535件、skip 10。monitoring/logger/healthの新規テスト含む)
+- `pnpm build` — 合格(`/api/health` が Dynamic ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+- PIIフィルタは多層防御であり、呼び出し側が個人情報・証憑内容をmsg/contextへ入れない設計が前提(AGENTS.md準拠)。denylistは誤検知で安全側に倒し、name/token/email/証憑関連キーを広めに除去。`businessId`等の識別子・`route`/`op`等の運用メタは通す
+- 構造化ログはfieldsをエントリへ平準化し、予約キー(level/msg/ts/err/redactedKeys)衝突は除去対象。`logger.error`と別に`logger.exception(msg, error, fields)`を設けError畳込みを明示化
+- `connection()`はリクエストストア外でthrowするため、route.test.tsでは`next/server`と`@/lib/firebase/admin`をvi.mockして疎通3分岐(skipped/ok/error)を検証
+- Sentry導入タスクでの拡張点は`createMonitoringProvider`(DSN設定時に実SDK初期化のプロバイダを返す)。`NEXT_PUBLIC_SENTRY_DSN`はクライアント捕捉の将来用で現状未使用
+## 2026-11-02: 法務ページ(Issue #79)
+- Worktree: legal-pages
+公開用の法務3ページをプレースホルダー骨組みとして新設し、アプリ各面の末尾から辿れるリンクフッターを設置。
+- `src/app/legal/terms/page.tsx`: 利用規約の条項骨組み(適用・定義・登録・サービス内容・AI提案の性質・料金・禁止事項・データ取扱・知財・免責・変更/停止・解約・規約変更・準拠法/管轄・附則)。AI提案は確定仕訳ではなく利用者の最終判断が必要、税務・会計助言ではない旨の構造を確保
+- `src/app/legal/privacy/page.tsx`: プライバシーポリシー骨組み(事業者情報・取得情報・利用目的・AI機能でのデータ取扱・第三者提供/委託・安全管理措置・保持/削除・利用者の権利・Cookie/ログ・変更・準拠法)
+- `src/app/legal/tokusho/page.tsx`: 特定商取引法に基づく表記を表形式で骨組み化(事業者名・責任者・所在地・連絡先・価格・支払・提供時期・返品/解約・動作環境・特別条件)
+- `src/app/legal/clause.tsx`: 3ページ共用の部品。`Clause`(条項セクション)と`ReviewNote`(「【要法務レビュー】」のamber破線注記)。本文は未作成で全項目にレビュー必須の注記を表示
+- `src/app/legal/layout.tsx`: max-w-3xl コンテナ + 末尾に LegalFooter(legalページ間の回遊用)
+- `src/components/legal-footer.tsx`: 新規。3ページへのリンクフッター(server component、Linkのみ)
+- `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
+- `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
+- `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
+- 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
+- legal ページはリクエスト依存データを読まない完全静的のため `instant` export は不要(cacheComponents環境でもそのまま static shell 検証を通過)
+- フッターは page/layout の return 末尾・Suspense内へ追加する方式で既存行の改変ゼロを維持。AppShellに手を入れないため認証ローディング中はフッターも fallback に含まれる挙動
+- 条項本文は意図的に未作成(「要法務レビュー」注記のみ)。公開前に法務レビューで各条項を肉付けする前提
+- `app/page.tsx`・`next.config.ts`・`app-shell.tsx` はIssue指定どおり未変更
 ## 2026-11-02: リリース運用整備(Issue #85)
 - Worktree: release-ops
 - `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
@@ -1388,6 +1566,8 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
+### 実行したテスト
+- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格
 - Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
 ### 備考

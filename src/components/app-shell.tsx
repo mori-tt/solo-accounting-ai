@@ -173,8 +173,12 @@ function ShellBody({ children }: { children: ReactNode }) {
 
   const onSignOut = async () => {
     setSigningOut(true);
-    await signOut();
-    router.replace("/login");
+    try {
+      await signOut();
+      router.replace("/login");
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   return (
@@ -243,16 +247,22 @@ function ShellBody({ children }: { children: ReactNode }) {
   );
 }
 
-/** 認証ゲート。未ログインは /login へ。 */
+/** 認証ゲート。未ログインは /login へ(行き先を next パラメータで保持)。 */
 export function AppShell({ children }: { children: ReactNode }) {
   const { status } = useApp();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (status === "signed_out") {
-      router.replace("/login");
+      // デフォルトの遷移先(ダッシュボード)は next を付けずURLを簡潔に保つ
+      const query =
+        pathname && pathname !== "/dashboard"
+          ? `?next=${encodeURIComponent(pathname)}`
+          : "";
+      router.replace(`/login${query}`);
     }
-  }, [status, router]);
+  }, [status, router, pathname]);
 
   if (status !== "signed_in") {
     return (

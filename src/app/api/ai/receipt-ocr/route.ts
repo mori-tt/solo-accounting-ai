@@ -12,7 +12,7 @@ import {
   fallbackReason,
   normalizeAIResponse,
 } from "@/lib/ai/schemas";
-import { aiRunRateLimiter } from "@/lib/api/rate-limit";
+import { aiApiRateLimiter, aiRunRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -47,6 +47,7 @@ export async function GET(request: Request) {
       throw new ApiError("INVALID_INPUT", "businessId が必要です");
     }
     await requireViewer(businessId);
+    aiApiRateLimiter.consume(businessId);
     return Response.json({
       ok: true,
       data: { available: isReceiptOcrAvailable() },
