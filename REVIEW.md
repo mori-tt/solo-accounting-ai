@@ -1822,6 +1822,58 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
 - rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約
+## 2026-11-02: Issue #112 セキュリティヘッダー強化(HSTS + nonce CSP 調査)
+- Worktree: headers-hardening
+- 対応: `src/proxy.ts` 新設 + `next.config.ts` コメント整理
+
+### HSTS(実装済み)
+- Next.js 16 で `middleware` 規約は `proxy` に改称済み(機能同等。
+  `node_modules/next/dist/docs/.../middleware.md` は deprecated 注記のみ)。
+  `src/proxy.ts` を新規作成し、`Strict-Transport-Security:
+  max-age=63072000; includeSubDomains; preload` を本番
+  (`NODE_ENV==="production"`)のみ付与。開発・Emulator(http)では付けない
+- matcher は公式 CSP ガイド推奨形
+  (`api`/`_next/static`/`_next/image`/`favicon.ico` と prefetch を除外)
+  に合わせた。将来 nonce CSP 導入時も同じ matcher を使う前提
+- 検証済み: `next start` で `/login` に HSTS + 既存 CSP が重複なく
+  同居。`_next/static`・`/api/health` では HSTS 非付与。
+  `next dev` では HSTS なし(本番のみ要件どおり)
+
+### nonce ベース CSP(調査の結果・見送り)
+- 公式対応状況: proxy(旧middleware)でリクエスト毎に nonce 生成 →
+  `x-nonce` + CSP をリクエストヘッダへ伝播 → Next がレンダリング時に
+  CSP から `'nonce-{value}'` を抽出して framework/ページ script・
+  inline script/style・`<Script nonce>` へ自動付与、という公式パターンは
+  Next 16 でも継続(docs: app/guides/content-security-policy)。
+  app 側で個別タグへの nonce 付与は不要な設計
+- しかし **本プロジェクト構成では不成立** と判断:
+  1. 全 app ページが完全な静的 prerender(`x-nextjs-prerender: 1`、
+     `.next/server/app/*.html` が verbatim 配信)。静的ファイルには
+     リクエスト毎の nonce を注入する経路が存在しない
+     (login.html に nonce なし inline script が12個: `$RT` 計時、
+     `TURBOPACK.push` bootstrap、`__next_f.push` Flight data)
+  2. postponed shell を返す動的 route でも、16.4 系は Turbopack
+     shared-runtime bootstrap を nonce なしで shell に埋め込む
+     (upstream vercel/next.js#99800。修正 PR #100102 は canary のみ、
+     16.4.3 stable には未バックポート) → nonce CSP で hydration が壊れる
+  3. cacheComponents 有効時は `export const dynamic = 'force-dynamic'` が
+     廃止済みで、per-request レンダリングへの逃げ道がない
+     (ensureStatic は静的化を「強める」向きのみ)
+  4. nonce CSP 化の代替 `connection()` で全 route を動的化すると
+     静的最適化を全捨てする上に上記2で依然破綻
+- 判断: 静的 CSP(`script-src 'self' 'unsafe-inline'`)を next.config
+  `headers()` に維持。proxy 側はリクエスト単位ヘッダ(HSTS)専任とし、
+  二重 CSP 防止のため将来 nonce CSP 化する際は config 側の
+  `Content-Security-Policy` を外す旨をコードコメントに記録
+- 再検討トリガ: Next.js が #100102 相当を stable backport + 静的
+  prerender への nonce 注入手段が公式提供された時点。または
+  cacheComponents 非採用の構成変更時
+
+### チェック
+- `pnpm lint` — 合格(既存 warning 1件のみ)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(50ファイル593件、skip 10)
+- `pnpm build` — 合格(`ƒ Proxy (Middleware)` 登録確認)
 ## 2026-11-02: api-client耐障害性(Issue #111)
 - Worktree: api-resilience
 - 依存追加なし。`pnpm install --frozen-lockfile` 実行済み。変更は `src/lib/api-client.ts` のみ(+テスト新規)。`use-api-data.ts` は `errorCode` がエラーオブジェクトから透過されるため整合上の変更不要と判断し未変更
@@ -1880,7 +1932,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
     `{ok:false,error:{code:"RATE_LIMITED"}}` を返す既存経路に乗る
     (画面側は ApiClientError.code==="RATE_LIMITED" のメッセージ表示)
 - `pnpm lint` — 合格(0エラー。receipts-screen の img 警告1件は既存)
-- `pnpm test` — 合格(50ファイル593件、skip 10)
 - Firebase Emulator tests — 未実施(rules・firestore書き込み経路の変更なし。
   limiterはサーバー内インメモリでEmulator外)
 - 残存: R2-18 の「N+1解消・件数上限」側は未対応(services層の変更が必要で
@@ -1910,6 +1961,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
     timeout は spec 26ファイル・retry 2 を見込んで 45 分に設定
   - 残リスク: `next dev` の初回コンパイル込みで実行時間が伸びる可能性。
     実運用で 45 分を超える/不安定な場合は spec 分割か shards 化を検討
-- `pnpm lint` — 合格(既存 warning 1件のみ)
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm build` — 合格
 - `pnpm test` — 合格(50ファイル593件、skip 10)
