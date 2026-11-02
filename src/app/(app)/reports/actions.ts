@@ -33,6 +33,8 @@ import {
   fiscalPeriodOf,
   monthKeyRange,
 } from "@/lib/accounting/dates";
+import { inventoryTotalAmount } from "@/lib/accounting/domain/inventory";
+import { inventoryCountId } from "@/lib/accounting/services/inventory";
 import type { TaxMode } from "@/lib/accounting/types";
 import { actionReadRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
@@ -302,11 +304,23 @@ export async function getConsumptionTaxFilingData(
 export interface FilingStatementData {
   businessName: string;
   statement: IncomeStatement;
+  /**
+   * 期首商品棚卸高(円・整数)。前年度の棚卸カウント合計
+   * (inventoryCounts/fy{fiscalYear-1})。未入力は0。
+   */
+  beginningInventory: number;
+  /**
+   * 期末商品棚卸高(円・整数)。対象年度の棚卸カウント合計
+   * (inventoryCounts/fy{fiscalYear})。未入力は0。
+   */
+  endingInventory: number;
 }
 
 /**
  * 決算書(収支内訳書様式)用の年間収支。
  * 科目別年間合計を収支内訳書の部(収入金額/売上原価/経費)に振り分ける。
+ * 棚卸高は対象年度・前年度の棚卸カウント(inventoryCounts)の合計を返し、
+ * 画面側で手入力上書きできる初期値として使う(集計値は保存しない)。
  */
 export async function getFilingStatement(
   businessId: string,
@@ -327,11 +341,11 @@ export async function getFilingStatement(
       fiscalYear,
       business.fiscalYearStartMonth,
     );
-    const transactions = await store.listTransactionsInRange(
-      businessId,
-      startDate,
-      endDate,
-    );
+    const [transactions, beginningCount, endingCount] = await Promise.all([
+      store.listTransactionsInRange(businessId, startDate, endDate),
+      store.getInventoryCount(businessId, inventoryCountId(fiscalYear - 1)),
+      store.getInventoryCount(businessId, inventoryCountId(fiscalYear)),
+    ]);
     return {
       businessName: business.name,
       statement: buildIncomeStatement(
@@ -341,6 +355,8 @@ export async function getFilingStatement(
           business.fiscalYearStartMonth,
         ),
       ),
+      beginningInventory: inventoryTotalAmount(beginningCount?.lines ?? []),
+      endingInventory: inventoryTotalAmount(endingCount?.lines ?? []),
     };
   });
 }

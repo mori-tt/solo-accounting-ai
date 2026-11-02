@@ -6,6 +6,12 @@ import {
 } from "@/lib/accounting/services/monthlySummary";
 import { findUnpaidExpenses } from "@/lib/accounting/services/expenses";
 import { findUnpaidInvoices } from "@/lib/accounting/services/sales";
+import { findUnpaidBills } from "@/lib/accounting/services/bills";
+
+import {
+  filingDeadlineAlerts,
+  type FilingDeadlineAlert,
+} from "@/lib/accounting/domain/deadlines";
 import { monthKeyOf, monthKeyRange } from "@/lib/accounting/dates";
 import type { MonthlySummary, Transaction } from "@/lib/accounting/types";
 import { MAX_LIST_LIMIT } from "@/lib/ai/store";
@@ -87,9 +93,15 @@ export interface DashboardData {
   unpaidInvoiceCount: number;
   unpaidInvoiceAmount: number;
   overdueInvoiceCount: number;
+  /** 未払の受領請求書(買掛)。期日超過分と残額合計も返す */
+  unpaidBillCount: number;
+  unpaidBillAmount: number;
+  overdueBillCount: number;
   /** 前月以前で締め済み期間に含まれない月の数(open期間の月+取引がある月) */
   unclosedMonthCount: number;
   recentTransactions: Transaction[];
+  /** 期限30日前〜猶予内の申告期限アラート(期限日昇順) */
+  deadlineAlerts: FilingDeadlineAlert[];
 }
 
 /** ダッシュボード用の集計。月次サマリはその場で計算する。 */
@@ -111,16 +123,23 @@ export async function getDashboard(
       receipts,
       unpaidExpenses,
       unpaidInvoices,
+      unpaidBills,
       suggestions,
       periods,
+      business,
+      activeFixedAssets,
     ] = await Promise.all([
       store.listTransactionsInRange(businessId, startDate, endDate),
       store.listTransactionsInRange(businessId, "0001-01-01", "9999-12-31"),
       store.listReceipts(businessId, "unprocessed"),
       findUnpaidExpenses(store, businessId, input.asOf),
       findUnpaidInvoices(store, businessId, input.asOf),
+      findUnpaidBills(store, businessId, input.asOf),
       getAISuggestionService().list(businessId, { limit: MAX_LIST_LIMIT }),
       store.listFiscalPeriods(businessId),
+      store.getBusiness(businessId),
+      // 償却資産申告の対象判定用(activeのみ)
+      store.listFixedAssets(businessId, "active"),
     ]);
 
     const summary = computeMonthlySummary(
@@ -149,12 +168,20 @@ export async function getDashboard(
       unpaidInvoiceCount: unpaidInvoices.length,
       unpaidInvoiceAmount: unpaidInvoices.reduce((s, u) => s + u.remaining, 0),
       overdueInvoiceCount: unpaidInvoices.filter((u) => u.overdue).length,
+      unpaidBillCount: unpaidBills.length,
+      unpaidBillAmount: unpaidBills.reduce((s, u) => s + u.remaining, 0),
+      overdueBillCount: unpaidBills.filter((u) => u.overdue).length,
       unclosedMonthCount: countUnclosedMonths(
         periods,
         allTx.map((t) => monthKeyOf(t.date)),
         parsed.data,
       ),
       recentTransactions,
+      deadlineAlerts: filingDeadlineAlerts({
+        asOf: input.asOf,
+        taxMode: business?.taxMode ?? "exempt",
+        hasDepreciableAssets: activeFixedAssets.length > 0,
+      }),
     };
   });
 }

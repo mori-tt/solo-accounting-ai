@@ -18,6 +18,7 @@ describe("NavLinks", () => {
     for (const heading of [
       "記帳",
       "売上・請求",
+      "仕入・支払",
       "レポート",
       "決算・管理",
     ]) {
@@ -25,7 +26,7 @@ describe("NavLinks", () => {
         screen.getByRole("heading", { name: heading }),
       ).toBeTruthy();
     }
-    expect(screen.getAllByRole("link")).toHaveLength(25);
+    expect(screen.getAllByRole("link")).toHaveLength(27);
   });
 
   it("現在のパスに対応するリンクだけをアクティブ表示にする", () => {
@@ -50,5 +51,8 @@ describe("NavLinks", () => {
     expect(
       screen.getByRole("link", { name: "決算チェック" }).getAttribute("href"),
     ).toBe("/closing");
+    expect(
+      screen.getByRole("link", { name: "棚卸・在庫" }).getAttribute("href"),
+    ).toBe("/inventory");
   });
 });

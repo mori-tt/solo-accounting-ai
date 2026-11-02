@@ -204,6 +204,36 @@ export function recurringTemplate(extra: Record<string, unknown> = {}) {
   };
 }
 
+export function inventoryItem(extra: Record<string, unknown> = {}) {
+  return {
+    name: "商品A",
+    unit: "個",
+    standardUnitPrice: 1000,
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
+export function inventoryCount(
+  fiscalYear = 2026,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    fiscalYear,
+    lines: [
+      {
+        itemId: "i1",
+        name: "商品A",
+        unit: "個",
+        quantity: 3,
+        unitPrice: 1000,
+      },
+    ],
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
 export function fixedAsset(extra: Record<string, unknown> = {}) {
   return {
     name: "複合機",
@@ -214,6 +244,30 @@ export function fixedAsset(extra: Record<string, unknown> = {}) {
     businessRatio: 80,
     status: "active",
     createdBy: "seed",
+    ...extra,
+  };
+}
+
+export function bill(
+  status: "unpaid" | "paid" = "unpaid",
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    vendorName: "仕入先A",
+    totalAmount: 110000,
+    receivedDate: "2026-10-01",
+    dueDate: "2026-10-31",
+    status,
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
+export function billPayment(extra: Record<string, unknown> = {}) {
+  return {
+    billId: "bill-1",
+    date: "2026-10-20",
+    amount: 50000,
     ...extra,
   };
 }

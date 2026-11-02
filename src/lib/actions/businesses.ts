@@ -346,6 +346,9 @@ export async function updateMemberRole(
  * 全サブコレクションを再帰削除する(members/transactions/expenses/
  * receipts/customers/projects/invoices/quotes/payments/journalEntries/
  * recurringTemplates/closingChecks/aiSuggestions/monthlySummaries/
+
+ * receipts/customers/projects/invoices/payments/bills/billPayments/
+ * journalEntries/recurringTemplates/closingChecks/aiSuggestions/monthlySummaries/
  * fiscalPeriods/auditLogs/idempotencyKeys が実在コレクション。
  * recursiveDelete が存在する全コレクションを処理するため列挙は網羅確認用)
  * に加え、Storageの receipts/{businessId}/
