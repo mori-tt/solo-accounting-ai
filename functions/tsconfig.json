@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // package.jsonに"type"を置かないため全ファイルCommonJSとして出力される。
+    // CJSでは拡張子なしの相対importが使えるため、アプリ側ドメイン層
+    // (src/lib/accounting等)をそのままコンパイルできる。
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    // functions/src からリポジトリの src/lib ドメイン層を直接importして
+    // 生成ロジックをアプリと一元化する。出力は lib/ 内にリポジトリの
+    // ディレクトリ構造を保つ(lib/functions/src + lib/src/lib)ため、
+    // デプロイは functions/ ディレクトリ単体で完結する。
+    "rootDir": "..",
+    "outDir": "lib",
+    "sourceMap": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
+}

@@ -20,6 +20,9 @@ const eslintConfig = defineConfig([
     ".firebase/**",
     "emulator-data/**",
     "firebase-export-*/**",
+    // Cloud Functions build output:
+    "functions/lib/**",
+    "functions/node_modules/**",
   ]),
 ]);
 

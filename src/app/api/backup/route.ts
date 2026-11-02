@@ -1,4 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
+import { DomainError } from "@/lib/accounting/errors";
 import { readRequestText } from "@/lib/api/body";
 import { writeAuditLog } from "@/lib/api/queries";
 import {
@@ -33,7 +34,16 @@ export async function GET(request: Request) {
     await requireEditor(businessId);
     // 全データ読み出しの重い処理のため businessId 単位で制限
     backupExportRateLimiter.consume(businessId);
-    const backup = await exportBusinessBackup(getAdminDb(), businessId);
+    // exportBusinessBackup は共有モジュール(backup-export)側で DomainError を
+    // 投げるため、APIの従来メッセージへ変換する
+    const backup = await exportBusinessBackup(getAdminDb(), businessId).catch(
+      (e) => {
+        if (e instanceof DomainError && e.code === "NOT_FOUND") {
+          throw new ApiError("NOT_FOUND", "事業が見つかりません");
+        }
+        throw e;
+      },
+    );
     // 最終バックアップ日時を記録(ダッシュボードの鮮度アラート用)。
     // 記録の失敗でダウンロード自体を落とさないため別tryで捕捉する
     try {

@@ -2379,6 +2379,57 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   - firestore.rules 変更なし(追加は読み取り経路のみ・サーバー側Admin SDK)
   - getDashboard に getBusiness+listFixedAssets の読み取り2件を追加。
     listFixedAssets は status+取得日の既存複合indexを利用
+## 2026-11-02: Cloud Functions スケジュールジョブ基盤 (Issue #147)
+- Worktree: scheduled-jobs
+- 変更内容:
+  - `functions/` を新規スキャフォールド(firebase-functions v2・TypeScript・pnpmワークスペースメンバー)。
+    tsconfig `rootDir:".."` でアプリのドメイン層(src/lib/accounting, src/lib/backup-export)を
+    共有コンパイルし、生成ロジックの二重実装を回避(lib/内でデプロイ単体完結)
+  - `generateRecurringInvoicesDaily`(毎日03:00 JST): 全事業のrecurringInvoiceTemplates
+    当月分をドメイン層 `generateRecurringInvoices` でドラフト請求書化。
+    lastGeneratedMonth・決定的ID・invoiceCounter採番・締め済みガードはアプリの手動実行と同一。
+    actorは `system`、1事業の失敗はログ記録して継続
+  - `exportStaleBackupsDaily`(毎日04:00 JST): 鮮度が fresh(30日以内)でない事業のみ
+    `backups/{businessId}/backup-{YYYY-MM-DD}.json` へバックアップJSONを保存し
+    lastBackupAt を更新。stale/never 検出は構造化warnログ(リマインダ基盤のフック点、
+    通知配送は未実装)
+  - `src/lib/backup-export.ts`(新設): BACKUP_COLLECTIONS/exportBusinessBackup/
+    backupFreshness等をbackup.tsから移設(相対importのみ・functions共有用)。
+    NOT_FOUNDはApiError→DomainErrorに変更し、route.tsで従来メッセージへ変換
+  - firebase.json: functions設定(source/codebase/predeploy)+emulator port 5001追加。
+    `pnpm emulators` は先に functions を build するよう更新
+  - CI: functions build job追加(既存jobは不変更)
+- 変更ファイル:
+  - `functions/{package.json,tsconfig.json,.gitignore}`: engines node22、main=lib/functions/src/index.js
+  - `functions/src/{index.ts,admin.ts,time.ts,backup-utils.ts,recurring-invoices.ts,backup.ts}`
+  - `src/lib/backup-export.ts`(新規), `src/lib/backup.ts`(再export化), `src/app/api/backup/route.ts`
+  - `firebase.json`, `pnpm-workspace.yaml`, `package.json`, `eslint.config.mjs`, `.github/workflows/ci.yml`
+  - `tests/functions/scheduled-jobs.test.ts`, `docs/FIRESTORE_SCHEMA.md`, `docs/DECISIONS.md`(ADR-0006)
+- 判断事項:
+  - 実行方式は「毎日JST実行+当月分生成」。期日到来分の冪等性はドメイン層の既存機構
+    (lastGeneratedMonth+決定的ID)に委ね、月またぎ失敗も翌日実行で自然回復する
+  - バックアップは鮮度ゲート付きのスケジュールエクスポート基盤とした(未バックアップの
+    検出warnログ=リマインダのフック点)。Storageの backups/ はstorage.rulesの
+    許可対象外でクライアント非公開。世代管理はバケットのライフサイクル設定で運用想定
+  - デプロイは行わない(Issue要件)。predeployで `npm --prefix "$RESOURCE_DIR" run build` を設定
+  - functionsのランタイムはnode22指定(ローカルnode26でビルド・emulator検証済み)
+- Checks:
+  - `pnpm install --frozen-lockfile` — 前提実行済み(ワークスペース化後に `pnpm install` でlockfile更新)
+  - `pnpm -C functions build` — 合格(lib/functions/src + lib/src/lib に共有コード出力)
+  - functions emulator スモーク — 合格(exportStaleBackupsDaily/generateRecurringInvoicesDaily がロード)
+  - `pnpm lint` — 合格(0 errors、既存warning1件のみ: receiptsの<img>)
+  - `pnpm exec next typegen` + `pnpm typecheck` — 合格
+  - `pnpm test` — 合格(62ファイル764件、tests/functions 7件新規)
+  - `pnpm build` — 合格
+  - `pnpm test:rules`(JAVA_HOME=openjdk@21) — 合格(156件)
+  - `pnpm test:emulators`(JAVA_HOME=openjdk@21) — 合格(7件)
+- 備考:
+  - デプロイ時の注意: functionsはワークスペース依存(pnpmシンボリンク)のため、
+    実デプロイ時は事前に `pnpm install` + `pnpm -C functions build` が必要。
+    pnpm配下のnode_modulesがデプロイパッケージで解決できるかは未検証
+  - PERIOD_CLOSED等で生成不能な事業は日次errorログが継続する(テンプレ無効化等で解消)。
+    再試行はしない(翌日実行がリトライを兼ねる)
+  - firestore.rules/storage.rules の変更なし(Admin SDK経路のため)
 ## 2026-11-02: 課金基盤の抽象層(プラン/entitlement)(Issue #148)
 - Worktree: plan-billing
 ### 実装内容
@@ -2435,13 +2486,9 @@ Stripe等の実接続を伴わない課金基盤の抽象層。プラン保持(B
   settingsの「プランを変更」ボタンを課金ポータル遷移へ置き換え、
   webhook側でBusiness.planを更新する想定(コメントで接続点を明記)
 ### Checks
-- `pnpm lint` — 合格(0 errors、既存warning1件のみ: receiptsの<img>)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(62ファイル764件、skip 10。billing.test.ts 8件新規)
-- `pnpm build` — 合格
 - `pnpm test:rules`(JAVA_HOME=openjdk@21) — 合格(2ファイル157件)
 - `pnpm test:emulators`(JAVA_HOME=openjdk@21) — 合格(2ファイル7件)
-
 ## 2026-11-02: 複数年比較レポート(Issue #149)
 - Worktree: reports-compare
 ### 実装内容

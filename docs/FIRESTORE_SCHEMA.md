@@ -83,7 +83,7 @@ receipts(証憑ファイル)
 | customAccounts | object[] | 任意・最大50件。`{ code, label, kind: income\|expense, parentCode?, disabled? }` カスタム勘定科目・補助科目 |
 | allocationRatios | map? | 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い |
 | openingBalances | array | 期首残高 `{ fiscalYear, accountCode, amount }[]`。amountは円・整数、借方残高を正・貸方残高を負とする。任意 |
-| lastBackupAt | Timestamp? | 最終バックアップ(エクスポート)日時。`/api/backup` GET成功時にサーバーが記録。未取得は未設定 |
+| lastBackupAt | Timestamp? | 最終バックアップ(エクスポート)日時。`/api/backup` GET成功時またはCloud Functionsのスケジュールバックアップ成功時にサーバーが記録。未取得は未設定 |
 | invoiceRegistrationNumber | string? | 適格請求書発行事業者の登録番号(T+13桁)。未登録(免税事業者等)は未設定 |
 | issuerName | string? | 請求書の発行者名。未設定時は事業名を使う |
 | issuerAddress | string? | 請求書に記載する発行者住所 |
