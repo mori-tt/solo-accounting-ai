@@ -1354,3 +1354,27 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: 初回セットアップウィザード(Issue #80)
+- Worktree: onboarding
+### 実装内容
+`app/(app)/onboarding/` に5ステップのセットアップウィザードを新設。事業情報(事業名+課税方式)→会計年度開始月→期首残高(現金/預金/売掛金プリセット)→勘定科目確認→完了の順に案内し、既存 Server Action(`createBusiness`/`updateBusinessSettings`/`getOpeningBalances`/`saveOpeningBalances`)をそのまま再利用した。actions/types の改変なし。
+- `onboarding-screen.tsx`: クライアント側のステップマシン。各入力は null=未編集のドラフト方式で既存 `business` 値を初期表示に使う(opening-balances画面と同パターン)
+- 事業情報+開始月はステップ2の「次へ」時点でまとめて保存。事業なし=`createBusiness`(idempotencyKey付き)、既存事業=差分があるときのみ `updateBusinessSettings`(無変更なら呼ばず監査ログを汚染しない)
+- 期首残高は保存対象年度(開始月から `fiscalPeriodOf(today)` で導出)のプリセット3科目のみ入力で置き換え、それ以外の既存レコードは `saveOpeningBalances` の全置換仕様に合わせて維持マージ。未入力科目は登録しない。入力なし・削除対象なしなら呼び出し自体を省略。全空でも「後で設定する」でスキップ可
+- 勘定科目ステップは `getAccountOptions` で標準+カスタム科目を種別グループの Badge 表示(確認のみ、編集は勘定科目画面へのリンクで誘導)
+- 完了ステップは設定内容のサマリ(事業名/課税方式/開始月/期首残高件数)とダッシュボード導線
+- `savedBusiness` state で作成済み事業IDと最終保存入力を保持し、戻る→次への再実行や context 反映前の遅延でも事業の二重作成を防止
+- 既存事業で非オーナーは実行不可(business-delete と同じ警告ガード)。`businessId` 解決前は LoadingBlock
+- `dashboard-screen.tsx`: PageHeader の `actions` に `/onboarding` への「セットアップウィザード」リンク1箇所を追加
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(初回は `MyBusiness.taxMode` が string 型のため `Record<TaxMode,string>` の index エラー。ラベル map を `Record<string,string>` に修正)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格(/onboarding ルート生成を確認)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。既存actionの呼び出しのみ)
+### 設計上の判断・備考
+- 事業0件のユーザーは app-shell の `BusinessOnboarding` が children を覆うため現状このページへは到達しないが、ステップ仕様(事業作成)に合わせ createBusiness 経路も実装済み(shell側からの直接リンク追加等でそのまま使える)
+- 期首残高ステップの年度は現在日付を含む会計年度に自動決定(初期セットアップ用途のため年度選択UIは設けず)。締め済み年度の不変条件は `saveOpeningBalances` 側の既存チェックに委譲
+- `businessSchema.pick({name,taxMode})` でステップ0の先行検証を行い、開始月の検証は保存時にまとめる(未表示フィールドのエラーを先出ししないため)
+- E2E・単体テストのウィザードカバレッジは別タスク(UIは新規パターンのため既存テストで担保される範囲外)

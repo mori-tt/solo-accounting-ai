@@ -116,6 +116,14 @@ export function DashboardScreen() {
       <PageHeader
         title="ダッシュボード"
         description={`${business?.name ?? ""} / ${formatMonthKey(monthKey)}の状況`}
+        actions={
+          <Link
+            href="/onboarding"
+            className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+          >
+            セットアップウィザード
+          </Link>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
