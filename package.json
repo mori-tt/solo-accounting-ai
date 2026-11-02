@@ -2,6 +2,7 @@
   "name": "solo-accounting-ai",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -45,6 +46,7 @@
   },
   "packageManager": "pnpm@12.16.1",
   "engines": {
-    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+    "node": ">=26",
+    "pnpm": ">=12"
   }
 }
