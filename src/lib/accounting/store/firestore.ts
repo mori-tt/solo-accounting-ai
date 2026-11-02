@@ -400,6 +400,17 @@ export class FirestoreAccountingStore implements AccountingStore {
 
       const { batch, value } = await work(this.txReader(tx));
 
+      for (const del of batch.deletes ?? []) {
+        tx.delete(
+          del.collection === "businesses"
+            ? this.db.collection("businesses").doc(del.id)
+            : this.db
+                .collection("businesses")
+                .doc(businessId)
+                .collection(del.collection)
+                .doc(del.id),
+        );
+      }
       for (const put of batch.puts) {
         const ref =
           put.collection === "businesses"

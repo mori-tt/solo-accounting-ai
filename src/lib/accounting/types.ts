@@ -62,6 +62,14 @@ export interface Business {
   openingBalances?: OpeningBalance[];
   /** 最終バックアップ(エクスポート)日時。未取得は undefined */
   lastBackupAt?: string;
+  /** 適格請求書発行事業者の登録番号(T+13桁)。未登録(免税事業者等)は未設定 */
+  invoiceRegistrationNumber?: string;
+  /** 請求書の発行者名(屋号・氏名)。未設定時は事業名を使う */
+  issuerName?: string;
+  /** 請求書に記載する発行者の住所 */
+  issuerAddress?: string;
+  /** 請求書番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 */
+  invoiceCounter?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -141,6 +149,8 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string;
+  /** 請求書番号(事業内連番・作成時に採番)。連番導入前のデータは未設定 */
+  invoiceNumber?: string;
   customerId: string;
   projectId?: string;
   issueDate: DateString;

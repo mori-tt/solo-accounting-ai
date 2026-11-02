@@ -14,7 +14,7 @@ import {
 } from "@/lib/ai/schemas";
 import { aiApiRateLimiter, aiRunRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
-import { requireViewer } from "@/lib/api/session";
+import { requireEditor, requireUid, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
 import { getAdminBucket } from "@/lib/firebase/admin";
 import { parseForm } from "@/lib/validation/schemas";
@@ -62,11 +62,14 @@ export async function GET(request: Request) {
  * POST /api/ai/receipt-ocr
  * body: { businessId, receiptId }
  * storagePathはクライアントから受け取らず、サーバー登録済みのreceipt
- * レコードから解決する(任意パス参照を防ぐ)。viewer以上。
+ * レコードから解決する(任意パス参照を防ぐ)。editor以上
+ * (有償OCR呼出のため閲覧専用ロールには開放しない)。
  * OCR未設定時は { ok:false, error.code:"OCR_UNAVAILABLE" } を返す。
  */
 export async function POST(request: Request) {
   try {
+    // ボディ解析前に認証のみ先行(R2-5)。businessId依存のロール検証は後続
+    await requireUid();
     const body: unknown = await request.json().catch(() => {
       throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
     });
@@ -75,7 +78,8 @@ export async function POST(request: Request) {
       throw new ApiError("INVALID_INPUT", parsed.issues.join(" / "));
     }
     const { businessId, receiptId } = parsed.data;
-    await requireViewer(businessId);
+    // 有償OCR/LLM呼出しはviewerに開放しない(R2-6)
+    await requireEditor(businessId);
     // OCRはLLM課金対象のため businessId 単位で制限(suggestions と同じ枠組み)
     aiRunRateLimiter.consume(businessId);
 

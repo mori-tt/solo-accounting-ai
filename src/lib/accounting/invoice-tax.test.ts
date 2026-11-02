@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeInvoiceTotals,
+  invoiceAmountsByRate,
   invoiceItemTaxAmount,
   invoiceTaxAmount,
   isInvoiceTaxRate,
@@ -81,6 +82,69 @@ describe("invoiceTaxAmount", () => {
         ],
       }),
     ).toBe(20_908);
+  });
+});
+
+describe("invoiceAmountsByRate", () => {
+  it("税率区分ごとに対象金額・消費税額を集計する(標準→軽減の順)", () => {
+    const groups = invoiceAmountsByRate({
+      items: [
+        {
+          description: "a",
+          quantity: 1,
+          unitPrice: 200_000,
+          amount: 200_000,
+          taxRate: "standard",
+        },
+        {
+          description: "b",
+          quantity: 1,
+          unitPrice: 30_000,
+          amount: 30_000,
+          taxRate: "reduced",
+        },
+        {
+          description: "c",
+          quantity: 1,
+          unitPrice: 11_000,
+          amount: 11_000,
+          taxRate: "standard",
+        },
+      ],
+    });
+    expect(groups).toEqual([
+      { rate: "standard", amount: 211_000, taxAmount: 18_181 + 1_000 },
+      { rate: "reduced", amount: 30_000, taxAmount: 2_222 },
+    ]);
+  });
+
+  it("明細に保存済みの taxAmount があればそれを使う", () => {
+    const groups = invoiceAmountsByRate({
+      items: [
+        {
+          description: "a",
+          quantity: 1,
+          unitPrice: 11_000,
+          amount: 11_000,
+          taxRate: "standard",
+          taxAmount: 999,
+        },
+      ],
+    });
+    expect(groups).toEqual([
+      { rate: "standard", amount: 11_000, taxAmount: 999 },
+    ]);
+  });
+
+  it("taxRate 未設定の旧明細は標準税率に含める", () => {
+    const groups = invoiceAmountsByRate({
+      items: [
+        { description: "a", quantity: 1, unitPrice: 11_000, amount: 11_000 },
+      ],
+    });
+    expect(groups).toEqual([
+      { rate: "standard", amount: 11_000, taxAmount: 1_000 },
+    ]);
   });
 });
 

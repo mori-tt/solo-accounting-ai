@@ -29,6 +29,7 @@ function plan(
   let seq = 0;
   return planRestore(backup, existingIds, {
     targetBusinessId: "biz-dst",
+    actorUid: "tester",
     newId: () => `new-${++seq}`,
     ...opts,
   });
@@ -106,7 +107,7 @@ describe("planRestore", () => {
       parse({
         ...BASE_BACKUP,
         collections: {
-          transactions: [{ id: "t1", amount: 100 }],
+          transactions: [{ id: "t1", amount: 100, status: "confirmed" }],
           customers: [{ id: "c1", name: "顧客" }],
         },
       }),
@@ -126,10 +127,20 @@ describe("planRestore", () => {
       ...BASE_BACKUP,
       collections: {
         customers: [{ id: "c1" }],
-        invoices: [{ id: "i1", customerId: "c1" }],
+        invoices: [{ id: "i1", customerId: "c1", status: "issued" }],
         payments: [{ id: "p1", invoiceId: "i1" }],
-        transactions: [{ id: "t1", receiptIds: ["r1"] }],
-        receipts: [{ id: "r1", transactionId: "t1" }],
+        transactions: [
+          { id: "t1", receiptIds: ["r1"], status: "confirmed" },
+        ],
+        receipts: [
+          {
+            id: "r1",
+            transactionId: "t1",
+            status: "linked",
+            storagePath: "receipts/biz-src/r1/f.png",
+            mimeType: "image/png",
+          },
+        ],
         expenses: [{ id: "e1", transactionId: "t1", receiptId: "r1" }],
       },
     });
@@ -160,17 +171,19 @@ describe("planRestore", () => {
     expect(byCollection("expenses").data.receiptId).toBe(receiptId);
   });
 
-  it("journalEntries.sourceIdとaiSuggestions.target.idを種別に応じて張り替える", () => {
+  it("journalEntries.sourceIdを種別に応じて張り替える", () => {
     const backup = parse({
       ...BASE_BACKUP,
       collections: {
-        transactions: [{ id: "t1" }],
+        transactions: [{ id: "t1", status: "confirmed" }],
         journalEntries: [
-          { id: "j1", sourceType: "transaction", sourceId: "t1" },
-          { id: "j2", sourceType: "manual", sourceId: "t1" },
-        ],
-        aiSuggestions: [
-          { id: "s1", target: { type: "transaction", id: "t1" } },
+          {
+            id: "j1",
+            sourceType: "transaction",
+            sourceId: "t1",
+            status: "confirmed",
+          },
+          { id: "j2", sourceType: "manual", sourceId: "t1", status: "draft" },
         ],
       },
     });
@@ -185,13 +198,34 @@ describe("planRestore", () => {
     expect(journals[0].data.sourceId).toBe(txWrite.id);
     // manualは参照先なし → 張替なし
     expect(journals[1].data.sourceId).toBe("t1");
-    const suggestion = result.writes.find(
-      (w) => w.collection === "aiSuggestions",
-    )!;
-    expect(suggestion.data.target).toEqual({
-      type: "transaction",
-      id: txWrite.id,
+  });
+
+  it("auditLogs/aiSuggestions/monthlySummariesは復元対象外になる(R2-2)", () => {
+    const backup = parse({
+      ...BASE_BACKUP,
+      collections: {
+        auditLogs: [
+          { id: "a1", actorUid: "other", action: "close", targetPath: "x" },
+        ],
+        aiSuggestions: [
+          { id: "s1", status: "accepted", decidedBy: "other" },
+        ],
+        monthlySummaries: [{ id: "202601", income: 1 }],
+        transactions: [{ id: "t1", status: "confirmed" }],
+      },
     });
+    const result = plan(backup);
+    expect(result.counts.auditLogs).toEqual({ written: 0, skipped: 1 });
+    expect(result.counts.aiSuggestions).toEqual({ written: 0, skipped: 1 });
+    expect(result.counts.monthlySummaries).toEqual({ written: 0, skipped: 1 });
+    expect(
+      result.writes.every(
+        (w) =>
+          w.collection !== "auditLogs" &&
+          w.collection !== "aiSuggestions" &&
+          w.collection !== "monthlySummaries",
+      ),
+    ).toBe(true);
   });
 
   it("固定IDコレクションは衝突時にskipし既存を維持する", () => {
@@ -215,7 +249,8 @@ describe("planRestore", () => {
     );
     expect(result.counts.members).toEqual({ written: 1, skipped: 1 });
     expect(result.counts.fiscalPeriods).toEqual({ written: 0, skipped: 1 });
-    expect(result.counts.monthlySummaries).toEqual({ written: 1, skipped: 0 });
+    // monthlySummariesは復元対象外(R2-2)
+    expect(result.counts.monthlySummaries).toEqual({ written: 0, skipped: 1 });
     // 衝突した固定IDは再採番されない(remap対象外)
     expect(result.remappedCount).toBe(0);
     const member = result.writes.find((w) => w.collection === "members")!;
@@ -243,42 +278,22 @@ describe("planRestore", () => {
     const backup = parse({
       ...BASE_BACKUP,
       collections: {
-        transactions: [{ id: "t1" }],
-        aiSuggestions: [
-          {
-            id: "s1",
-            businessId: "biz-src",
-            target: { type: "transaction", id: "t1" },
-          },
-        ],
-        auditLogs: [
-          {
-            id: "a1",
-            targetPath: "businesses/biz-src/transactions/t1",
-          },
+        transactions: [
+          { id: "t1", status: "confirmed", businessId: "biz-src" },
         ],
         closingChecks: [
           {
             id: "k1",
             fiscalPeriodId: "fy2025",
+            status: "open",
             targetPath: "businesses/biz-src/fiscalPeriods/fy2025",
           },
         ],
       },
     });
-    const result = plan(
-      backup,
-      new Map([["transactions", new Set(["t1"])]]),
-    );
+    const result = plan(backup);
     const txWrite = result.writes.find((w) => w.collection === "transactions")!;
-    const suggestion = result.writes.find(
-      (w) => w.collection === "aiSuggestions",
-    )!;
-    expect(suggestion.data.businessId).toBe("biz-dst");
-    const audit = result.writes.find((w) => w.collection === "auditLogs")!;
-    expect(audit.data.targetPath).toBe(
-      `businesses/biz-dst/transactions/${txWrite.id}`,
-    );
+    expect(txWrite.data.businessId).toBe("biz-dst");
     const check = result.writes.find((w) => w.collection === "closingChecks")!;
     // fiscalPeriodsは固定ID(衝突していない)なのでIDはそのまま、businessIdのみ張替
     expect(check.data.targetPath).toBe(
@@ -291,8 +306,8 @@ describe("planRestore", () => {
       ...BASE_BACKUP,
       collections: {
         transactions: [
-          { id: "t1", amount: 1 },
-          { id: "t1", amount: 2 },
+          { id: "t1", amount: 1, status: "draft" },
+          { id: "t1", amount: 2, status: "draft" },
         ],
       },
     });
@@ -306,7 +321,7 @@ describe("planRestore", () => {
       ...BASE_BACKUP,
       collections: {
         unknownCol: [{ id: "x" }],
-        transactions: [{ id: "t1" }],
+        transactions: [{ id: "t1", status: "draft" }],
       },
     });
     const result = plan(backup);
@@ -339,5 +354,125 @@ describe("backupFreshness", () => {
     expect(
       backupFreshness("2026-01-01T00:00:00.000Z", NOW),
     ).toBe("stale");
+  });
+});
+
+describe("sanitizeRestoredDoc (planRestore経由, R2-2)", () => {
+  it("status='locked'はconfirmedへ正規化し、enum外statusのdocはskipする", () => {
+    const backup = parse({
+      ...BASE_BACKUP,
+      collections: {
+        transactions: [
+          { id: "t1", status: "locked" },
+          { id: "t2", status: "deleted" },
+          { id: "t3", status: "confirmed" },
+        ],
+        journalEntries: [{ id: "j1", status: "locked" }],
+      },
+    });
+    const result = plan(backup);
+    const txs = result.writes.filter((w) => w.collection === "transactions");
+    expect(txs.map((w) => w.id)).toEqual(["t1", "t3"]);
+    expect(txs[0].data.status).toBe("confirmed");
+    expect(
+      result.writes.find((w) => w.collection === "journalEntries")?.data
+        .status,
+    ).toBe("confirmed");
+  });
+
+  it("帰属フィールドを復元実行者へ上書きし、Admin専用フィールドを除去する", () => {
+    const backup = parse({
+      ...BASE_BACKUP,
+      collections: {
+        transactions: [
+          { id: "t1", status: "confirmed", createdBy: "other" },
+        ],
+        closingChecks: [
+          { id: "k1", status: "resolved", resolvedBy: "other" },
+        ],
+        journalEntries: [
+          { id: "j1", status: "draft", aiSuggestionId: "s1" },
+        ],
+      },
+    });
+    const result = plan(backup);
+    const tx = result.writes.find((w) => w.collection === "transactions")!;
+    expect(tx.data.createdBy).toBe("tester");
+    const check = result.writes.find(
+      (w) => w.collection === "closingChecks",
+    )!;
+    expect(check.data.resolvedBy).toBe("tester");
+    const journal = result.writes.find(
+      (w) => w.collection === "journalEntries",
+    )!;
+    expect("aiSuggestionId" in journal.data).toBe(false);
+  });
+
+  it("既存closed期間内の日付を持つdocはskipする", () => {
+    const backup = parse({
+      ...BASE_BACKUP,
+      collections: {
+        transactions: [
+          { id: "t1", status: "confirmed", date: "2025-05-10" },
+          { id: "t2", status: "confirmed", date: "2026-05-10" },
+        ],
+        payments: [{ id: "p1", date: "2025-12-31", amount: 1 }],
+      },
+    });
+    const result = plan(backup, new Map(), {
+      closedRanges: [{ startDate: "2025-01-01", endDate: "2025-12-31" }],
+    });
+    const txs = result.writes.filter((w) => w.collection === "transactions");
+    expect(txs.map((w) => w.id)).toEqual(["t2"]);
+    expect(result.counts.payments).toEqual({ written: 0, skipped: 1 });
+  });
+
+  it("members: ownerロール注入をskipし、uid/invitedByを正規化する", () => {
+    const backup = parse({
+      ...BASE_BACKUP,
+      collections: {
+        members: [
+          { id: "u1", role: "owner", invitedBy: "other" },
+          { id: "u2", role: "editor", uid: "spoofed", invitedBy: "other" },
+        ],
+      },
+    });
+    const result = plan(backup);
+    const members = result.writes.filter((w) => w.collection === "members");
+    expect(members).toHaveLength(1);
+    expect(members[0].id).toBe("u2");
+    expect(members[0].data.uid).toBe("u2");
+    expect(members[0].data.invitedBy).toBe("tester");
+  });
+
+  it("receipts: storagePath接頭辞・mimeTypeが不正なdocはskipする", () => {
+    const backup = parse({
+      ...BASE_BACKUP,
+      collections: {
+        receipts: [
+          {
+            id: "r1",
+            status: "unprocessed",
+            storagePath: "secrets/other/x.pdf",
+            mimeType: "application/pdf",
+          },
+          {
+            id: "r2",
+            status: "unprocessed",
+            storagePath: "receipts/biz-src/r2/f.html",
+            mimeType: "text/html",
+          },
+          {
+            id: "r3",
+            status: "unprocessed",
+            storagePath: "receipts/biz-src/r3/f.png",
+            mimeType: "image/png",
+          },
+        ],
+      },
+    });
+    const result = plan(backup);
+    const receipts = result.writes.filter((w) => w.collection === "receipts");
+    expect(receipts.map((w) => w.id)).toEqual(["r3"]);
   });
 });

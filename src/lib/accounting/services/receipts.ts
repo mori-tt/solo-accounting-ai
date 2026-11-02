@@ -6,6 +6,7 @@ import {
   auditsFor,
   newId,
   nowOf,
+  scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
 
@@ -45,7 +46,7 @@ export async function registerReceipt(
   };
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("receipt", input.idempotencyKey) },
     async () => ({
       batch: {
         puts: [{ collection: "receipts", id, data: receipt }],

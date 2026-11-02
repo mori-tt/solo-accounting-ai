@@ -106,14 +106,22 @@ export const aiApiRateLimiter = createRateLimiter({
 /**
  * businessId を持たないエンドポイント(認証系)向けに、
  * クライアントIPをレート制限キーとして取り出す。
- * プロキシ配下では x-forwarded-for の先頭を使う。最良努力であり、
- * ヘッダ偽装までは防げない点に注意(MAX_KEYS で Map 増大は抑制済み)。
+ *
+ * x-forwarded-for の先頭はクライアント制御で偽装・回転できるため、
+ * 直近プロキシが追記する最右エントリを採用し、なければ
+ * x-real-ip(インフラが付与するケース)にフォールバックする。
+ * 完全な偽装防止はインフラ依存のため最良努力であり、
+ * IP回転への第二防御としてレート制限値自体を低めに設定している。
  */
 export function clientIpKey(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
+    const parts = forwarded
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last) return last;
   }
   return request.headers.get("x-real-ip")?.trim() ?? "unknown";
 }
@@ -156,4 +164,14 @@ export const receiptUploadRateLimiter = createRateLimiter({
 export const receiptDownloadRateLimiter = createRateLimiter({
   limit: 1200,
   windowMs: 60 * 60 * 1000,
+});
+
+/**
+ * 事業作成用(uid単位・1日窓)。
+ * businessId単位のレート制限は新規事業作成で枠を増やせるため、
+ * 作成数自体を1ユーザーあたり20件/日で制限する。
+ */
+export const businessCreateRateLimiter = createRateLimiter({
+  limit: 20,
+  windowMs: 24 * 60 * 60 * 1000,
 });
