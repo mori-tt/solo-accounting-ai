@@ -4,8 +4,50 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # react・react-dom・型定義は常に同一バージョンで揃える必要がある。
+      # 分離PRで片方だけ更新されると実行時不整合を起こすため必ず1PRにまとめる
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      # next と eslint-config-next は同一リポジトリから同バージョンでリリースされる
+      next:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+          - "@next/*"
+      eslint:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "@typescript-eslint/*"
+          - "eslint-plugin-*"
+      firebase:
+        patterns:
+          - "firebase*"
+          - "@firebase/*"
+      test:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@vitejs/*"
+          - "@playwright/*"
+          - "@testing-library/*"
+          - "jsdom"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # Actions の更新は単体で壊れにくいため1PRに集約してレビュー負荷を下げる
+      actions:
+        patterns:
+          - "*"
