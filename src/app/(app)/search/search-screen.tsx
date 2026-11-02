@@ -103,6 +103,7 @@ export function SearchScreen() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="例: 備品 Amazon 12000"
           aria-label="検索キーワード"
+          data-shortcut="search-input"
         />
         <Select
           className="w-40"
