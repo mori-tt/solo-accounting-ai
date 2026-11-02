@@ -207,6 +207,13 @@ export async function listPaymentsRaw(businessId: string) {
   return snap.docs.map((d) => toPlain({ id: d.id, ...d.data() }));
 }
 
+export async function listBillPaymentsRaw(businessId: string) {
+  const snap = await businessDoc(getAdminDb(), businessId)
+    .collection("billPayments")
+    .get();
+  return snap.docs.map((d) => toPlain({ id: d.id, ...d.data() }));
+}
+
 export interface AuditLogDoc {
   /** ドキュメントID(.add()経由のログはidフィールドを持たないためdoc.idを使う) */
   id: string;

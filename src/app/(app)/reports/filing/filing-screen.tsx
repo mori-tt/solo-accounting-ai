@@ -11,6 +11,7 @@ import { fiscalYearOf } from "@/lib/accounting/domain/fiscal";
 import {
   BLUE_RETURN_DEDUCTION_MAX,
   computeNetIncome,
+  grossIncomeWithInventory,
 } from "@/lib/accounting/domain/filing";
 import { todayDateString } from "@/lib/format";
 import {
@@ -49,6 +50,14 @@ export function FilingScreen() {
     value: string;
   } | null>(null);
   const [deductionInput, setDeductionInput] = useState("");
+  // 棚卸高欄は棚卸カウント(inventoryCounts)の合計を初期値として表示する。
+  // 上書き保持の仕組みは専従者給与と同じ(自動値が変わると自動値へ戻る)。
+  const [inventoryOverride, setInventoryOverride] = useState<{
+    autoBeginning: number;
+    autoEnding: number;
+    beginning: string;
+    ending: string;
+  } | null>(null);
 
   const { data, initialLoading, error, reload } = useApiData(
     () => callApi(() => getFilingStatement(businessId ?? "", fiscalYear)),
@@ -64,19 +73,53 @@ export function FilingScreen() {
       ? salaryOverride.value
       : autoSalaryText;
 
+  const autoBeginning = data?.beginningInventory ?? 0;
+  const autoEnding = data?.endingInventory ?? 0;
+  const overrideValid =
+    inventoryOverride !== null &&
+    inventoryOverride.autoBeginning === autoBeginning &&
+    inventoryOverride.autoEnding === autoEnding;
+  const beginningInput =
+    overrideValid && inventoryOverride.beginning !== ""
+      ? inventoryOverride.beginning
+      : autoBeginning > 0
+        ? String(autoBeginning)
+        : "";
+  const endingInput =
+    overrideValid && inventoryOverride.ending !== ""
+      ? inventoryOverride.ending
+      : autoEnding > 0
+        ? String(autoEnding)
+        : "";
+
   const familySalary = parseYenInput(familySalaryInput);
   const deduction = parseYenInput(deductionInput);
+  const beginning = parseYenInput(beginningInput);
+  const ending = parseYenInput(endingInput);
   const familySalaryError =
     familySalary === undefined ? "0円以上の整数で入力してください" : undefined;
   const deductionError =
     deduction === undefined || deduction > BLUE_RETURN_DEDUCTION_MAX
       ? `0〜${BLUE_RETURN_DEDUCTION_MAX.toLocaleString()}円で入力してください`
       : undefined;
+  const inventoryError =
+    beginning === undefined || ending === undefined
+      ? "0円以上の整数で入力してください"
+      : undefined;
 
   // 入力が不正なときは帳票上の適用額を0として表示する
+  const appliedBeginning = inventoryError ? 0 : (beginning ?? 0);
+  const appliedEnding = inventoryError ? 0 : (ending ?? 0);
+  const grossIncome = data
+    ? grossIncomeWithInventory(
+        data.statement,
+        appliedBeginning,
+        appliedEnding,
+      )
+    : 0;
   const netIncome = data
     ? computeNetIncome({
-        grossIncome: data.statement.grossIncome,
+        grossIncome,
         familyEmployeeSalary: familySalaryError
           ? undefined
           : (familySalary ?? 0),
@@ -107,6 +150,12 @@ export function FilingScreen() {
           actions={
             <>
               <Link
+                href="/inventory"
+                className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
+              >
+                棚卸カウントへ
+              </Link>
+              <Link
                 href="/reports/consumption-tax"
                 className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
               >
@@ -129,6 +178,50 @@ export function FilingScreen() {
             startMonth={startMonth}
             onChange={setSelectedYear}
           />
+          <div className="w-44">
+            <Field
+              label="期首商品棚卸高(円)"
+              hint="前年度の棚卸カウントを初期表示(上書き可)"
+              error={beginning === undefined ? inventoryError : undefined}
+            >
+              <NumberInput
+                value={beginningInput}
+                min={0}
+                step={1}
+                placeholder="0"
+                onChange={(e) =>
+                  setInventoryOverride({
+                    autoBeginning,
+                    autoEnding,
+                    beginning: e.target.value,
+                    ending: endingInput,
+                  })
+                }
+              />
+            </Field>
+          </div>
+          <div className="w-44">
+            <Field
+              label="期末商品棚卸高(円)"
+              hint="棚卸カウントを初期表示(上書き可)"
+              error={ending === undefined ? inventoryError : undefined}
+            >
+              <NumberInput
+                value={endingInput}
+                min={0}
+                step={1}
+                placeholder="0"
+                onChange={(e) =>
+                  setInventoryOverride({
+                    autoBeginning,
+                    autoEnding,
+                    beginning: beginningInput,
+                    ending: e.target.value,
+                  })
+                }
+              />
+            </Field>
+          </div>
           <div className="w-44">
             <Field
               label="専従者給与(円)"
@@ -184,6 +277,9 @@ export function FilingScreen() {
         <FilingSheet
           businessName={data.businessName}
           statement={data.statement}
+          beginningInventory={appliedBeginning}
+          endingInventory={appliedEnding}
+          grossIncome={grossIncome}
           result={{
             ...netIncome,
             familyEmployeeSalary: familySalaryError

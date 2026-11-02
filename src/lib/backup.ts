@@ -34,6 +34,8 @@ export const BACKUP_COLLECTIONS = [
   "receipts",
   "invoices",
   "payments",
+  "bills",
+  "billPayments",
   "journalEntries",
   "fiscalPeriods",
   "closingChecks",
@@ -43,6 +45,8 @@ export const BACKUP_COLLECTIONS = [
   "aiSuggestions",
   "monthlySummaries",
   "auditLogs",
+  "inventoryItems",
+  "inventoryCounts",
 ] as const;
 
 export type BackupCollection = (typeof BACKUP_COLLECTIONS)[number];
@@ -77,6 +81,8 @@ const FIXED_ID_COLLECTIONS: ReadonlySet<string> = new Set([
   "members",
   "fiscalPeriods",
   "monthlySummaries",
+  // fy{fiscalYear}の決定的ID(fiscalPeriodsと同じ採番)
+  "inventoryCounts",
 ]);
 
 export interface BackupDoc {
@@ -253,6 +259,7 @@ const RESTORE_STATUS_RULES: Record<
   expenses: { allowed: ["draft", "confirmed"], optional: true },
   receipts: { allowed: ["unprocessed", "linked", "archived"] },
   invoices: { allowed: ["draft", "issued", "paid", "overdue"] },
+  bills: { allowed: ["unpaid", "paid"] },
   journalEntries: { allowed: ["draft", "confirmed"] },
   closingChecks: { allowed: ["open", "resolved", "waived"] },
   fiscalPeriods: { allowed: ["open", "closed"] },
@@ -273,6 +280,10 @@ const RESTORE_ACTOR_FIELDS: Record<string, readonly string[] | undefined> = {
   fixedAssets: ["createdBy"],
   closingChecks: ["createdBy", "resolvedBy"],
   fiscalPeriods: ["closedBy"],
+  bills: ["createdBy"],
+
+  inventoryItems: ["createdBy"],
+  inventoryCounts: ["createdBy"],
 };
 
 /** Admin SDK専用フィールド。クライアント書き込み禁止と同じ扱いで復元時に除去 */
@@ -285,6 +296,8 @@ const RESTORE_DATE_FIELDS: Record<string, readonly string[] | undefined> = {
   payments: ["date"],
   journalEntries: ["date"],
   invoices: ["issueDate", "dueDate"],
+  bills: ["receivedDate"],
+  billPayments: ["date"],
 };
 
 /** 日付文字列がいずれかのclosed期間内か */
@@ -373,6 +386,10 @@ const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
     recurringInvoiceTemplates: [
       ["customerId", "customers"],
       ["projectId", "projects"],
+
+    billPayments: [
+      ["billId", "bills"],
+      ["transactionId", "transactions"],
     ],
     closingChecks: [["fiscalPeriodId", "fiscalPeriods"]],
   };

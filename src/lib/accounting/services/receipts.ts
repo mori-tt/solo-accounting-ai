@@ -103,6 +103,11 @@ export async function linkReceiptToTransaction(
       ...receipt,
       status: "linked",
       transactionId,
+      // 電帳法の検索要件用メタデータを紐付先の値で揃える。
+      // 取引側の後続変更までは追従しない(証憑単体の検索用スナップショット)
+      transactionDate: transaction.date,
+      amount: transaction.amount,
+      counterparty: transaction.counterparty || undefined,
       updatedAt: at,
     };
     const receiptIds = transaction.receiptIds.includes(receiptId)
@@ -121,6 +126,64 @@ export async function linkReceiptToTransaction(
             { collection: "receipts", id: receiptId },
             { collection: "transactions", id: transactionId },
           ],
+          "update",
+          actor,
+        ),
+      },
+      value: receiptNext,
+    };
+  });
+  return { receipt: value };
+}
+
+export interface ReceiptMetadataInput {
+  /** 取引日 YYYY-MM-DD。undefined はフィールド削除 */
+  transactionDate?: string;
+  /** 円・整数・0以上。undefined はフィールド削除 */
+  amount?: number;
+  /** 取引先。undefined・空文字はフィールド削除 */
+  counterparty?: string;
+}
+
+/**
+ * 証憑の検索用メタデータ(取引日/金額/取引先)を更新する。
+ * 締め済み取引に紐付く証憑は拒否する。アーカイブ済みは編集可
+ * (検索要件の補完はアーカイブ後も必要になりうるため)。
+ */
+export async function updateReceiptMetadata(
+  store: AccountingStore,
+  businessId: string,
+  actor: ActorContext,
+  receiptId: string,
+  input: ReceiptMetadataInput,
+): Promise<{ receipt: Receipt }> {
+  const { value } = await store.transact(businessId, {}, async (tx) => {
+    const receipt = await tx.getReceipt(businessId, receiptId);
+    if (!receipt) {
+      throw new DomainError("NOT_FOUND", `receipt ${receiptId} not found`);
+    }
+    if (receipt.transactionId !== undefined) {
+      const transaction = await tx.getTransaction(
+        businessId,
+        receipt.transactionId,
+      );
+      if (transaction) {
+        await assertTransactionEditable(tx, businessId, transaction);
+      }
+    }
+    const receiptNext: Receipt = {
+      ...receipt,
+      transactionDate: input.transactionDate,
+      amount: input.amount,
+      counterparty: input.counterparty || undefined,
+      updatedAt: nowOf(actor),
+    };
+    return {
+      batch: {
+        puts: [{ collection: "receipts", id: receiptId, data: receiptNext }],
+        audits: auditsFor(
+          businessId,
+          [{ collection: "receipts", id: receiptId }],
           "update",
           actor,
         ),

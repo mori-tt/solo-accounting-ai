@@ -7,6 +7,8 @@ import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getJournalReport } from "../actions";
 import { useBookAccountLabel } from "../account-label";
 import { callApi } from "@/lib/api-client";
+import { buildJournalCsv } from "@/lib/csv";
+import { downloadCsv } from "@/lib/download";
 import {
   currentMonthKey,
   formatDateJP,
@@ -44,13 +46,27 @@ export function JournalScreen() {
           title="仕訳帳"
           description="確定済みの取引を複式仕訳として日付順に表示します"
           actions={
-            <Button
-              variant="secondary"
-              onClick={() => window.print()}
-              disabled={!data || data.entries.length === 0}
-            >
-              印刷する
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  downloadCsv(
+                    `journal-${monthKey}.csv`,
+                    buildJournalCsv(data?.entries ?? [], label),
+                  )
+                }
+                disabled={!data || data.entries.length === 0}
+              >
+                CSV出力
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => window.print()}
+                disabled={!data || data.entries.length === 0}
+              >
+                印刷する
+              </Button>
+            </>
           }
         />
 

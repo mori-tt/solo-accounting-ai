@@ -11,12 +11,16 @@ import {
 } from "firebase-admin/firestore";
 import type {
   AuditLogEntry,
+  Bill,
+  BillPayment,
   Business,
   Customer,
   Expense,
   FiscalPeriod,
   FixedAsset,
   FixedAssetStatus,
+  InventoryCount,
+  InventoryItem,
   Invoice,
   MonthlySummary,
   Payment,
@@ -277,12 +281,62 @@ class FirestoreAccountingReader implements AccountingReader {
     );
   }
 
+  getInventoryItem(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryItem | undefined> {
+    return this.readDoc(businessId, "inventoryItems", id);
+  }
+
+  listInventoryItems(businessId: string): Promise<InventoryItem[]> {
+    return this.readQuery<InventoryItem>(
+      this.col(businessId, "inventoryItems"),
+    );
+  }
+
+  getInventoryCount(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryCount | undefined> {
+    return this.readDoc(businessId, "inventoryCounts", id);
+  }
+
+  listInventoryCounts(businessId: string): Promise<InventoryCount[]> {
+    return this.readQuery<InventoryCount>(
+      this.col(businessId, "inventoryCounts"),
+    );
+  }
+
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,
   ): Promise<Payment[]> {
     return this.readQuery<Payment>(
       this.col(businessId, "payments").where("invoiceId", "==", invoiceId),
+    );
+  }
+
+  getBill(businessId: string, id: string): Promise<Bill | undefined> {
+    return this.readDoc(businessId, "bills", id);
+  }
+
+  listBills(businessId: string): Promise<Bill[]> {
+    return this.readQuery<Bill>(this.col(businessId, "bills"));
+  }
+
+  getBillPayment(
+    businessId: string,
+    id: string,
+  ): Promise<BillPayment | undefined> {
+    return this.readDoc(businessId, "billPayments", id);
+  }
+
+  listBillPaymentsForBill(
+    businessId: string,
+    billId: string,
+  ): Promise<BillPayment[]> {
+    return this.readQuery<BillPayment>(
+      this.col(businessId, "billPayments").where("billId", "==", billId),
     );
   }
 
@@ -386,8 +440,32 @@ export class FirestoreAccountingStore implements AccountingStore {
   listFixedAssets(businessId: string, status?: FixedAssetStatus) {
     return this.reader.listFixedAssets(businessId, status);
   }
+  getInventoryItem(businessId: string, id: string) {
+    return this.reader.getInventoryItem(businessId, id);
+  }
+  listInventoryItems(businessId: string) {
+    return this.reader.listInventoryItems(businessId);
+  }
+  getInventoryCount(businessId: string, id: string) {
+    return this.reader.getInventoryCount(businessId, id);
+  }
+  listInventoryCounts(businessId: string) {
+    return this.reader.listInventoryCounts(businessId);
+  }
   listPaymentsForInvoice(businessId: string, invoiceId: string) {
     return this.reader.listPaymentsForInvoice(businessId, invoiceId);
+  }
+  getBill(businessId: string, id: string) {
+    return this.reader.getBill(businessId, id);
+  }
+  listBills(businessId: string) {
+    return this.reader.listBills(businessId);
+  }
+  getBillPayment(businessId: string, id: string) {
+    return this.reader.getBillPayment(businessId, id);
+  }
+  listBillPaymentsForBill(businessId: string, billId: string) {
+    return this.reader.listBillPaymentsForBill(businessId, billId);
   }
   listFiscalPeriods(businessId: string) {
     return this.reader.listFiscalPeriods(businessId);
