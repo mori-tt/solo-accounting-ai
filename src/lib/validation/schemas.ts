@@ -92,6 +92,22 @@ export const businessSchema = z.object({
       "按分設定は200科目以内で登録してください",
     )
     .optional(),
+  /**
+   * 適格請求書発行事業者の登録番号(T+13桁)。空文字は未設定扱い。
+   * 未指定(undefined)=既存値を保持(設定項目のない画面からの保存で消さない)
+   */
+  invoiceRegistrationNumber: z
+    .union([
+      z.literal(""),
+      z
+        .string()
+        .regex(/^T\d{13}$/, "登録番号はTに続く13桁の数字で入力してください"),
+    ])
+    .optional(),
+  /** 請求書の発行者名。空文字は未設定扱い(事業名を使う) */
+  issuerName: optionalText,
+  /** 請求書に記載する発行者住所。空文字は未設定扱い */
+  issuerAddress: optionalText,
 });
 export type BusinessInput = z.infer<typeof businessSchema>;
 

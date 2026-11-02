@@ -74,3 +74,33 @@ export function invoiceTaxAmount(
 ): number {
   return invoice.taxAmount ?? computeInvoiceTotals(invoice.items).taxAmount;
 }
+
+export interface InvoiceRateGroup {
+  rate: ConsumptionTaxRate;
+  /** 税率ごとの対象金額合計(税込・円整数) */
+  amount: number;
+  /** 対象に含まれる消費税額(明細ごと切り捨ての合算・円整数) */
+  taxAmount: number;
+}
+
+/**
+ * 税率区分ごとの対象金額・消費税額。適格請求書の
+ * 「税率ごとに区分した合計金額と消費税額」の記載に使う。
+ * 並び順は INVOICE_TAX_RATES(標準→軽減)。
+ */
+export function invoiceAmountsByRate(
+  invoice: Pick<Invoice, "items">,
+): InvoiceRateGroup[] {
+  const groups = new Map<ConsumptionTaxRate, InvoiceRateGroup>();
+  for (const item of invoice.items) {
+    const rate = item.taxRate ?? DEFAULT_INVOICE_TAX_RATE;
+    const group = groups.get(rate) ?? { rate, amount: 0, taxAmount: 0 };
+    group.amount += item.amount;
+    group.taxAmount += item.taxAmount ?? invoiceItemTaxAmount(item);
+    groups.set(rate, group);
+  }
+  return [...groups.values()].sort(
+    (a, b) =>
+      INVOICE_TAX_RATES.indexOf(a.rate) - INVOICE_TAX_RATES.indexOf(b.rate),
+  );
+}

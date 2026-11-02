@@ -61,6 +61,13 @@ function BusinessSettingsCard() {
   const [taxMode, setTaxMode] = useState<TaxMode>(
     (business?.taxMode as TaxMode) ?? "exempt",
   );
+  const [registrationNumber, setRegistrationNumber] = useState(
+    business?.invoiceRegistrationNumber ?? "",
+  );
+  const [issuerName, setIssuerName] = useState(business?.issuerName ?? "");
+  const [issuerAddress, setIssuerAddress] = useState(
+    business?.issuerAddress ?? "",
+  );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
@@ -72,6 +79,9 @@ function BusinessSettingsCard() {
       name,
       fiscalYearStartMonth: Number(startMonth),
       taxMode,
+      invoiceRegistrationNumber: registrationNumber,
+      issuerName,
+      issuerAddress,
     });
     if (!parsed.success) {
       setFieldErrors(issuesByField(parsed.issues));
@@ -133,6 +143,42 @@ function BusinessSettingsCard() {
               </Select>
             </Field>
           </div>
+          <div className="border-t border-zinc-200 pt-3 dark:border-zinc-800">
+            <p className="mb-2 text-xs font-medium text-zinc-500">
+              適格請求書(インボイス)発行情報
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Field
+                label="登録番号"
+                error={fieldErrors.invoiceRegistrationNumber}
+                hint="Tに続く13桁。未登録の場合は空欄"
+              >
+                <TextInput
+                  value={registrationNumber}
+                  onChange={(e) => setRegistrationNumber(e.target.value)}
+                  placeholder="T1234567890123"
+                />
+              </Field>
+              <Field
+                label="発行者名"
+                error={fieldErrors.issuerName}
+                hint="空欄の場合は事業名を表示"
+              >
+                <TextInput
+                  value={issuerName}
+                  onChange={(e) => setIssuerName(e.target.value)}
+                  placeholder="例: 山田太郎商店"
+                />
+              </Field>
+              <Field label="発行者住所" error={fieldErrors.issuerAddress}>
+                <TextInput
+                  value={issuerAddress}
+                  onChange={(e) => setIssuerAddress(e.target.value)}
+                  placeholder="例: 東京都渋谷区1-2-3"
+                />
+              </Field>
+            </div>
+          </div>
           {fieldErrors._form && (
             <Alert tone="error">{fieldErrors._form}</Alert>
           )}
@@ -159,6 +205,18 @@ function BusinessSettingsCard() {
             <dd>
               {TAX_MODE_LABELS[(business?.taxMode as TaxMode) ?? "exempt"]}
             </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">インボイス登録番号</dt>
+            <dd>{business?.invoiceRegistrationNumber ?? "未登録"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">発行者名</dt>
+            <dd>{business?.issuerName || business?.name}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-zinc-500">発行者住所</dt>
+            <dd>{business?.issuerAddress || "-"}</dd>
           </div>
         </dl>
       )}
