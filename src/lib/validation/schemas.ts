@@ -342,6 +342,44 @@ export const disposeFixedAssetSchema = z.object({
 });
 export type DisposeFixedAssetInput = z.infer<typeof disposeFixedAssetSchema>;
 
+// ---------- 棚卸(品目マスタ・期末棚卸カウント) ----------
+
+export const inventoryItemSchema = z.object({
+  name: z.string().min(1, "品目名を入力してください").max(200),
+  unit: z.string().min(1, "単位を入力してください").max(50),
+  /** 標準単価(円・整数・0以上) */
+  standardUnitPrice: nonNegativeYen,
+});
+export type InventoryItemInput = z.infer<typeof inventoryItemSchema>;
+
+export const inventoryCountLineSchema = z.object({
+  itemId: z.string().min(1).max(200),
+  /** 実在庫数量(0以上。kg/m 等の小数単位も許容) */
+  quantity: z
+    .number({ error: "数量は数値で入力してください" })
+    .nonnegative("数量は0以上で入力してください")
+    .max(1_000_000_000, "数量が大きすぎます"),
+  /** 評価単価(円・整数・0以上)。省略時は品目の標準単価 */
+  unitPrice: nonNegativeYen.optional(),
+});
+
+/** 年度別の期末棚卸カウントの保存入力 */
+export const inventoryCountSchema = z
+  .object({
+    fiscalYear: z
+      .number({ error: "会計年度は数値で入力してください" })
+      .int("会計年度は整数で入力してください")
+      .min(1900, "会計年度が不正です")
+      .max(2200, "会計年度が不正です"),
+    lines: z
+      .array(inventoryCountLineSchema)
+      .max(500, "棚卸明細は500行以内で入力してください"),
+  })
+  .refine((v) => new Set(v.lines.map((l) => l.itemId)).size === v.lines.length, {
+    message: "同じ品目の明細が重複しています",
+  });
+export type InventoryCountInput = z.infer<typeof inventoryCountSchema>;
+
 // ---------- AI提案 API(api/ai/suggestions) ----------
 
 export const aiTargetTypeSchema = z.enum([

@@ -25,7 +25,7 @@ describe("NavLinks", () => {
         screen.getByRole("heading", { name: heading }),
       ).toBeTruthy();
     }
-    expect(screen.getAllByRole("link")).toHaveLength(24);
+    expect(screen.getAllByRole("link")).toHaveLength(25);
   });
 
   it("現在のパスに対応するリンクだけをアクティブ表示にする", () => {
@@ -50,5 +50,8 @@ describe("NavLinks", () => {
     expect(
       screen.getByRole("link", { name: "決算チェック" }).getAttribute("href"),
     ).toBe("/closing");
+    expect(
+      screen.getByRole("link", { name: "棚卸・在庫" }).getAttribute("href"),
+    ).toBe("/inventory");
   });
 });

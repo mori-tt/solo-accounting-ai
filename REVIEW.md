@@ -16,6 +16,86 @@
 
 ## Log
 
+## 2026-11-02: 棚卸資産管理(在庫品目+期末棚卸高の自動集計)(Issue #133)
+- Worktree: inventory
+### 実装内容
+棚卸品目マスタ(`inventoryItems`)と年度別期末棚卸カウント(`inventoryCounts`)を新設し、
+期末棚卸高(数量×評価単価の合計)を決算書(収支内訳書)の「期末商品棚卸高」・
+翌年度の「期首商品棚卸高」の初期値として連携する機能。依存追加なし。
+- `src/lib/accounting/types.ts`: `InventoryItem`(name/unit/standardUnitPrice)、
+  `InventoryCountLine`(itemId/name/unit/quantity/unitPrice。name/unitは保存時点の
+  スナップショット)、`InventoryCount`(fiscalYear/lines。docIdは `fy{fiscalYear}`)を追加
+- `src/lib/accounting/domain/inventory.ts`(新規): `inventoryLineAmount`
+  (数量×単価を円・整数へ四捨五入。小数数量の浮動誤差で1円欠けないよう round 採用)、
+  `inventoryTotalAmount`(期末棚卸高=明細合計)、`costOfGoodsSold`(期首+仕入-期末)
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"inventoryItems"`/`"inventoryCounts"`、
+  `AccountingReader` に `getInventoryItem`/`listInventoryItems`/`getInventoryCount`/`listInventoryCounts`。
+  `store/memory.ts`・`store/firestore.ts` に実装
+- `src/lib/accounting/services/inventory.ts`(新規): `registerInventoryItem`
+  (冪等キー)、`updateInventoryItem`、`deleteInventoryItem`(再実行冪等)、
+  `inventoryCountId`(fy{year})、`saveInventoryCount`(年度upsert。
+  締め済み年度は `PERIOD_CLOSED`、itemId重複・存在しない品目・負数量・負単価を拒否。
+  unitPrice省略時は品目の標準単価で解決し、品目名・単位をスナップショット保存)
+- `src/lib/validation/schemas.ts`: `inventoryItemSchema`/`inventoryCountLineSchema`/
+  `inventoryCountSchema`(年度1900-2200・明細500行以内・itemId重複不可・
+  単価は円整数0以上・数量は0以上の実数)追加
+- `src/lib/actions/inventory.ts`(新規): `listInventoryYearData`
+  (requireViewer・品目+年度カウント+棚卸高+締め状態)、`createInventoryItem`/
+  `updateInventoryItemAction`(requireEditor+zod再検証)、`deleteInventoryItemAction`
+  (requireOwner・rulesと同じ制限)、`saveInventoryCountAction`(requireEditor)
+- `/inventory` ページ新設(`page.tsx`/`loading.tsx`/`inventory-screen.tsx`):
+  年度ナビ付き期末棚卸カウント表(数量・評価単価入力、金額・合計を自動計算)、
+  品目マスタの登録・編集・削除(ownerのみ)、締め済み年度の読取専用表示、
+  削除済み品目を参照する保存済み明細の警告(保存時に除外)。
+  ナビ「決算・管理」グループに「棚卸・在庫」を追加
+- 決算書連携: `getFilingStatement` が前年度・対象年度のカウント合計を
+  `beginningInventory`/`endingInventory` として返却。filing画面に期首・期末
+  商品棚卸高の入力欄を追加(専従者給与と同じ「自動値をキーとした上書き状態」で
+  手入力上書き可・年度切替/自動値変化で自動値へ復帰)。`domain/filing.ts` に
+  `grossIncomeWithInventory` を追加し差引金額へ反映。`filing-sheet` の
+  「期首/期末商品(製品)棚卸高」は固定値0から実値表示へ、差引原価=期首+仕入-期末
+- `firestore.rules`: `inventoryItems`(member読取/canEdit作成更新/createdBy一致・
+  不変/ownerのみ削除/`validInventoryItem` 検証)、`inventoryCounts`
+  (member読取/canEdit作成更新・`docId == "fy" + fiscalYear` 強制・
+  fiscalYear/createdBy/createdAt不変・締め済み年度は `periodClosed` で
+  作成更新削除を拒否・ownerのみ削除)を追加
+- `tests/rules/helpers.ts` に `inventoryItem()`/`inventoryCount()`、
+  `firestore.rules.test.ts` に2つの describe(読取/作成/他人名義拒否/不正データ拒否/
+  docId-fiscalYear不一致拒否/不変フィールド/締め済み年度の変更削除拒否/viewer拒否/
+  owner削除)を追加
+- `src/lib/backup.ts`: `BACKUP_COLLECTIONS` に2コレクション追加。
+  `inventoryCounts` は決定的IDのため `FIXED_ID_COLLECTIONS` に登録し、
+  復元時のID衝突は既存を維持してskip。`RESTORE_ACTOR_FIELDS` に両者の
+  `createdBy` を追加(復元者へ上書き)
+- `docs/FIRESTORE_SCHEMA.md`: コレクション一覧と2コレクションのフィールド表・
+  棚卸高の計算規約(保存せず都度計算)・締め済み保護を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功・依存追加なし
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(53ファイル637件、skip 10。`domain/inventory.test.ts` 6件 +
+  `services/inventory.test.ts` 11件 新規、nav-links テストのリンク数を25へ更新)
+- `pnpm build` — 合格(/inventory が静的路由として生成)
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules`
+  — 合格(2ファイル125件。inventoryItems 6件 + inventoryCounts 8件を含む)
+- `JAVA_HOME=... pnpm test:emulators` — 合格(2ファイル7件)
+### 判断事項・次の担当者への注意事項
+- 期末棚卸高はドキュメントに保存せず lines(数量×評価単価)から都度計算する
+  (depreciation と同じ方針)。決算書の棚卸高欄はその計算値を初期値として表示し、
+  手入力上書き値は保存しない(年度切替・再取得で自動値へ戻る)
+- 数量は小数可(kg/m 等)。金額は `Math.round(数量×単価)` で円・整数
+  (切り捨てだと 0.29×100 のような浮動誤差で欠けるため)
+- 品目を削除しても保存済みカウント明細は name/unit スナップショットで残る
+  (棚卸表は期末確定資料のため)。次回保存時に削除済み品目の行は除外される
+  (画面で警告表示)。保存は「現在の品目マスタにある行のみ」を送るUI設計
+- inventoryCounts の Rules 検証は lines 要素の中身まで反復できないため
+  `lines is list && size() <= 500` まで。明細内容の検証はサービス層+zodで実施
+- 締め済み年度の保護はサービス層(トランザクション内で fiscalPeriod 参照)と
+  Rules(`periodClosed`)の二重。期首棚卸高は「前年度カウント fy{year-1}」を
+  参照するため、前年度が締め済みでも読取のみで問題ない
+- `inventoryCounts` の復元は FIXED_ID_COLLECTIONS で既存維持skipとなるため、
+  別事業への復元で棚卸カウントを引き継ぐには新しい年度環境である必要がある
+- Emulator利用: `JAVA_HOME` 設定後 `test:rules`/`test:emulators` を実行(ポート衝突なし)
 ## 2026-11-02: 電子帳簿保存法コンプライアンス・e-Tax連携可否調査(Issue #135)
 - Worktree: compliance
 ### 調査: 電帳法要件との比較(詳細は docs/ELECTRONIC_BOOKKEEPING.md)
@@ -26,7 +106,6 @@
 | タイムスタンプ | システム時刻(Firestore Timestamp、監査ログはrequest.time±1h検証)。認定タイムスタンプは未対応だが訂正削除履歴システム措置で代替可 |
 | ダウンロードの求め | JSONバックアップ・取引CSVは既存。証憑一覧CSV・監査ログCSVを追加。証憑ファイル一括DLは残ギャップ |
 | 優良電子帳簿 | 検索・履歴要件は概ね充足だが「すべての国税関係帳簿の備付け」等の確認が必要で認定取得支援はスコープ外 |
-### 実装内容
 - `Receipt`型に検索要件メタデータ `transactionDate`/`amount`/`counterparty`(いずれもoptional)を追加。紐付け(`linkReceipt`)時に取引値をコピー
 - `services/receipts.ts` に `updateReceiptMetadata` を追加(冪等再実行許容、紐付取引が締め済み期間ならPERIOD_CLOSED拒否、監査ログ `update` 記録)
 - `actions/receipts.ts` に `updateReceiptMetadataAction`(requireEditor+zod再検証)を追加
@@ -45,13 +124,10 @@
 2. 申告送信は受付システムIF仕様書+帳票XML仕様書への自前対応が必要(仕様書は所得税関係だけで約8MB)
 3. 申告送信には利用者の電子署名(電子証明書: マイナンバーカード等)が必須で、ブラウザアプリ単体ではICカードへアクセスするローカル署名コンポーネントが実現できない
 代替手段: `/reports/filing` 集計の確定申告書等作成コーナー転記、CSV/JSONバックアップの税理士・他ソフト受け渡し、証憑/監査ログCSVの資料化。REQUIREMENTS.mdのスコープ外記載と整合
-### 実行したテスト
 - `pnpm lint` — 合格(warning 1件: 既存の `<img>`)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(52ファイル635件、skip 10。`receipt-search.test.ts` 9件、`buildReceiptsCsv` 3件、`buildAuditLogCsv` 2件、`updateReceiptMetadata` 5件を含む新規)
 - `pnpm build` — 合格
 - `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル112件。receiptメタデータ検証ケース含む)
-### 判断事項・次の担当者への注意事項
 - 証憑メタデータは紐付け時点のスナップショットであり取引編集に自動追従しない(検索は両方の値を対象とするため探索可能性は維持)。追従が必要になった場合は紐付取引の更新フックで連動させる設計変更を検討
 - 監査ログCSVは識別情報のみ(actorNameは表示名、パスから証憑内容は推測されない)。内容スナップショットを含める要件が出た場合は個人情報取り扱い方針(docs/SECURITY_RULES.md)との整合確認が必要
 - 「ダウンロードの求め」への完全対応には証憑ファイル本体の一括エクスポートが残っている。個別DL+一覧CSV+JSONバックアップで代替可能だが、必要なら別Issue化
