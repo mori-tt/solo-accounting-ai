@@ -173,6 +173,32 @@ export const taxCategorySchema = z.enum([
   "out_of_scope",
 ]);
 
+/** 源泉徴収の支払区分。service_fee=報酬・料金(支払調書)、salary=給与(源泉徴収票) */
+export const withholdingCategorySchema = z.enum(["service_fee", "salary"]);
+
+/**
+ * 源泉徴収記録の入力。対象はexpense型取引。
+ * paymentAmount は対象支払額(取引額以下)、taxAmount は manual 時の税額。
+ * auto は区分の税率(service_fee=10.21%)で自動計算する。
+ */
+export const withholdingSchema = z
+  .object({
+    category: withholdingCategorySchema,
+    /** 源泉徴収の対象となる支払金額(円・整数・正数) */
+    paymentAmount: yenAmount,
+    /** 税額の求め方。auto=税率で自動計算、manual=税額を手入力 */
+    calculation: z.enum(["auto", "manual"]),
+    /** manual時の源泉徴収税額(円・整数・0以上)。auto時は無視される */
+    taxAmount: nonNegativeYen.optional(),
+    /** 支払調書の細目欄に使うメモ(任意) */
+    note: optionalText,
+  })
+  .refine((v) => v.calculation !== "manual" || v.taxAmount !== undefined, {
+    message: "手入力の場合は源泉徴収税額を入力してください",
+    path: ["taxAmount"],
+  });
+export type WithholdingFormInput = z.infer<typeof withholdingSchema>;
+
 export const transactionSchema = z
   .object({
     type: z.enum(["income", "expense", "transfer"]),
@@ -190,11 +216,23 @@ export const transactionSchema = z
      */
     taxCategory: taxCategorySchema.nullable().optional(),
     taxRate: z.enum(["standard", "reduced"]).nullable().optional(),
+    /**
+     * 源泉徴収記録。更新時: 省略(undefined)=既存値を保持、
+     * null=解除、値=登録/更新。type=expense の場合のみ有効。
+     */
+    withholding: withholdingSchema.nullable().optional(),
   })
   .refine((v) => v.taxRate == null || v.taxCategory === "taxable", {
     message: "税率は課税取引の場合のみ指定できます",
     path: ["taxRate"],
-  });
+  })
+  .refine(
+    (v) => !v.withholding || v.type === "expense",
+    {
+      message: "源泉徴収は支出取引のみ設定できます",
+      path: ["withholding"],
+    },
+  );
 export type TransactionInput = z.infer<typeof transactionSchema>;
 
 /** 取引検索の入力。queryは摘要・取引先・科目・金額への横断検索文字列 */
@@ -235,6 +273,8 @@ export const expenseSchema = z.object({
   taxCategory: taxCategorySchema,
   taxAmount: nonNegativeYen.optional(),
   paymentDueDate: z.union([dateString, z.literal("")]).optional(),
+  /** 源泉徴収の記録(任意)。外注費・報酬・専従者給与の源泉税を記録する */
+  withholding: withholdingSchema.optional(),
 });
 export type ExpenseInput = z.infer<typeof expenseSchema>;
 

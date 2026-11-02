@@ -33,6 +33,12 @@ import {
   tableClass,
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
+import {
+  initialWithholdingFields,
+  WithholdingFields,
+  withholdingInputFrom,
+  type WithholdingFieldsValue,
+} from "../../transactions/withholding-fields";
 
 const TAX_CATEGORY_LABELS: Record<TaxCategory, string> = {
   taxable: "課税仕入",
@@ -55,6 +61,9 @@ export function ExpensesScreen() {
   const [taxCategory, setTaxCategory] = useState<TaxCategory>("taxable");
   const [taxAmount, setTaxAmount] = useState("");
   const [paymentDueDate, setPaymentDueDate] = useState("");
+  const [withholding, setWithholding] = useState<WithholdingFieldsValue>(() =>
+    initialWithholdingFields(undefined, ""),
+  );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -78,6 +87,8 @@ export function ExpensesScreen() {
       taxCategory,
       taxAmount: taxAmount === "" ? undefined : Number(taxAmount),
       paymentDueDate: paymentDueDate === "" ? undefined : paymentDueDate,
+      // 源泉徴収の対象外はundefined(記録を作らない)
+      withholding: withholdingInputFrom(withholding) ?? undefined,
     };
     const parsed = parseForm(expenseSchema, input);
     if (!parsed.success) {
@@ -103,6 +114,7 @@ export function ExpensesScreen() {
       setDescription("");
       setTaxAmount("");
       setPaymentDueDate("");
+      setWithholding(initialWithholdingFields(undefined, ""));
       reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
@@ -221,6 +233,14 @@ export function ExpensesScreen() {
                 />
               </Field>
             </div>
+            <WithholdingFields
+              value={withholding}
+              defaultPaymentAmount={amount}
+              onChange={setWithholding}
+            />
+            {fieldErrors.withholding && (
+              <Alert tone="error">{fieldErrors.withholding}</Alert>
+            )}
             {fieldErrors._form && (
               <Alert tone="error">{fieldErrors._form}</Alert>
             )}

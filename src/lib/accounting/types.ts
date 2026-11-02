@@ -108,6 +108,37 @@ export interface Expense {
   paidAt?: DateString;
 }
 
+/** 源泉徴収の支払区分。service_fee=報酬・料金等(支払調書)、salary=給与(源泉徴収票) */
+export type WithholdingCategory = "service_fee" | "salary";
+
+/** 源泉徴収税額の求め方。auto=税率で自動計算、manual=手入力 */
+export type WithholdingCalculation = "auto" | "manual";
+
+/**
+ * 源泉徴収の記録。expense型Transactionに1対1で紐付く
+ * (ドキュメントID = transactionId で一意性を構造保証する)。
+ * レコードの存在自体が「源泉徴収対象」フラグを兼ねる。
+ */
+export interface WithholdingRecord {
+  /** ドキュメントID = transactionId */
+  id: string;
+  /** 対象取引(expense型のみ) */
+  transactionId: string;
+  /** 支払区分 */
+  category: WithholdingCategory;
+  /** 源泉徴収の対象となった支払金額(円・整数・正数) */
+  paymentAmount: number;
+  /** 源泉徴収税額(円・整数・0以上) */
+  taxAmount: number;
+  /** taxAmount の求め方(自動計算か手入力かの記録) */
+  calculation: WithholdingCalculation;
+  /** 支払調書の細目欄に使うメモ(任意) */
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Receipt {
   id: string;
   storagePath: string;

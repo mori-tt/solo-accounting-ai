@@ -3,7 +3,7 @@ import type { ConsumptionTaxRate } from "../domain/tax";
 import { TAX_CATEGORIES, TRANSACTION_TYPES } from "../domain/validate";
 import { DomainError } from "../errors";
 import { assertYenAmount } from "../money";
-import type { AccountingStore } from "../store/types";
+import type { AccountingStore, PutOp } from "../store/types";
 import { docPath } from "../store/types";
 import type {
   TaxCategory,
@@ -18,6 +18,10 @@ import {
   scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
+import {
+  planWithholdingRecord,
+  type WithholdingInput,
+} from "./withholding";
 
 const TAX_RATES: readonly ConsumptionTaxRate[] = ["standard", "reduced"];
 
@@ -80,6 +84,11 @@ export interface RegisterTransactionInput {
   taxCategory?: TaxCategory;
   /** 税率区分。taxCategory=taxable のときのみ有効(省略時 standard) */
   taxRate?: ConsumptionTaxRate;
+  /**
+   * 源泉徴収の記録(任意)。設定時は type=expense 必須。
+   * withholdingRecords に取引と同一コミットで記録する。
+   */
+  withholding?: WithholdingInput;
 }
 
 /**
@@ -140,15 +149,27 @@ export async function registerTransaction(
         createdAt: at,
         updatedAt: at,
       };
+      const puts: PutOp[] = [
+        { collection: "transactions", id, data: transaction },
+      ];
+      const auditTargets: { collection: string; id: string }[] = [
+        { collection: "transactions", id },
+      ];
+      // 源泉徴収対象の支出は記録を取引と同一コミットで作成する
+      if (input.withholding !== undefined) {
+        const record = planWithholdingRecord(
+          transaction,
+          input.withholding,
+          actor,
+          at,
+        );
+        puts.push({ collection: "withholdingRecords", id, data: record });
+        auditTargets.push({ collection: "withholdingRecords", id });
+      }
       return {
         batch: {
-          puts: [{ collection: "transactions", id, data: transaction }],
-          audits: auditsFor(
-            businessId,
-            [{ collection: "transactions", id }],
-            "create",
-            actor,
-          ),
+          puts,
+          audits: auditsFor(businessId, auditTargets, "create", actor),
         },
         value: transaction,
       };

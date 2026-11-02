@@ -44,6 +44,7 @@ const NAV_GROUPS = [
       { href: "/reports/trial-balance", label: "試算表" },
       { href: "/reports/yearly", label: "年次レポート" },
       { href: "/reports/filing", label: "決算書(収支内訳書)" },
+      { href: "/withholding", label: "源泉徴収" },
     ],
   },
   {

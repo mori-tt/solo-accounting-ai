@@ -55,6 +55,36 @@
 - `recurringTemplates`/`fixedAssets` が `BACKUP_COLLECTIONS` から漏れていた既存バグを合わせて修正(exportされず復元も不可能だった)。backup.test.ts 21件は従来通り合格
 - E2E(`e2e/recurring-invoices.spec.ts`)は作成済みだが `pnpm test:e2e` は未実行(next dev起動が必要・別レーンとのポート衝突回避のため)
 - Emulator利用: `JAVA_HOME` export 後 `pnpm test:rules` のみ実行(next dev 未使用)
+## 2026-11-02: 源泉徴収記録・支払調書集計・専従者源泉徴収票(Issue #131)
+- Worktree: withholding
+外注費・報酬支払いと専従者給与の源泉徴収記録、支払先別の支払調書集計、専従者給与の源泉徴収票帳票。新コレクション `withholdingRecords` を追加。依存追加なし。
+- モデル: `businesses/{businessId}/withholdingRecords/{transactionId}`。doc ID=取引IDで支出取引と1:1(記録の存在自体が対象フラグ)。フィールド: transactionId/category(service_fee|salary)/paymentAmount/taxAmount/calculation(auto|manual)/note?/createdBy/createdAt/updatedAt
+- `src/lib/accounting/types.ts`: `WithholdingRecord`/`WithholdingCategory`/`WithholdingCalculation` 追加
+- `src/lib/accounting/domain/withholding.ts`(新規): `computeWithholdingTax`(報酬・料金: 100万円以下は10.21%=floor(額×1021/10000)、超過分は102,100円+20.42%。salaryは税額表依存のため自動計算を拒否)、`calendarYearRange`、`buildPaymentRecordReport`(暦年・支払先別集計。対象はservice_fee区分の記録が紐付く確定済み支出)、`computeSalaryIncomeDeduction`(令和2年分以降の控除表)、`buildFamilySalarySlips`(専従者給与科目 or salary区分記録の和集合を受給者別に集計し給与所得控除後金額・源泉税額を算出)
+- `src/lib/accounting/domain/ledger.ts`: `WITHHOLDING_ACCOUNT="withholding_payable"` 追加。`transactionToJournalEntry(tx, withholdingTaxAmount)` が源泉徴収対象の支出を3行仕訳へ展開(借方=経費科目総額 / 貸方=現金(差引支払額)+預り金(税額)。貸借一致は維持)。`buildJournal` に `withholdingTaxByTx?: Map` を追加。`JournalEntry.lines` を可変長へ変更(通常2行)
+- 科目マスタ: `src/lib/accounts.ts` に `withholding_payable`(預り金(源泉所得税)・kind=any)を追加し帳簿画面で解決可能に。`src/lib/opening-balance-accounts.ts` のプリセットにも追加(未納付残高の繰越対象)
+- ストア: `store/types.ts` の `CollectionName`・`AccountingReader` に `withholdingRecords` と `getWithholdingRecord`/`listWithholdingRecords` を追加。firestore/memory 両実装を拡張
+- `src/lib/accounting/services/withholding.ts`(新規): `planWithholdingRecord`(expense限定・paymentAmount≤取引額・taxAmount≤取引額・salary自動計算拒否・manual税額必須・既存レコードのcreatedBy/createdAt継承)、`resolveWithholdingTaxAmount`
+- 登録・更新・削除: `services/transactions.ts` の `registerTransaction`、`services/expenses.ts` の `registerExpense` に `withholding?` 入力を追加し取引+記録を同一コミットで作成。`actions/transactions.ts` の `updateTransaction` は省略=保持/null=解除/値=作成更新、expense以外への種別変更で記録を削除。`deleteTransaction` は記録を同時削除(孤児化防止)。auditも同一バッチで記録
+- zod: `withholdingSchema`(manual時taxAmount必須のrefine)、`transactionSchema.withholding`(nullable=解除。expense以外での指定を拒否するrefine)、`expenseSchema.withholding`
+- `src/lib/actions/withholding.ts`(新規): `getWithholdingRecordForTransaction`(編集フォーム初期値用)、`listWithholdingRows`(暦年内の記録+取引の結合)、`getPaymentRecordReport`(businessName+集計)、`getFamilySalarySlipReport`(businessName+issuerName/issuerAddress+集計)。集計は保存せず毎回生成(手計算値の保存禁止)
+- レポート連携: `reports/actions.ts` の仕訳帳・勘定元帳・試算表・`services/periods.ts` の繰越計算で `transactionId→税額` マップを `buildJournal` へ渡し預り金科目を残高計算に含める
+- UI: `transactions/withholding-fields.tsx`(新規・取引/経費フォーム共用の対象チェック+区分+対象支払額+自動/手入力+細目メモ。自動時は税額プレビュー、salaryは手入力強制)。`transaction-form.tsx` は編集時に既存記録を取得して初期化しexpense時のみ表示・送信。`expenses-screen.tsx` にも同欄を追加。`/withholding` ページ新設(page/loading/screen): 記録一覧・支払調書集計(支払先別合計+明細・印刷可)・源泉徴収票(受給者別帳票+支払明細・印刷可)の3タブ、暦年ナビ、集計対象外件数の警告、正式帳票でない旨の注意書き。ナビ「帳簿・レポート」に「源泉徴収」追加
+- `firestore.rules`: `withholdingRecords` match 追加(member読取/canEdit作成更新削除/transactionId=docID/createdBy一致/transactionId・createdBy・createdAt不変/`validWithholdingRecord` 検証/`withholdingTxOpen` でリンク先取引の実在・expense型・非locked・非締め済み期間を要求。孤児レコードのdeleteは許可)
+- `src/lib/backup.ts`: `BACKUP_COLLECTIONS` に追加。復元はdoc ID=transactionIdのためランダム採番せずリンク先取引の確定IDを使用(`SINGLE_REF_FIELDS` で参照リマップ、バックアップ取引日付でclosed期間混入をskip、transactionId≠書込先IDの不整合をskip)
+- ドキュメント: `docs/FIRESTORE_SCHEMA.md` にコレクション定義、`docs/SECURITY_RULES.md` にルール仕様を追記
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(53ファイル646件・skip 10。新規: `domain/withholding.test.ts` 税率/集計/源泉徴収票、`domain/ledger.test.ts` 3行展開、`services/withholding.test.ts` 入力検証。`periods.test.ts` は繰越プリセット追加に伴う期待値を更新)
+- `pnpm build` — 合格(/withholding を含む全ルート生成)
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル119件。withholdingRecords 11件を含む。初回はポート衝突で失敗→リトライで成功)
+- 支払調書・源泉徴収票は「記帳データから組み立てた簡易帳票」。法定様式の提出用紙ではない旨を画面に明記(税額表・扶養控除等の申告情報を持たないため)
+- 給与の源泉税額は自動計算しない(源泉徴収税額表+扶養人数等依存)。manual入力のみ受け付け、salary選択時はUIも手入力に揃える
+- 預り金の納付は「借方=withholding_payable」の振替取引で残高を減らす運用(専用の納付機能は未実装。科目は kind=any で振替に選べる)
+- 記録は取引の付属データとして同一コミットで管理し、取引削除・expense以外への種別変更で同時に消す(単独APIは作らず不整合経路を無くす方針)
+- 記録一覧は暦年内の取引に紐付くもののみ表示(取引が期間外・存在しない記録は表示されない。孤児は削除経路が無いため通常発生しない)
+- 取引更新時の withholding は省略=保持・null=解除・値=作成更新の3値セマンティクス。フォームは常に値かnullを送る(API直接呼び出し時のみ保持が効く)
+- paymentAmount(対象支払額)は取引額以下で、取引額より小さくできる(消費税込み支払いで税抜部分のみ対象などのケース用)。仕訳展開の税額は taxAmount を使うため支払額設定が仕訳金額へ影響しない設計
 ## 2026-11-02: 棚卸資産管理(在庫品目+期末棚卸高の自動集計)(Issue #133)
 - Worktree: inventory
 棚卸品目マスタ(`inventoryItems`)と年度別期末棚卸カウント(`inventoryCounts`)を新設し、
@@ -108,6 +138,7 @@
 - `docs/FIRESTORE_SCHEMA.md`: コレクション一覧と2コレクションのフィールド表・
   棚卸高の計算規約(保存せず都度計算)・締め済み保護を追記
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
 - `pnpm test` — 合格(53ファイル637件、skip 10。`domain/inventory.test.ts` 6件 +
   `services/inventory.test.ts` 11件 新規、nav-links テストのリンク数を25へ更新)
 - `pnpm build` — 合格(/inventory が静的路由として生成)
