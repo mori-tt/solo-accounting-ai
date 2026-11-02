@@ -42,6 +42,7 @@ const NAV_ITEMS = [
   { href: "/audit-log", label: "監査ログ" },
   { href: "/settings", label: "設定" },
   { href: "/backup", label: "バックアップ" },
+  { href: "/business-delete", label: "事業の削除" },
 ] as const;
 
 function NavLinks() {

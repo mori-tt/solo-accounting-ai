@@ -1184,9 +1184,31 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 全角元号アルファベット(Ｒ等)は数字のみ半角化するため列名・日付ともに対象外(半角表記のみ受理)
 - `api-client.ts`・`csv.ts`・`accounts.ts`・`firestore.rules`・設定画面は変更なし(許容範囲内で不要だった)
 - E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク
+## 2026-11-02: パスワードリセットと事業削除(Issue #63)
+- Worktree: account-lifecycle
+### 実装内容
+- パスワードリセット: 公開ページ `/reset-password` 新設(`src/app/reset-password/page.tsx` + `reset-password-screen.tsx`)。メール入力 → `sendPasswordResetEmail`(firebase client SDK) → 送信完了表示 + ログイン画面へのリンク。`/login` 画面(signinモード時)に「パスワードを忘れた方はこちら」導線を追加
+- `src/lib/validation/schemas.ts`: `passwordResetSchema`(emailのみ)を追加
+- 事業削除: `src/lib/actions/businesses.ts` に `deleteBusiness(businessId, confirmName)` Server Action を追加。`requireOwner` でowner限定、事業名の完全一致をサーバー側でも検証。`getAdminBucket().deleteFiles({prefix: "receipts/{businessId}/"})` で証憑ファイルを削除後、`db.recursiveDelete` でbusinessドキュメント+全サブコレクションを削除(実在コレクション: members/transactions/expenses/receipts/customers/projects/invoices/payments/journalEntries/recurringTemplates/closingChecks/aiSuggestions/monthlySummaries/fiscalPeriods/auditLogs/idempotencyKeys — rules/docs/FIRESTORE_SCHEMA.md/store typesから洗い出し)
+- `/business-delete` 専用ページ新設(`src/app/(app)/business-delete/`): settings画面は変更不可のため独立ページ。非ownerは警告のみ表示。事業名入力(完全一致でボタン活性化)+ ConfirmDialog の二重確認。成功後は `reloadBusinesses()` → `/dashboard` へ遷移
+- `app-shell.tsx`: ナビに「事業の削除」を1行追加(バックアップの次・管理系末尾)
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功。依存追加なし
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(37ファイル483件、skip 10)
+- `pnpm build` — 合格(`/reset-password`・`/business-delete` が静的ルートとして生成)
+- Firebase Emulator tests — 未実施(Issue制約で起動禁止。firestore.rules/storage.rules の変更なし)
+### 設計上の判断・備考
+- 削除は `db.recursiveDelete`(Admin SDK・BulkWriter経由)を採用。コレクション名のハードコード列挙ではなく存在する全サブコレクションを再帰削除するため、将来追加されるコレクションも漏れなく削除される
+- Storageの `receipts/{businessId}/` 配下はFirestoreより先に削除。Firestore先行だと失敗時に残骸ファイルを事業単位で追えなくなるため
+- `users/{uid}`・Firebase Authアカウントは削除対象外(事業が消えてもアカウントは残る)。membersサブコレクションは事業配下のため削除される
+- 監査ログへの記録は実施せず。auditLogsは事業配下のため削除と同時に消え、証跡として残らない
+- 締め済み期間のデータも含めて全削除される(事業ライフサイクル操作としてIssueの要件どおり。ロックデータの直接変更禁止ルールとは別枠)
+- `deleteBusiness` は `confirmName` を文字列引数で受け取る(removeMember等と同じスタイル)。zodスキーマは使わず、サーバー側で事業名との完全一致のみ検証
+- Emulator・`next dev` は制約で未起動のため実動作確認はE2Eなし
 ## 2026-11-02: グローバル検索と入力履歴サジェスト(Issue #61)
 - Worktree: search-suggest
-### 実装内容
 - `/search` 新規画面(`src/app/(app)/search/`): フリーテキストで摘要・取引先・科目・金額を横断検索。確定済み(confirmed/locked)のみ、businessIdは `requireViewer` でスコープ。期間は「全会計期間(既定)/直近1年/期間を指定(任意の片側のみも可)」。結果は日付降順テーブルで、各行に取引一覧へのリンク(50件ずつ「さらに読み込む」)
 - `src/lib/search.ts`(新規): `transactionMatchesQuery`(空白区切りトークンのAND。各トークンは 摘要/取引先/科目コード/科目名/金額 のいずれかに部分一致。金額は数字以外を落として比較)と `normalizeSearchText`(NFKC正規化で全角英数・半角カナ・全角スペースを吸収)、`recentDistinctValues`(直近利用順distinct)
 - `src/lib/actions/search.ts`(新規): `searchTransactions`。`listTransactionsInRange` で範囲取得後、科目ラベル(標準+カスタム科目)を解決してマッチング。未指定期間は `0001-01-01`〜`9999-12-31`
@@ -1195,14 +1217,10 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - `transaction-form.tsx`: 取引先・摘要に `<datalist>` オートコンプリート。履歴はフォーム内で `listTransactionInputHistory` を取得(親画面は変更不可のため自己完結)。摘要は datalist 非対応の `Textarea` から `TextInput` へ変更(もともと rows=1 の単一行)
 - `app-shell.tsx`: ナビ「取引一覧」の次に「検索」を1行追加
 - `src/lib/search.test.ts`(新規): 14件。正規化(全角/半角カナ/空白畳み)、横断一致(摘要/取引先/科目コード/科目名/金額各表記)、ANDトークン、空クエリ全件一致、distinct順序/空除外/limit
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
 - `pnpm test` — 合格(38ファイル496件、skip 10。search.test.ts 14件含む)
 - `pnpm build` — 合格(`/search` が静的ルートとして生成)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
-### 設計上の判断・備考
 - Firestoreに全文検索が無いため、期間範囲の取引取得→`transactionMatchesQuery` でサーバー側フィルタ。期間未指定は既存と同じ全期間rangeを使う
 - 検索対象は confirmed/locked(=確定済み)に限定。入力履歴サジェストは入力補助のため下書きも含める
 - 金額検索はトークンの数字以外を除去して部分一致(「12,000」「¥12000」「12000円」「１２０００」いずれも金額12000に一致)
