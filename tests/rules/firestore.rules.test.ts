@@ -1710,6 +1710,20 @@ describe("quotes(Issue #129)", () => {
     await seed(testEnv, {
       [`businesses/${BIZ}/fiscalPeriods/fy2025`]: closedPeriod2025,
       [qPath("q-closed")]: { ...quote("sent"), issueDate: "2025-06-15" },
+    });
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    await assertFails(
+      editor
+        .doc(qPath("q-new"))
+        .set({ ...quote("draft"), issueDate: "2025-06-15" }),
+    );
+    await assertFails(
+      editor.doc(qPath("q-closed")).update({ validUntil: "2025-12-31" }),
+    );
+    await assertFails(owner.doc(qPath("q-closed")).delete());
+  });
+});
 
 describe("bills / billPayments(買掛の支払消込)", () => {
   const bPath = (id: string) => `businesses/${BIZ}/bills/${id}`;
@@ -1802,13 +1816,6 @@ describe("bills / billPayments(買掛の支払消込)", () => {
     const editor = asUser(testEnv, EDITOR);
     const owner = asUser(testEnv, OWNER);
     await assertFails(
-      editor.doc(qPath("q-new")).set({ ...quote("draft"), issueDate: "2025-06-15" }),
-    );
-    await assertFails(
-      editor.doc(qPath("q-closed")).update({ validUntil: "2025-12-31" }),
-    );
-    await assertFails(owner.doc(qPath("q-closed")).delete());
-
       editor.doc(bPath("b3")).set({ ...bill(), createdBy: EDITOR }),
     );
     await assertFails(editor.doc(bPath("b1")).update({ totalAmount: 1 }));
