@@ -1,4 +1,5 @@
 import { registerReceipt } from "@/lib/accounting/services/receipts";
+import { receiptUploadRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireEditor } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -34,6 +35,8 @@ export async function POST(request: Request) {
       throw new ApiError("INVALID_INPUT", "businessId と file が必要です");
     }
     const actor = await requireEditor(businessId);
+    // Storage書き込み+帯域が課金対象のため businessId 単位で制限
+    receiptUploadRateLimiter.consume(businessId);
 
     if (!ALLOWED_MIME.has(file.type)) {
       throw new ApiError(

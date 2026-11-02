@@ -9,7 +9,6 @@ import {
   type QuerySnapshot,
   type Transaction as FsTransaction,
 } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
 import type {
   AuditLogEntry,
   Business,
@@ -289,7 +288,7 @@ class FirestoreAccountingReader implements AccountingReader {
 export class FirestoreAccountingStore implements AccountingStore {
   private readonly reader: AccountingReader;
 
-  constructor(private readonly db: Firestore = getAdminDb()) {
+  constructor(private readonly db: Firestore) {
     this.reader = new FirestoreAccountingReader(
       db,
       (ref) => ref.get(),

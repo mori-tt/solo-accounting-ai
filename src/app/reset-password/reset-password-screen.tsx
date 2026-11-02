@@ -5,6 +5,7 @@ import Link from "next/link";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import { shouldUseEmulator } from "@/lib/firebase/config";
 import {
   Alert,
   Button,
@@ -21,12 +22,12 @@ function resetErrorMessage(e: unknown): string {
       case "auth/invalid-email":
       case "auth/missing-email":
         return "メールアドレスの形式が正しくありません";
-      case "auth/user-not-found":
-        return "このメールアドレスのアカウントは見つかりません";
       case "auth/too-many-requests":
         return "試行回数が多すぎます。しばらく待ってから再試行してください";
       case "auth/network-request-failed":
-        return "認証サーバーに接続できません。Emulatorの起動を確認してください";
+        return shouldUseEmulator()
+          ? "認証サーバーに接続できません。Emulatorの起動を確認してください"
+          : "認証サーバーに接続できません。しばらく待ってから再試行してください";
     }
   }
   return "送信に失敗しました";
@@ -53,7 +54,16 @@ export function ResetPasswordScreen() {
       await sendPasswordResetEmail(getFirebaseAuth(), parsed.data.email);
       setSent(true);
     } catch (err) {
-      setError(resetErrorMessage(err));
+      // アカウント列挙防止: 未登録メールも送信成功と同じ表示にする
+      // (Firebaseのメール列挙保護と同じ振る舞い)
+      if (
+        err instanceof FirebaseError &&
+        err.code === "auth/user-not-found"
+      ) {
+        setSent(true);
+      } else {
+        setError(resetErrorMessage(err));
+      }
     } finally {
       setBusy(false);
     }
