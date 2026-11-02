@@ -1,5 +1,7 @@
 import type {
   AuditLogEntry,
+  Bill,
+  BillPayment,
   Business,
   Customer,
   Expense,
@@ -30,6 +32,8 @@ export type CollectionName =
   | "projects"
   | "invoices"
   | "payments"
+  | "bills"
+  | "billPayments"
   | "monthlySummaries"
   | "recurringTemplates"
   | "fixedAssets"
@@ -95,6 +99,16 @@ export interface AccountingReader {
     businessId: string,
     invoiceId: string,
   ): Promise<Payment[]>;
+  getBill(businessId: string, id: string): Promise<Bill | undefined>;
+  listBills(businessId: string): Promise<Bill[]>;
+  getBillPayment(
+    businessId: string,
+    id: string,
+  ): Promise<BillPayment | undefined>;
+  listBillPaymentsForBill(
+    businessId: string,
+    billId: string,
+  ): Promise<BillPayment[]>;
   listFiscalPeriods(businessId: string): Promise<FiscalPeriod[]>;
   listAuditLogs(businessId: string): Promise<AuditLogEntry[]>;
 }

@@ -2024,3 +2024,36 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
 - `pnpm build` — 合格
 - `pnpm test` — 合格(50ファイル593件、skip 10)
+
+## 2026-11-02: 買掛管理(受領請求→支払予定→支払消込)(Issue #132)
+- Worktree: payables
+### 実装内容
+入金消込(payments/請求書)と対称な買掛ワークフロー。
+受領請求書登録 → 支払予定・期日アラート → 支払記録・支出取引との消込。依存追加なし。
+- `src/lib/accounting/types.ts`: `Bill`(vendorName/totalAmount/receivedDate/dueDate/description?/status/createdBy/createdAt/updatedAt)、`BillStatus`(`unpaid`/`paid`。期限超過はdueDateから都度判定するため保持しない)、`BillPayment`(billId/date/amount/transactionId?/createdAt) を追加
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"bills"`/`"billPayments"`、`AccountingReader` に `getBill`/`listBills`/`getBillPayment`/`listBillPaymentsForBill` を追加。`store/firestore.ts`(billId等値クエリ)・`store/memory.ts` に実装
+- `src/lib/accounting/services/bills.ts`(新規): `registerBill`(unpaid登録・冪等キー・受領日の締め期間チェック)、`updateBill`(未払のみ・新旧受領日ともopen期間・支払累計未満への請求額引下げは拒否)、`registerBillPayment`(部分支払可・過払い拒否・paid化は支払合計到達時のみ・支払日の締め期間チェック・監査はpayment+status変更時のbill)、`findUnpaidBills`(期日昇順・overdue判定・remaining算出)
+- `src/lib/bill-matching.ts`(新規): payment-matching の買掛版。`rankBillPaymentLinkCandidates`(同一取引先優先+日付降順・二重消込はexcludeIdsで排除)、`billPaymentProgress`、`billSettlement` を payment-matching 関数で実装
+- `src/lib/validation/schemas.ts`: `billSchema`/`billPaymentSchema` を追加
+- `src/lib/actions/bills.ts`(新規): `listBillRows`(未払は期日昇順・支払済は期日降順+支払履歴)、`createBill`/`updateBillAction`(editor・冪等キー)、`listBillPaymentLinkCandidates`(受領日〜asOfのexpense取引・紐付済み除外)、`registerBillPaymentAction`(transactionIdはexpense型の実在取引のみ)
+- `src/lib/api/queries.ts`: `listBillPaymentsRaw` を追加
+- `src/lib/actions/reports.ts` + `dashboard-screen.tsx`: DashboardData に `unpaidBillCount`/`unpaidBillAmount`/`overdueBillCount` を追加し「要対応」アラートへ未払請求書項目を追加(既存AttentionItemと同パターン・/billsへリンク)
+- `src/app/(app)/bills/`: 一覧(支払額/残額・期限超過・一部支払・消込バッジ)+ 登録/編集フォーム + 支払記録フォーム(支出取引の候補選択つき) + 支払履歴
+- `src/components/nav-links.tsx`: 「仕入・支払」グループに「支払・買掛」(/bills)追加、`status-badge.tsx` に `bill` 種別追加、nav-links.test 更新(リンク数24→25)
+- `src/lib/backup.ts` + `backup-screen.tsx` + `audit-log-view.ts` + `businesses.ts`(コメント): bills/billPayments をバックアップ対象・復元ルール(status遷移はskip・createdBy張替・receivedDate/dateのclosed期間検査・billId/transactionId参照張替)・コレクション表示名・監査対象種別に追加
+- `firestore.rules`: `billDoc`ヘルパ、`/bills`(member読・editor作成createdBy一致・未払のみ編集可/paidは不変・editorは未払のみ削除・受領日closed期間ガード)、`/billPayments`(実在bill必須・transactionIdは実在のexpense型取引のみ・金額日付消込先不変・削除はownerのみ・支払日closed期間ガード)
+- `docs/FIRESTORE_SCHEMA.md`: bills/billPaymentsコレクション定義を追加(overdueは派生値であることも明記)
+- `tests/rules/helpers.ts` + `firestore.rules.test.ts`: bills/billPayments フィクスチャと7ケース追加(権限・createdBy偽装・status/日付/金額不正値・paid不変性・削除権限・closed期間・実在bill参照・expense限定transactionId)
+### 判断事項
+- BillStatusは`unpaid`/`paid`のみ。invoicesの`overdue`と違い保存値にしない(dueDate+基準日からの導出値で、status遷移の管理負荷を避ける)
+- billの編集は未払のみ・請求額を支払累計未満には下げられない(残高負転防止)
+- billPayment確定後の訂正はpayment削除(owner)+再登録で表現(paymentsと同様の不変性方針)
+- invoicesのupdate rulesと同パターン: 未払billはクライアント更新可(paidへの直接変更もrules上は許容。invoicesのdraft→paidと同じ既知の緩さ)
+- `updateBill`の請求額下限ガードを自己レビューで追加(invoicesにupdate相当が無く先例なし)
+### Checks
+- `pnpm lint` — 合格(0 errors、既存warning1件のみ: receiptsの<img>)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` で `.next/types` 生成後。worktree初期状態ではLayoutProps未生成で失敗する既知事象)
+- `pnpm test` — 合格(53ファイル641件、skip 10)
+- `pnpm build` — 合格(/bills ルート生成)
+- `pnpm test:rules`(JAVA_HOME=openjdk@21) — 合格(2ファイル117件)
+- `pnpm test:emulators` — 合格(2ファイル7件)

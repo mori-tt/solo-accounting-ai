@@ -23,6 +23,9 @@ export type ProjectStatus = "active" | "done" | "archived";
 
 export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue";
 
+/** 受領請求書(買掛)の状態。期限超過は dueDate から都度判定するため保持しない */
+export type BillStatus = "unpaid" | "paid";
+
 export type FiscalPeriodStatus = "open" | "closed";
 
 export type AuditAction = "create" | "update" | "delete" | "close";
@@ -171,6 +174,42 @@ export interface Payment {
   date: DateString;
   /** 円・整数・正数 */
   amount: number;
+  transactionId?: string;
+  createdAt: string;
+}
+
+/**
+ * 取引先から受領した請求書(買掛)。
+ * 支払は billPayments で消込し、支払合計が totalAmount に達すると
+ * status が paid になる(入金消込の買掛版)。
+ */
+export interface Bill {
+  id: string;
+  /** 取引先名(支払先) */
+  vendorName: string;
+  /** 請求額(円・整数・正数・税込) */
+  totalAmount: number;
+  /** 受領日 YYYY-MM-DD */
+  receivedDate: DateString;
+  /** 支払期日 YYYY-MM-DD */
+  dueDate: DateString;
+  /** 摘要(任意) */
+  description?: string;
+  status: BillStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 受領請求書への支払(消込)。部分支払可、超過支払は不可。 */
+export interface BillPayment {
+  id: string;
+  billId: string;
+  /** 支払日 YYYY-MM-DD */
+  date: DateString;
+  /** 円・整数・正数 */
+  amount: number;
+  /** 対応する支出Transaction */
   transactionId?: string;
   createdAt: string;
 }

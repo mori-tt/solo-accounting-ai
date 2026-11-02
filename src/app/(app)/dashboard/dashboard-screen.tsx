@@ -115,6 +115,7 @@ export function DashboardScreen() {
     data.unprocessedReceiptCount === 0 &&
     data.unpaidExpenseCount === 0 &&
     data.unpaidInvoiceCount === 0 &&
+    data.unpaidBillCount === 0 &&
     data.unclosedMonthCount === 0;
 
   return (
@@ -205,6 +206,12 @@ export function DashboardScreen() {
                 danger={data.overdueInvoiceCount > 0}
               />
               <AttentionItem
+                href="/bills"
+                count={data.unpaidBillCount}
+                label={`未払の受領請求書(期限超過 ${data.overdueBillCount}件)`}
+                danger={data.overdueBillCount > 0}
+              />
+              <AttentionItem
                 href="/closing"
                 count={data.unclosedMonthCount}
                 unit="ヶ月"
@@ -213,6 +220,11 @@ export function DashboardScreen() {
               {data.unpaidInvoiceAmount > 0 && (
                 <p className="text-right text-xs text-zinc-500">
                   未入金合計: <Amount value={data.unpaidInvoiceAmount} />
+                </p>
+              )}
+              {data.unpaidBillAmount > 0 && (
+                <p className="text-right text-xs text-zinc-500">
+                  未払合計: <Amount value={data.unpaidBillAmount} />
                 </p>
               )}
             </div>

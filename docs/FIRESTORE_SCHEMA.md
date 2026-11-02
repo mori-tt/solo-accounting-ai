@@ -27,6 +27,8 @@ businesses/{businessId}/expenses/{expenseId}
 businesses/{businessId}/receipts/{receiptId}
 businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/payments/{paymentId}
+businesses/{businessId}/bills/{billId}
+businesses/{businessId}/billPayments/{billPaymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
 businesses/{businessId}/recurringTemplates/{templateId}
 businesses/{businessId}/fixedAssets/{assetId}
@@ -180,6 +182,35 @@ receipts(証憑ファイル)
 | date | string | YYYY-MM-DD |
 | amount | number | 円・整数 |
 | transactionId | string? | 対応する入金Transaction |
+| createdAt | Timestamp | |
+
+### businesses/{businessId}/bills/{billId}
+
+取引先から受領した請求書(買掛)。支払は `billPayments` で消込し、
+支払合計が `totalAmount` に達すると `status` が `paid` になる
+(入金消込の買掛版)。期限超過は `dueDate` と基準日から都度判定し、
+`overdue` ステータスは持たない。
+
+| Field | Type | Note |
+|---|---|---|
+| vendorName | string | 取引先名(支払先) |
+| totalAmount | number | 請求額(円・整数・税込) |
+| receivedDate | string | 受領日 YYYY-MM-DD |
+| dueDate | string | 支払期日 YYYY-MM-DD |
+| description | string? | 摘要 |
+| status | string | `unpaid` / `paid` |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/billPayments/{billPaymentId}
+
+| Field | Type | Note |
+|---|---|---|
+| billId | string | 消込先 |
+| date | string | YYYY-MM-DD(支払日) |
+| amount | number | 円・整数(部分支払可・超過支払は不可) |
+| transactionId | string? | 対応する支出Transaction |
 | createdAt | Timestamp | |
 
 ### businesses/{businessId}/journalEntries/{journalEntryId}

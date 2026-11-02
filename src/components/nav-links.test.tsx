@@ -18,6 +18,7 @@ describe("NavLinks", () => {
     for (const heading of [
       "記帳",
       "売上・請求",
+      "仕入・支払",
       "レポート",
       "決算・管理",
     ]) {
@@ -25,7 +26,7 @@ describe("NavLinks", () => {
         screen.getByRole("heading", { name: heading }),
       ).toBeTruthy();
     }
-    expect(screen.getAllByRole("link")).toHaveLength(24);
+    expect(screen.getAllByRole("link")).toHaveLength(25);
   });
 
   it("現在のパスに対応するリンクだけをアクティブ表示にする", () => {

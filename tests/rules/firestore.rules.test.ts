@@ -9,6 +9,8 @@ import {
   BIZ,
   EDITOR,
   aiSuggestion,
+  bill,
+  billPayment,
   closingCheck,
   expense,
   fiscalPeriod,
@@ -1376,6 +1378,152 @@ describe("invoices / payments(R2-10, R2-11)", () => {
     // 削除はownerのみ
     await assertFails(editor.doc(pPath("p1")).delete());
     await assertSucceeds(asUser(testEnv, OWNER).doc(pPath("p1")).delete());
+  });
+});
+
+describe("bills / billPayments(買掛の支払消込)", () => {
+  const bPath = (id: string) => `businesses/${BIZ}/bills/${id}`;
+  const bpPath = (id: string) => `businesses/${BIZ}/billPayments/${id}`;
+
+  it("editorは請求書を作成でき、viewerは作成できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    const viewer = asUser(testEnv, VIEWER);
+    await assertSucceeds(
+      editor.doc(bPath("b1")).set({ ...bill(), createdBy: EDITOR }),
+    );
+    await assertFails(
+      viewer.doc(bPath("b2")).set({ ...bill(), createdBy: VIEWER }),
+    );
+  });
+
+  it("createdByを偽装して作成できない・statusや日付の不正値は拒否", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor.doc(bPath("b1")).set({ ...bill(), createdBy: OWNER }),
+    );
+    await assertFails(
+      editor
+        .doc(bPath("b1"))
+        .set({ ...bill(), status: "overdue", createdBy: EDITOR }),
+    );
+    await assertFails(
+      editor
+        .doc(bPath("b1"))
+        .set({ ...bill(), dueDate: "2026/10/31", createdBy: EDITOR }),
+    );
+    await assertFails(
+      editor
+        .doc(bPath("b1"))
+        .set({ ...bill(), totalAmount: "110000", createdBy: EDITOR }),
+    );
+  });
+
+  it("未払の請求書は更新でき、支払済みは内容・statusを変更できない", async () => {
+    await seed(testEnv, {
+      [bPath("b-unpaid")]: bill("unpaid"),
+      [bPath("b-paid")]: bill("paid"),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor.doc(bPath("b-unpaid")).update({ totalAmount: 99000 }),
+    );
+    await assertFails(
+      editor.doc(bPath("b-paid")).update({ totalAmount: 1 }),
+    );
+    await assertFails(
+      editor.doc(bPath("b-paid")).update({ status: "unpaid" }),
+    );
+    await assertFails(
+      editor.doc(bPath("b-paid")).update({ vendorName: "他社" }),
+    );
+    await assertFails(
+      editor.doc(bPath("b-paid")).update({ dueDate: "2026-11-01" }),
+    );
+    // createdBy・createdAtは不変
+    await assertFails(
+      editor.doc(bPath("b-unpaid")).update({ createdBy: "x" }),
+    );
+  });
+
+  it("editorは未払のみ削除でき、支払済みの削除はownerのみ", async () => {
+    await seed(testEnv, {
+      [bPath("b-unpaid")]: bill("unpaid"),
+      [bPath("b-paid")]: bill("paid"),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    await assertSucceeds(editor.doc(bPath("b-unpaid")).delete());
+    await assertFails(editor.doc(bPath("b-paid")).delete());
+    await assertSucceeds(owner.doc(bPath("b-paid")).delete());
+  });
+
+  it("closed期間内の受領日では作成・削除・変更できない", async () => {
+    await seed(testEnv, {
+      [`businesses/${BIZ}/fiscalPeriods/fy2026`]: {
+        fiscalYear: 2026,
+        startDate: "2026-01-01",
+        endDate: "2026-12-31",
+        status: "closed",
+        closedBy: OWNER,
+      },
+      [bPath("b1")]: bill("unpaid"),
+      [bPath("b2")]: bill("unpaid", { receivedDate: "2027-01-10" }),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    await assertFails(
+      editor.doc(bPath("b3")).set({ ...bill(), createdBy: EDITOR }),
+    );
+    await assertFails(editor.doc(bPath("b1")).update({ totalAmount: 1 }));
+    await assertFails(owner.doc(bPath("b1")).delete());
+    // 期間外の受領日をclosed期間へ書き換えることも不可
+    await assertFails(
+      editor.doc(bPath("b2")).update({ receivedDate: "2026-10-01" }),
+    );
+  });
+
+  it("billPaymentは実在する請求書へのみ作成でき、確定項目は変更できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    // 存在しない請求書への支払は影の消込になるため不可
+    await assertFails(editor.doc(bpPath("p1")).set(billPayment()));
+    await seed(testEnv, { [bPath("bill-1")]: bill("unpaid") });
+    await assertSucceeds(editor.doc(bpPath("p1")).set(billPayment()));
+    // 金額・日付・消込先・対応transactionは不変
+    await assertFails(editor.doc(bpPath("p1")).update({ amount: 1 }));
+    await assertFails(editor.doc(bpPath("p1")).update({ date: "2026-10-21" }));
+    await assertFails(editor.doc(bpPath("p1")).update({ billId: "bill-2" }));
+    await assertFails(
+      editor.doc(bpPath("p1")).update({ transactionId: "t9" }),
+    );
+    // 削除はownerのみ
+    await assertFails(editor.doc(bpPath("p1")).delete());
+    await assertSucceeds(asUser(testEnv, OWNER).doc(bpPath("p1")).delete());
+  });
+
+  it("billPaymentのtransactionIdは支出取引のみ紐付けられる", async () => {
+    await seed(testEnv, {
+      [bPath("bill-1")]: bill("unpaid"),
+      [tPath(BIZ, "tx-exp")]: tx("confirmed"),
+      [tPath(BIZ, "tx-income")]: { ...tx("confirmed"), type: "income" },
+    });
+    const editor = asUser(testEnv, EDITOR);
+    // 収入取引への紐付けは拒否
+    await assertFails(
+      editor
+        .doc(bpPath("p1"))
+        .set(billPayment({ transactionId: "tx-income" })),
+    );
+    // 存在しない取引への紐付けも拒否
+    await assertFails(
+      editor
+        .doc(bpPath("p1"))
+        .set(billPayment({ transactionId: "ghost" })),
+    );
+    await assertSucceeds(
+      editor
+        .doc(bpPath("p1"))
+        .set(billPayment({ transactionId: "tx-exp" })),
+    );
   });
 });
 

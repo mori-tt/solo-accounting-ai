@@ -11,6 +11,8 @@ import {
 } from "firebase-admin/firestore";
 import type {
   AuditLogEntry,
+  Bill,
+  BillPayment,
   Business,
   Customer,
   Expense,
@@ -270,6 +272,30 @@ class FirestoreAccountingReader implements AccountingReader {
     );
   }
 
+  getBill(businessId: string, id: string): Promise<Bill | undefined> {
+    return this.readDoc(businessId, "bills", id);
+  }
+
+  listBills(businessId: string): Promise<Bill[]> {
+    return this.readQuery<Bill>(this.col(businessId, "bills"));
+  }
+
+  getBillPayment(
+    businessId: string,
+    id: string,
+  ): Promise<BillPayment | undefined> {
+    return this.readDoc(businessId, "billPayments", id);
+  }
+
+  listBillPaymentsForBill(
+    businessId: string,
+    billId: string,
+  ): Promise<BillPayment[]> {
+    return this.readQuery<BillPayment>(
+      this.col(businessId, "billPayments").where("billId", "==", billId),
+    );
+  }
+
   listFiscalPeriods(businessId: string): Promise<FiscalPeriod[]> {
     return this.readQuery<FiscalPeriod>(
       this.col(businessId, "fiscalPeriods"),
@@ -366,6 +392,18 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listPaymentsForInvoice(businessId: string, invoiceId: string) {
     return this.reader.listPaymentsForInvoice(businessId, invoiceId);
+  }
+  getBill(businessId: string, id: string) {
+    return this.reader.getBill(businessId, id);
+  }
+  listBills(businessId: string) {
+    return this.reader.listBills(businessId);
+  }
+  getBillPayment(businessId: string, id: string) {
+    return this.reader.getBillPayment(businessId, id);
+  }
+  listBillPaymentsForBill(businessId: string, billId: string) {
+    return this.reader.listBillPaymentsForBill(businessId, billId);
   }
   listFiscalPeriods(businessId: string) {
     return this.reader.listFiscalPeriods(businessId);

@@ -205,6 +205,30 @@ export function fixedAsset(extra: Record<string, unknown> = {}) {
   };
 }
 
+export function bill(
+  status: "unpaid" | "paid" = "unpaid",
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    vendorName: "仕入先A",
+    totalAmount: 110000,
+    receivedDate: "2026-10-01",
+    dueDate: "2026-10-31",
+    status,
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
+export function billPayment(extra: Record<string, unknown> = {}) {
+  return {
+    billId: "bill-1",
+    date: "2026-10-20",
+    amount: 50000,
+    ...extra,
+  };
+}
+
 export function fiscalPeriod(status: "open" | "closed" = "open") {
   const closed = status === "closed";
   return {

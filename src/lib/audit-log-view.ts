@@ -41,6 +41,8 @@ export const AUDIT_TARGET_TYPES = [
   { value: "receipts", label: "領収書" },
   { value: "invoices", label: "請求書" },
   { value: "payments", label: "入金" },
+  { value: "bills", label: "受領請求書" },
+  { value: "billPayments", label: "支払" },
   { value: "customers", label: "顧客" },
   { value: "projects", label: "案件" },
   { value: "journalEntries", label: "仕訳" },
