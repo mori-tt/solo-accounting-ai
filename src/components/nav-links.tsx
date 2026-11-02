@@ -27,6 +27,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/customers", label: "顧客" },
       { href: "/projects", label: "案件" },
+      { href: "/quotes", label: "見積" },
       { href: "/invoices", label: "請求・入金" },
     ],
   },

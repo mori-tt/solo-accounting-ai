@@ -176,6 +176,19 @@ export function receipt(status = "unprocessed", id = "r1") {
   };
 }
 
+export function quote(status = "draft") {
+  return {
+    customerId: "c1",
+    issueDate: "2026-10-01",
+    validUntil: "2026-10-31",
+    items: [
+      { description: "作業費", quantity: 1, unitPrice: 10000, amount: 10000 },
+    ],
+    totalAmount: 10000,
+    status,
+  };
+}
+
 export function recurringTemplate(extra: Record<string, unknown> = {}) {
   return {
     name: "事務所家賃",

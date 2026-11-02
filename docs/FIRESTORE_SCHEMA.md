@@ -26,6 +26,7 @@ businesses/{businessId}/transactions/{transactionId}
 businesses/{businessId}/expenses/{expenseId}
 businesses/{businessId}/receipts/{receiptId}
 businesses/{businessId}/invoices/{invoiceId}
+businesses/{businessId}/quotes/{quoteId}
 businesses/{businessId}/payments/{paymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
 businesses/{businessId}/recurringTemplates/{templateId}
@@ -81,6 +82,7 @@ receipts(証憑ファイル)
 | issuerName | string? | 請求書の発行者名。未設定時は事業名を使う |
 | issuerAddress | string? | 請求書に記載する発行者住所 |
 | invoiceCounter | number? | 請求書番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 |
+| quoteCounter | number? | 見積番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
 
@@ -169,8 +171,35 @@ receipts(証憑ファイル)
 | totalAmount | number | 円・整数(税込) |
 | taxAmount | number? | 消費税合計(円・整数・明細ごと切り捨ての合算)。税フィールド導入前データは未設定 |
 | status | string | `draft` / `issued` / `paid` / `overdue` |
+| quoteId | string? | 転換元の見積ID(見積→請求変換で生成された場合のみ) |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
+
+### businesses/{businessId}/quotes/{quoteId}
+
+見積書。`draft`→`sent`→`accepted`→`converted` のライフサイクルを持ち、
+`sent`/`accepted` の見積から請求書へ転換できる(明細・顧客・案件をコピー、
+invoice.quoteId と quote.convertedInvoiceId を相互参照する)。
+会計仕訳を持たないが、発行日の締め済み期間への混入は請求書と同じく拒否する。
+
+| Field | Type | Note |
+|---|---|---|
+| quoteNumber | string? | 見積番号(`EST-`+6桁連番・作成時に採番)。連番導入前データは未設定 |
+| customerId | string | |
+| projectId | string? | |
+| issueDate | string | YYYY-MM-DD(見積発行日) |
+| validUntil | string | YYYY-MM-DD(見積有効期限) |
+| items | array | invoices と同じ構造 [{ description, quantity, unitPrice, amount, taxRate, taxAmount }] ※unitPrice/amountは税込 |
+| totalAmount | number | 円・整数(税込) |
+| taxAmount | number? | 消費税合計(円・整数)。税フィールド導入前データは未設定 |
+| notes | string? | 帳票の備考欄に出す補足 |
+| status | string | `draft` / `sent` / `accepted` / `converted` |
+| convertedInvoiceId | string? | 転換先の請求書ID(status=convertedのとき設定) |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+※ 納品書は請求書から、発行領収書は入金(payments)からその都度派生する
+帳票であり、専用コレクションは持たない(納品書番号は `{invoiceNumber}-D`)。
 
 ### businesses/{businessId}/payments/{paymentId}
 

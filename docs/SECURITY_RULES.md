@@ -37,6 +37,7 @@ Firebase Security Rules(Firestore / Storage)の方針。
 - editorのdelete「制限あり」の具体化:
   - transactions: `status='draft'` のみ削除可
   - invoices: `status='draft'` のみ削除可
+  - quotes: `status='draft'` のみ削除可
   - receipts: `status='unprocessed'` のみ削除可
   - 上記以外の削除はownerのみ
 - `businesses` ドキュメントのdeleteはクライアントから不可
@@ -52,7 +53,8 @@ Firebase Security Rules(Firestore / Storage)の方針。
   update/deleteを拒否する
 - `status` を `locked` に変更する操作自体もクライアントからは不可(Admin SDKのみ)
 - `receipts` は紐付くTransactionがlockedならupdate/deleteを拒否する
-- `invoices` は `issueDate`、`payments` は `date` が締め済み期間に属する場合
+- `invoices` は `issueDate`、`quotes` は `issueDate`、`payments` は `date` が
+  締め済み期間に属する場合
   create/update/deleteを拒否する(期間IDは business の `fiscalYearStartMonth`
   から `fy{会計年度}` を導出。締め後の正当な更新はAdmin SDK経由のため影響しない)
 - `fiscalPeriods` の作成・更新(締め)はownerのみ。`closed` になった期間は

@@ -344,7 +344,7 @@ export async function updateMemberRole(
  * 事業の完全削除(オーナーのみ)。
  * 確認として事業名の完全一致を要求し、Firestoreのbusinessドキュメントと
  * 全サブコレクションを再帰削除する(members/transactions/expenses/
- * receipts/customers/projects/invoices/payments/journalEntries/
+ * receipts/customers/projects/invoices/quotes/payments/journalEntries/
  * recurringTemplates/closingChecks/aiSuggestions/monthlySummaries/
  * fiscalPeriods/auditLogs/idempotencyKeys が実在コレクション。
  * recursiveDelete が存在する全コレクションを処理するため列挙は網羅確認用)

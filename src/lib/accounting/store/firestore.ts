@@ -21,6 +21,7 @@ import type {
   MonthlySummary,
   Payment,
   Project,
+  Quote,
   Receipt,
   ReceiptStatus,
   RecurringTemplate,
@@ -171,6 +172,10 @@ class FirestoreAccountingReader implements AccountingReader {
     return this.readDoc(businessId, "invoices", id);
   }
 
+  getQuote(businessId: string, id: string): Promise<Quote | undefined> {
+    return this.readDoc(businessId, "quotes", id);
+  }
+
   getPayment(businessId: string, id: string): Promise<Payment | undefined> {
     return this.readDoc(businessId, "payments", id);
   }
@@ -224,6 +229,10 @@ class FirestoreAccountingReader implements AccountingReader {
 
   listInvoices(businessId: string): Promise<Invoice[]> {
     return this.readQuery<Invoice>(this.col(businessId, "invoices"));
+  }
+
+  listQuotes(businessId: string): Promise<Quote[]> {
+    return this.readQuery<Quote>(this.col(businessId, "quotes"));
   }
 
   getRecurringTemplate(
@@ -328,6 +337,9 @@ export class FirestoreAccountingStore implements AccountingStore {
   getInvoice(businessId: string, id: string) {
     return this.reader.getInvoice(businessId, id);
   }
+  getQuote(businessId: string, id: string) {
+    return this.reader.getQuote(businessId, id);
+  }
   getPayment(businessId: string, id: string) {
     return this.reader.getPayment(businessId, id);
   }
@@ -351,6 +363,9 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listInvoices(businessId: string) {
     return this.reader.listInvoices(businessId);
+  }
+  listQuotes(businessId: string) {
+    return this.reader.listQuotes(businessId);
   }
   getRecurringTemplate(businessId: string, id: string) {
     return this.reader.getRecurringTemplate(businessId, id);

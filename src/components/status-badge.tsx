@@ -26,6 +26,13 @@ const INVOICE_STATUS: Record<string, { label: string; tone: Tone }> = {
   overdue: { label: "期限超過", tone: "red" },
 };
 
+const QUOTE_STATUS: Record<string, { label: string; tone: Tone }> = {
+  draft: { label: "下書き", tone: "amber" },
+  sent: { label: "送付済み", tone: "sky" },
+  accepted: { label: "受注", tone: "green" },
+  converted: { label: "請求済", tone: "indigo" },
+};
+
 const PROJECT_STATUS: Record<string, { label: string; tone: Tone }> = {
   active: { label: "進行中", tone: "green" },
   done: { label: "完了", tone: "sky" },
@@ -47,6 +54,7 @@ const MAPS = {
   transaction: TRANSACTION_STATUS,
   receipt: RECEIPT_STATUS,
   invoice: INVOICE_STATUS,
+  quote: QUOTE_STATUS,
   project: PROJECT_STATUS,
   period: PERIOD_STATUS,
   role: ROLE_LABEL,

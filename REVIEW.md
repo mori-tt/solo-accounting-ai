@@ -16,6 +16,49 @@
 
 ## Log
 
+## 2026-11-02: 帳票発行(見積書・見積→請求変換・納品書・領収書・請求書PDF)(Issue #129)
+- Worktree: docs-issuance
+見積書コレクション新設、見積→請求転換、請求書ベースの納品書・入金ベースの発行領収書の帳票追加、印刷/PDF導線の改善。依存追加なし。
+### 実装内容
+- `src/lib/accounting/types.ts`: `Quote`(quoteNumber/customerId/projectId?/issueDate/validUntil/items/totalAmount/taxAmount?/notes?/status/convertedInvoiceId?)、`QuoteStatus`(`draft`/`sent`/`accepted`/`converted`)、`Business.quoteCounter?`、`Invoice.quoteId?` を追加
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"quotes"`、`AccountingReader` に `getQuote`/`listQuotes`。`store/firestore.ts`・`store/memory.ts` に実装
+- `src/lib/accounting/services/quotes.ts`(新規):
+  - `registerQuote` — 合計・税額は `normalizeInvoiceItems` で items から再計算(請求書と同一ロジック共有のため sales.ts から export 化)。見積番号は business ドキュメントの `quoteCounter` から `EST-`+6桁連番を transact 内で原子的に採番(請求書 `invoiceCounter` と同型・別カウンタ)。`validUntil < issueDate` は INVALID_INPUT、顧客/案件は存在チェック、`assertDateInOpenPeriod` で発行日の締め済み混入を拒否、冪等キー必須
+  - `updateQuote` — draft のみ更新可(送付済み以降は帳票確定扱い)。新旧 issueDate 両方を締め済みチェック
+  - `markQuoteSent`/`markQuoteAccepted` — `transitionQuote` で draft→sent→accepted の直列遷移のみ許可。同一ステータス・次段以降への再実行は冪等に現値を返す
+  - `convertQuoteToInvoice` — sent/accepted の見積から請求書を生成。items・customerId・projectId・totalAmount・taxAmount をコピー、`invoice.quoteId` と `quote.status=converted`+`convertedInvoiceId` を同一 transact で書込み(不整合を残さない)。請求書番号は `invoiceCounter` の共有連番。`dueDate < issueDate` は DUE_BEFORE_ISSUE、発行日の締め済みは拒否。converted の再実行・冪等リプレイは既存請求書を返し採番・請求書の重複生成をしない
+- `src/lib/validation/schemas.ts`: `quoteSchema`(customerId/projectId?/issueDate/validUntil/items/notes? + issueDate≤validUntil の refine)、`quoteConvertSchema`(issueDate/dueDate + 順序 refine)
+- `src/lib/actions/quotes.ts`(新規): `listQuoteRows`(見積+転換先請求書番号を issueDate 降順で返す、viewer可)、`createQuote`/`updateQuoteAction`/`markQuoteSentAction`/`markQuoteAcceptedAction`/`convertQuoteAction`(editor必須・zod再検証・actionWriteRateLimiter)。フォーム用の顧客・案件は既存 `listCustomers`/`listProjects`(actions/sales)を利用
+- `/quotes` 画面新設(`page.tsx`/`quotes-screen.tsx`/`quote-sheet.tsx`/`loading.tsx`): 一覧(見積番号・発行日・有効期限・顧客・案件・合計・税額・状態)+作成/編集フォーム(draftのみ編集)+行内展開の送付/受注/転換操作+帳票プレビュー。転換フォームは発行日・支払期日を入力して請求書(draft)を生成、完了後 `/invoices` へリンク誘導。帳票は `quote-sheet.tsx`(見積番号・発行者情報・顧客宛先・件名・明細・税率別内訳・有効期限・備考。`.print-sheet`+`.print-table`)
+- 請求書画面(`invoices-screen.tsx`)に3種の帳票プレビューを追加:
+  - 請求書: 従来の `invoice-sheet.tsx` を行アクション「請求書」で全幅プレビュー
+  - 納品書: `delivery-sheet.tsx`(新規)。請求書と同じ発行者/宛先/明細構成だが単価・金額・合計・税額を一切出さない様式。納品書番号は `{invoiceNumber}-D` の派生値
+  - 領収書: `payment-receipt-sheet.tsx`(新規)。入金履歴の各 payment 行から「領収書」ボタンで派生生成(領収日付=入金日、領収金額=入金額、但し書き=元請求書番号参照、収入印紙欄・発行者情報を記載)。**新コレクションは作らず invoice+payment からの派生帳票**(既存 `receipts`=経費証憑とは別物)
+  - 帳票ビューは一覧を置き換える印刷専用レイアウト。「印刷 / PDFで保存」ボタン(`window.print()`)+「ブラウザの印刷ダイアログからPDF保存できます」の説明文+「一覧に戻る」
+- `src/components/status-badge.tsx`: quote 用 status ラベル(draft=下書き/sent=送付済み/accepted=受注/converted=請求済)追加
+- `src/components/nav-links.tsx`: 「売上・請求」グループに `/quotes`「見積」追加
+- `firestore.rules`: `quotes` match 追加(member読取/canEdit作成/`validQuote` フィールド検証/draft は内容更新可・sent以降は status・明細・採番・convertedInvoiceId をクライアントから不変/editor は draft のみ削除可・owner は全削除可/issueDate の締め済み期間 create/update/delete 拒否)
+- `src/lib/backup.ts`: `BACKUP_COLLECTIONS`・`RESTORE_STATUS_RULES`・`RESTORE_DATE_FIELDS`・`SINGLE_REF_FIELDS`(quotes→customers/projects、invoices→quotes の参照検証)に quotes を追加
+- `docs/FIRESTORE_SCHEMA.md`: businesses.quoteCounter、invoices.quoteId、quotes コレクション表、納品書・領収書が派生帳票である旨を追記。`docs/SECURITY_RULES.md`: editor の delete 制限と締め済み期間ルールに quotes を追記。`businesses.ts` 削除対象コレクション列挙コメントと business-delete 画面の警告文に見積書を追加
+- テスト: `services/quotes.test.ts`(新規13件: 合計再計算・連番採番と冪等リプレイ・日付順序・NOT_FOUND・締め済み拒否・更新・遷移冪等・転換の相互参照/重複拒否/案件引継ぎ)、`tests/rules` の helpers に `quote()`、rules テストに quotes describe(読取権限・作成・sent以降不変・draft更新削除・締め済み期間)5件。`nav-links.test.tsx` のリンク数期待値を 24→25 へ更新
+### PDF対応の判断(要件4)
+- `@react-pdf/renderer` + Noto Sans JP / html2canvas 系はいずれも重量級の依存・フォント同梱(数MB級)・Canvas依存の不安定さがあるため採用せず、**ブラウザ印刷ダイアログの「PDFで保存」を使う導線改善に留めた**。帳票は既存の `.print-sheet`/`.print-table` CSS で日本語フォント(ヒラギノ/メイリオ等のシステムフォント)が自然にレンダリングされ、フォント埋め込み問題自体が発生しない。将来サーバー生成PDFが必要になった場合は別Issueで検討
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(/quotes のroute型生成)
+- `pnpm test` — 合格(52ファイル630件、skip 10。quotes.test.ts 13件 + nav-links 更新を含む)
+- `pnpm build` — 合格(/quotes が静的路由として生成)
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル115件。quotes 5件を含む。ポート衝突なし・リトライ不要)
+- `pnpm test:emulators` — 合格(2ファイル7件)
+### 未解決事項・次の担当者への注意事項
+- 見積番号は `EST-`+6桁、請求書番号は `INV-`+6桁で別カウンタ(issue要件どおり見積独自連番)。転換しても番号体系は混ざらない
+- sent/accepted 見積の取消(却下・失注)や再発行は未実装。converted 以降の取消しは請求書側を削除しても quote は converted のまま残る(戻す操作は別タスク)
+- 納品書番号 `{invoiceNumber}-D` は派生値のため重複採番の心配はない。領収書は入金レコード単位で発行し入金日・入金額・元請求書番号を記載する(複数入金の合算領収書・領収書独自の通し番号は未対応)
+- 転換先請求書は必ず draft で作成(発行は既存の請求書発行フローに従う)。転換時に請求書の明細を直接編集する経路はない(draft 編集は既存画面で可能)
+- rules の `validQuote` は items 配列の中身までは検証していない(invoices と同じ方針。内容検証はサーバー層の zod + サービスが担う)
+- 帳票プレビュー中に対象データ(顧客名等)は一覧取得時点のスナップショット。印刷直前の再取得はしない
+
 ## 2026-11-02: 減価償却(固定資産台帳)(Issue #58)
 - Worktree: depreciation
 ### 実装内容

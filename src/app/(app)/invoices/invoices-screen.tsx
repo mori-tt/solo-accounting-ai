@@ -50,7 +50,14 @@ import {
   tableClass,
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
+import { DeliverySheet } from "./delivery-sheet";
 import { InvoiceSheet } from "./invoice-sheet";
+import { PaymentReceiptSheet } from "./payment-receipt-sheet";
+
+type PrintView =
+  | { kind: "invoice"; row: InvoiceRow }
+  | { kind: "delivery"; row: InvoiceRow }
+  | { kind: "receipt"; row: InvoiceRow; paymentId: string };
 
 interface ItemDraft {
   description: string;
@@ -280,7 +287,13 @@ function paymentLinkCandidateLabel(t: Transaction): string {
 }
 
 /** 入金履歴。消込済みの入金は取引一覧への参照リンクを表示する */
-function PaymentHistory({ row }: { row: InvoiceRow }) {
+function PaymentHistory({
+  row,
+  onPrintReceipt,
+}: {
+  row: InvoiceRow;
+  onPrintReceipt?: (paymentId: string) => void;
+}) {
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs font-medium text-zinc-500">入金履歴</p>
@@ -303,6 +316,15 @@ function PaymentHistory({ row }: { row: InvoiceRow }) {
             </>
           ) : (
             <Badge tone="amber">未消込</Badge>
+          )}
+          {onPrintReceipt && (
+            <button
+              type="button"
+              className="text-xs text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+              onClick={() => onPrintReceipt(p.id)}
+            >
+              領収書
+            </button>
           )}
         </div>
       ))}
@@ -465,7 +487,7 @@ export function InvoicesScreen() {
   const [showForm, setShowForm] = useState(false);
   const [payTarget, setPayTarget] = useState<string | null>(null);
   const [historyTarget, setHistoryTarget] = useState<string | null>(null);
-  const [printRow, setPrintRow] = useState<InvoiceRow | null>(null);
+  const [printView, setPrintView] = useState<PrintView | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string>();
 
@@ -511,30 +533,60 @@ export function InvoicesScreen() {
   };
 
   // 帳票プレビュー表示中は一覧を丸ごと差し替え、ツールバーのみ no-print にする
-  if (printRow) {
+  if (printView) {
+    const { row } = printView;
     const customer = data?.customers.find(
-      (c) => c.id === printRow.invoice.customerId,
+      (c) => c.id === row.invoice.customerId,
     );
-    const project = printRow.invoice.projectId
-      ? data?.projects.find((p) => p.id === printRow.invoice.projectId)
+    const project = row.invoice.projectId
+      ? data?.projects.find((p) => p.id === row.invoice.projectId)
       : undefined;
+    const receiptPayment =
+      printView.kind === "receipt"
+        ? row.payments.find((p) => p.id === printView.paymentId)
+        : undefined;
     return (
       <div className="mx-auto max-w-4xl">
         <div className="no-print mb-4 flex items-center gap-2">
-          <Button onClick={() => window.print()}>印刷する</Button>
-          <Button variant="secondary" onClick={() => setPrintRow(null)}>
+          <Button onClick={() => window.print()}>印刷 / PDFで保存</Button>
+          <Button variant="secondary" onClick={() => setPrintView(null)}>
             一覧に戻る
           </Button>
+          <p className="text-xs text-zinc-400">
+            印刷ダイアログで「PDFとして保存」を選ぶとPDF化できます
+          </p>
         </div>
-        <InvoiceSheet
-          invoice={printRow.invoice}
-          customerName={customer?.name ?? "-"}
-          customerAddress={customer?.address}
-          projectName={project?.name}
-          issuerName={business?.issuerName || business?.name}
-          issuerAddress={business?.issuerAddress}
-          registrationNumber={business?.invoiceRegistrationNumber}
-        />
+        {printView.kind === "invoice" && (
+          <InvoiceSheet
+            invoice={row.invoice}
+            customerName={customer?.name ?? "-"}
+            customerAddress={customer?.address}
+            projectName={project?.name}
+            issuerName={business?.issuerName || business?.name}
+            issuerAddress={business?.issuerAddress}
+            registrationNumber={business?.invoiceRegistrationNumber}
+          />
+        )}
+        {printView.kind === "delivery" && (
+          <DeliverySheet
+            invoice={row.invoice}
+            customerName={customer?.name ?? "-"}
+            customerAddress={customer?.address}
+            projectName={project?.name}
+            issuerName={business?.issuerName || business?.name}
+            issuerAddress={business?.issuerAddress}
+          />
+        )}
+        {printView.kind === "receipt" && receiptPayment && (
+          <PaymentReceiptSheet
+            invoice={row.invoice}
+            payment={receiptPayment}
+            customerName={customer?.name ?? "-"}
+            issuerName={business?.issuerName || business?.name}
+            issuerAddress={business?.issuerAddress}
+            registrationNumber={business?.invoiceRegistrationNumber}
+          />
+        )}
       </div>
     );
   }
@@ -615,17 +667,28 @@ export function InvoicesScreen() {
                   <tr>
                     <td className="whitespace-nowrap font-medium">
                       {row.invoice.invoiceNumber ?? row.invoice.id}
-                      <div>
+                      <div className="flex gap-2">
                         <button
                           type="button"
                           className="text-xs font-normal text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
                           onClick={() => {
                             setPayTarget(null);
                             setHistoryTarget(null);
-                            setPrintRow(row);
+                            setPrintView({ kind: "invoice", row });
                           }}
                         >
-                          印刷プレビュー
+                          請求書
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs font-normal text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+                          onClick={() => {
+                            setPayTarget(null);
+                            setHistoryTarget(null);
+                            setPrintView({ kind: "delivery", row });
+                          }}
+                        >
+                          納品書
                         </button>
                       </div>
                     </td>
@@ -731,7 +794,12 @@ export function InvoicesScreen() {
                         colSpan={canEdit ? 7 : 6}
                         className="bg-zinc-50/70 dark:bg-zinc-800/30"
                       >
-                        <PaymentHistory row={row} />
+                        <PaymentHistory
+                          row={row}
+                          onPrintReceipt={(paymentId) =>
+                            setPrintView({ kind: "receipt", row, paymentId })
+                          }
+                        />
                       </td>
                     </tr>
                   )}

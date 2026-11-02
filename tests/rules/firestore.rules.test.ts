@@ -17,6 +17,7 @@ import {
   OTHER_BIZ,
   OUTSIDER,
   OWNER,
+  quote,
   receipt,
   recurringTemplate,
   seed,
@@ -1376,6 +1377,87 @@ describe("invoices / payments(R2-10, R2-11)", () => {
     // 削除はownerのみ
     await assertFails(editor.doc(pPath("p1")).delete());
     await assertSucceeds(asUser(testEnv, OWNER).doc(pPath("p1")).delete());
+  });
+});
+
+describe("quotes(Issue #129)", () => {
+  const qPath = (id: string) => `businesses/${BIZ}/quotes/${id}`;
+
+  it("memberのみ読み取りでき、非メンバー・未認証は読めない", async () => {
+    await seed(testEnv, { [qPath("q1")]: quote("sent") });
+    await assertSucceeds(asUser(testEnv, VIEWER).doc(qPath("q1")).get());
+    await assertFails(asUser(testEnv, OUTSIDER).doc(qPath("q1")).get());
+    await assertFails(anon(testEnv).doc(qPath("q1")).get());
+  });
+
+  it("editorは作成でき、viewer・不正データは作成できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    const viewer = asUser(testEnv, VIEWER);
+    await assertSucceeds(editor.doc(qPath("q1")).set(quote("draft")));
+    await assertFails(viewer.doc(qPath("q2")).set(quote("draft")));
+    // 不正なstatus・日付形式・金額は拒否
+    await assertFails(
+      editor.doc(qPath("q3")).set({ ...quote("draft"), status: "bogus" }),
+    );
+    await assertFails(
+      editor.doc(qPath("q4")).set({ ...quote("draft"), validUntil: "10/31" }),
+    );
+    await assertFails(
+      editor
+        .doc(qPath("q5"))
+        .set({ ...quote("draft"), totalAmount: "10000" }),
+    );
+  });
+
+  it("sent以降の見積は内容・statusをクライアントから変更できない", async () => {
+    await seed(testEnv, { [qPath("q1")]: quote("sent") });
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(editor.doc(qPath("q1")).update({ items: [] }));
+    await assertFails(editor.doc(qPath("q1")).update({ status: "accepted" }));
+    await assertFails(editor.doc(qPath("q1")).update({ status: "draft" }));
+    await assertFails(editor.doc(qPath("q1")).update({ customerId: "c2" }));
+    await assertFails(
+      editor.doc(qPath("q1")).update({ convertedInvoiceId: "i1" }),
+    );
+  });
+
+  it("draft見積は更新でき、editorはdraftのみ削除できる", async () => {
+    await seed(testEnv, {
+      [qPath("q-d")]: quote("draft"),
+      [qPath("q-s")]: quote("sent"),
+      [qPath("q-c")]: quote("converted"),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    await assertSucceeds(
+      editor.doc(qPath("q-d")).update({ totalAmount: 9000 }),
+    );
+    await assertSucceeds(editor.doc(qPath("q-d")).delete());
+    await assertFails(editor.doc(qPath("q-s")).delete());
+    await assertFails(editor.doc(qPath("q-c")).delete());
+    await assertSucceeds(owner.doc(qPath("q-s")).delete());
+    await assertSucceeds(owner.doc(qPath("q-c")).delete());
+  });
+
+  it("closed期間のissueDateを持つ見積は作成・更新・削除できない", async () => {
+    const closedPeriod2025 = {
+      ...fiscalPeriod("closed"),
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    };
+    await seed(testEnv, {
+      [`businesses/${BIZ}/fiscalPeriods/fy2025`]: closedPeriod2025,
+      [qPath("q-closed")]: { ...quote("sent"), issueDate: "2025-06-15" },
+    });
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    await assertFails(
+      editor.doc(qPath("q-new")).set({ ...quote("draft"), issueDate: "2025-06-15" }),
+    );
+    await assertFails(
+      editor.doc(qPath("q-closed")).update({ validUntil: "2025-12-31" }),
+    );
+    await assertFails(owner.doc(qPath("q-closed")).delete());
   });
 });
 
