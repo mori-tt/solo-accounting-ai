@@ -1391,6 +1391,43 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - receipts GET の 1200回/時は一覧 `<img>` の一括要求(数十〜百件/ページ)を踏まえた緩め設定。正常利用で 429 にならない水準
 - 429 応答は `toErrorResponse` が `RateLimitError.retryAfterSec` → `Retry-After` ヘッダへ変換する既存仕組みで返る(画面側は `ApiClientError.code==="RATE_LIMITED"` のメッセージ表示)
 - 未対応(別タスク): nonceベースCSPへの移行(proxy/middleware導入が必要)、HSTS、Server Actions 側のレート制限、`api-client.ts` への 429 リトライ配慮
+## 2026-11-02: 監視基盤(Issue #83)
+- Worktree: observability
+- `src/lib/monitoring/` 新設: エラー監視抽象層と構造化ログ。Sentry SDK本体は入れず抽象層のみ
+  - `types.ts`: `MonitoringProvider`(captureException/captureMessage)、`MonitoringLevel`、`CaptureContext`(tags/extra)
+  - `logger.ts`: JSON 1行の構造化ロガー。fieldsはスカラーのみ受理し、PII・証憑・認証情報を示唆するキー名はdenylistで除去(redactedKeysにキー名のみ記録)。値のメールアドレス様文字列はマスク・長文は打切り。`LOG_LEVEL`で最小レベル制御(省略時info、呼出毎に遅延評価)。sink/clock差替え可能
+  - `provider.ts`: `createMonitoringProvider`で選択。`SENTRY_DSN`設定時は「SDK未同梱」の警告のみ出しconsoleフォールバック(DSN値自体は出力しない)、未設定時もconsoleフォールバック+外部配送no-op。`NoopMonitoringProvider`はテスト注入用
+  - `index.ts`: `captureException`/`captureMessage`公開API。プロバイダ例外を握りつぶし、監視経路の障害で本体処理を落とさない。`setMonitoringProviderForTest`/`resetMonitoringForTest`付き
+- `src/app/api/health/route.ts` 新設: 認証不要の生存確認GET。cacheComponents環境のため`connection()`でビルド時プリレンダを抑止し毎リクエスト実行。`checks.db`は`FIRESTORE_EMULATOR_HOST`設定時のみ遅延importしたadmin SDKの`listCollections()`(1秒timeout)で疎通試行、未設定時は"skipped"。疎通失敗はchecks.db="error"+warn構造化ログで表現しHTTP 200のまま返す(livenessはプロセス応答性のみ保証し、DB障害による再起動ループを誘発しない)
+- `.env.example` 末尾に `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN`/`LOG_LEVEL` を追記(末尾追記のみ)
+- 他のapi・ページ・next.configは未変更。既存ルートへの監視配線は本Issue範囲外
+- `pnpm test` — 合格(46ファイル中43実行535件、skip 10。monitoring/logger/healthの新規テスト含む)
+- `pnpm build` — 合格(`/api/health` が Dynamic ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+- PIIフィルタは多層防御であり、呼び出し側が個人情報・証憑内容をmsg/contextへ入れない設計が前提(AGENTS.md準拠)。denylistは誤検知で安全側に倒し、name/token/email/証憑関連キーを広めに除去。`businessId`等の識別子・`route`/`op`等の運用メタは通す
+- 構造化ログはfieldsをエントリへ平準化し、予約キー(level/msg/ts/err/redactedKeys)衝突は除去対象。`logger.error`と別に`logger.exception(msg, error, fields)`を設けError畳込みを明示化
+- `connection()`はリクエストストア外でthrowするため、route.test.tsでは`next/server`と`@/lib/firebase/admin`をvi.mockして疎通3分岐(skipped/ok/error)を検証
+- Sentry導入タスクでの拡張点は`createMonitoringProvider`(DSN設定時に実SDK初期化のプロバイダを返す)。`NEXT_PUBLIC_SENTRY_DSN`はクライアント捕捉の将来用で現状未使用
+## 2026-11-02: 法務ページ(Issue #79)
+- Worktree: legal-pages
+公開用の法務3ページをプレースホルダー骨組みとして新設し、アプリ各面の末尾から辿れるリンクフッターを設置。
+- `src/app/legal/terms/page.tsx`: 利用規約の条項骨組み(適用・定義・登録・サービス内容・AI提案の性質・料金・禁止事項・データ取扱・知財・免責・変更/停止・解約・規約変更・準拠法/管轄・附則)。AI提案は確定仕訳ではなく利用者の最終判断が必要、税務・会計助言ではない旨の構造を確保
+- `src/app/legal/privacy/page.tsx`: プライバシーポリシー骨組み(事業者情報・取得情報・利用目的・AI機能でのデータ取扱・第三者提供/委託・安全管理措置・保持/削除・利用者の権利・Cookie/ログ・変更・準拠法)
+- `src/app/legal/tokusho/page.tsx`: 特定商取引法に基づく表記を表形式で骨組み化(事業者名・責任者・所在地・連絡先・価格・支払・提供時期・返品/解約・動作環境・特別条件)
+- `src/app/legal/clause.tsx`: 3ページ共用の部品。`Clause`(条項セクション)と`ReviewNote`(「【要法務レビュー】」のamber破線注記)。本文は未作成で全項目にレビュー必須の注記を表示
+- `src/app/legal/layout.tsx`: max-w-3xl コンテナ + 末尾に LegalFooter(legalページ間の回遊用)
+- `src/components/legal-footer.tsx`: 新規。3ページへのリンクフッター(server component、Linkのみ)
+- `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
+- `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
+- 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
+- legal ページはリクエスト依存データを読まない完全静的のため `instant` export は不要(cacheComponents環境でもそのまま static shell 検証を通過)
+- フッターは page/layout の return 末尾・Suspense内へ追加する方式で既存行の改変ゼロを維持。AppShellに手を入れないため認証ローディング中はフッターも fallback に含まれる挙動
+- 条項本文は意図的に未作成(「要法務レビュー」注記のみ)。公開前に法務レビューで各条項を肉付けする前提
+- `app/page.tsx`・`next.config.ts`・`app-shell.tsx` はIssue指定どおり未変更
 ## 2026-11-02: リリース運用整備(Issue #85)
 - Worktree: release-ops
 - `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
@@ -1401,6 +1438,8 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
 - `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm build` — 合格
 - Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
