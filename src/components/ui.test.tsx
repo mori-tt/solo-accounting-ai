@@ -1,6 +1,20 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { Field, issuesByField, TextInput } from "./ui";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  announce,
+  ConfirmDialog,
+  Field,
+  issuesByField,
+  LiveAnnouncer,
+  TextInput,
+} from "./ui";
 
 afterEach(cleanup);
 
@@ -72,5 +86,96 @@ describe("issuesByField", () => {
   it("パスを持たない issue は _form にまとめる", () => {
     const errors = issuesByField(["入力内容を確認してください"]);
     expect(errors._form).toBe("入力内容を確認してください");
+  });
+});
+
+describe("ConfirmDialog", () => {
+  function renderDialog() {
+    function Wrapper() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            削除する
+          </button>
+          <ConfirmDialog
+            open={open}
+            title="削除の確認"
+            message="本当に削除しますか"
+            onConfirm={vi.fn()}
+            onCancel={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Wrapper />);
+  }
+
+  it("open になるまで描画しない", () => {
+    renderDialog();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("開くとキャンセルボタンへフォーカスし、Escape で onCancel が呼ばれる", () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    const cancel = screen.getByRole("button", { name: "キャンセル" });
+    expect(document.activeElement).toBe(cancel);
+
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Tab/Shift+Tab はダイアログ内で循環する(フォーカストラップ)", () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    const cancel = screen.getByRole("button", { name: "キャンセル" });
+    const confirm = screen.getByRole("button", { name: "実行する" });
+
+    // 先頭で Shift+Tab → 末尾へ
+    fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(confirm);
+
+    // 末尾で Tab → 先頭へ
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(document.activeElement).toBe(cancel);
+  });
+
+  it("閉じると開く前にフォーカスしていた要素へ戻る", () => {
+    renderDialog();
+    const trigger = screen.getByRole("button", { name: "削除する" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe("LiveAnnouncer", () => {
+  it("announce() のメッセージが polite/assertive 領域に流れる", () => {
+    render(<LiveAnnouncer />);
+
+    act(() => announce("保存しました"));
+    expect(screen.getByRole("status").textContent).toBe("保存しました");
+    expect(screen.getByRole("alert").textContent).toBe("");
+
+    act(() => announce("削除に失敗しました", true));
+    expect(screen.getByRole("alert").textContent).toBe("削除に失敗しました");
+  });
+
+  it("同一メッセージの連続通知も新しい要素として挿される", () => {
+    render(<LiveAnnouncer />);
+    act(() => announce("保存しました"));
+    const first = screen.getByRole("status").firstElementChild;
+    act(() => announce("保存しました"));
+    const second = screen.getByRole("status").firstElementChild;
+    expect(second).not.toBe(first);
+    expect(second?.textContent).toBe("保存しました");
+  });
+
+  it("アナウンサー未マウントでも announce() はエラーにならない", () => {
+    expect(() => announce("テスト")).not.toThrow();
   });
 });

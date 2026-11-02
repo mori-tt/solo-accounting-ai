@@ -5,6 +5,10 @@ import {
   registerExpense,
 } from "@/lib/accounting/services/expenses";
 import type { Expense, Transaction } from "@/lib/accounting/types";
+import {
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -24,7 +28,8 @@ export async function listExpenseRows(
   businessId: string,
 ): Promise<ActionResult<ExpenseRow[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const expenses = await store.listExpenses(businessId);
     const rows: ExpenseRow[] = [];
@@ -51,6 +56,7 @@ export async function createExpense(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const result = await registerExpense(getStore(), businessId, actor, {
       idempotencyKey: input.idempotencyKey,
       date: parsed.data.date,
@@ -75,6 +81,7 @@ export async function markExpensePaidAction(
 ): Promise<ActionResult<Expense>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { expense } = await markExpensePaid(
       getStore(),
       businessId,

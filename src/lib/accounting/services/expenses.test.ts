@@ -69,6 +69,27 @@ describe("registerExpense", () => {
     expect(expense.taxAmount).toBe(0);
   });
 
+  it("税区分と税額の不整合を拒否する(domain/validate.ts と同じルール)", async () => {
+    const { store, businessId, actor } = await setupStore();
+    // 非課税・免税・不課税は税額0固定
+    await expect(
+      registerExpense(store, businessId, actor, {
+        idempotencyKey: "exp-tax-inconsistent",
+        ...base,
+        taxCategory: "non_taxable",
+        taxAmount: 100,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    // 課税仕入でも amount×10%(税抜標準税率)を超える税額は拒否
+    await expect(
+      registerExpense(store, businessId, actor, {
+        idempotencyKey: "exp-tax-over",
+        ...base,
+        taxAmount: 1_201,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
   it("冪等キーの再実行で二重登録しない", async () => {
     const { store, businessId, actor } = await setupStore();
     const first = await registerExpense(store, businessId, actor, {

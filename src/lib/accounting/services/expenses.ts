@@ -1,6 +1,8 @@
 import { assertDateString } from "../dates";
+import { assertTaxAmountConsistent } from "../domain/tax";
+import { TAX_CATEGORIES } from "../domain/validate";
 import { DomainError } from "../errors";
-import { assertNonNegativeYen, assertYenAmount } from "../money";
+import { assertYenAmount } from "../money";
 import type { AccountingReader, AccountingStore } from "../store/types";
 import type {
   Expense,
@@ -16,13 +18,6 @@ import {
   scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
-
-const TAX_CATEGORIES: readonly TaxCategory[] = [
-  "taxable",
-  "non_taxable",
-  "exempt",
-  "out_of_scope",
-];
 
 export interface RegisterExpenseInput {
   id?: string;
@@ -54,16 +49,29 @@ export async function registerExpense(
 ): Promise<{ transaction: Transaction; expense: Expense; replayed: boolean }> {
   const date = assertDateString(input.date);
   const amount = assertYenAmount(input.amount);
-  const taxAmount = assertNonNegativeYen(input.taxAmount ?? 0, "taxAmount");
+  if (typeof input.account !== "string" || input.account.trim() === "") {
+    throw new DomainError("INVALID_INPUT", "account is required");
+  }
+  if (
+    input.counterparty !== undefined &&
+    typeof input.counterparty !== "string"
+  ) {
+    throw new DomainError("INVALID_INPUT", "counterparty must be a string");
+  }
+  if (
+    input.description !== undefined &&
+    typeof input.description !== "string"
+  ) {
+    throw new DomainError("INVALID_INPUT", "description must be a string");
+  }
   if (!TAX_CATEGORIES.includes(input.taxCategory)) {
     throw new DomainError(
       "INVALID_INPUT",
       `invalid taxCategory: ${String(input.taxCategory)}`,
     );
   }
-  if (!input.account) {
-    throw new DomainError("INVALID_INPUT", "account is required");
-  }
+  const taxAmount = input.taxAmount ?? 0;
+  assertTaxAmountConsistent(input.taxCategory, amount, taxAmount);
   const paymentDueDate = input.paymentDueDate
     ? assertDateString(input.paymentDueDate, "paymentDueDate")
     : undefined;

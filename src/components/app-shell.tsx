@@ -133,6 +133,13 @@ function ShellBody({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-1">
+      {/* キーボード/SRユーザーがナビを飛ばして本文へ移動するためのスキップリンク */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-indigo-600 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        本文へスキップ
+      </a>
       <aside className="flex w-52 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <div className="px-5 pt-5">
           <Link href="/dashboard" className="text-sm font-bold tracking-tight">
@@ -181,7 +188,11 @@ function ShellBody({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 px-6 py-6">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 flex-1 px-6 py-6 focus:outline-none"
+        >
           {businessesLoading ? (
             <LoadingBlock />
           ) : businesses.length === 0 ? (

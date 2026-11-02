@@ -11,6 +11,10 @@ import {
 } from "@/lib/accounting/services/common";
 import { DomainError } from "@/lib/accounting/errors";
 import type { Transaction } from "@/lib/accounting/types";
+import {
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { ApiError, fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -27,7 +31,8 @@ export async function listTransactions(
   range: { startDate: string; endDate: string },
 ): Promise<ActionResult<Transaction[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     return getStore().listTransactionsInRange(
       businessId,
       range.startDate,
@@ -45,6 +50,7 @@ export async function createTransaction(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { transaction } = await registerTransaction(
       getStore(),
       businessId,
@@ -75,6 +81,7 @@ export async function updateTransaction(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const store = getStore();
     const { value } = await store.transact(businessId, {}, async (tx) => {
       const current = await tx.getTransaction(businessId, transactionId);
@@ -148,6 +155,7 @@ export async function confirmTransactionAction(
 ): Promise<ActionResult<Transaction>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { transaction } = await confirmTransaction(
       getStore(),
       businessId,
@@ -165,6 +173,7 @@ export async function deleteTransaction(
 ): Promise<ActionResult<null>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const store = getStore();
     await store.transact(businessId, {}, async (tx) => {
       const current = await tx.getTransaction(businessId, transactionId);
@@ -214,7 +223,8 @@ export async function listTransactionInputHistory(
   businessId: string,
 ): Promise<ActionResult<TransactionInputHistory>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const transactions = await getStore().listTransactionsInRange(
       businessId,
       "0001-01-01",

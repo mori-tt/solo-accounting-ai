@@ -5,6 +5,10 @@ import {
   linkReceiptToTransaction,
 } from "@/lib/accounting/services/receipts";
 import type { Receipt, ReceiptStatus } from "@/lib/accounting/types";
+import {
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -15,7 +19,8 @@ export async function listReceipts(
   status?: ReceiptStatus,
 ): Promise<ActionResult<Receipt[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     return getStore().listReceipts(businessId, status);
   });
 }
@@ -28,6 +33,7 @@ export async function linkReceipt(
 ): Promise<ActionResult<Receipt>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { receipt } = await linkReceiptToTransaction(
       getStore(),
       businessId,
@@ -46,6 +52,7 @@ export async function archiveReceiptAction(
 ): Promise<ActionResult<Receipt>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { receipt } = await archiveReceipt(
       getStore(),
       businessId,
