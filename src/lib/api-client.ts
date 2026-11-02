@@ -172,6 +172,24 @@ export async function runReceiptOcr(
   });
 }
 
+// ---------- AI使用量 API(/api/ai/usage) ----------
+
+export interface AiUsage {
+  /** 現在ウィンドウ(1時間)のAI提案実行の残り回数 */
+  remaining: number;
+  /** ウィンドウあたりの上限回数 */
+  limit: number;
+}
+
+/**
+ * AI提案実行の残り回数を問い合わせる(ダッシュボード等の表示用)。
+ * 回数は消費しない。失敗時は呼び出し側で非表示にフォールバックする。
+ */
+export async function fetchAiUsage(businessId: string): Promise<AiUsage> {
+  const params = new URLSearchParams({ businessId });
+  return requestJson<AiUsage>(`/api/ai/usage?${params}`);
+}
+
 // ---------- バックアップ API(/api/backup) ----------
 
 /**

@@ -5,7 +5,7 @@ import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { getDashboard } from "@/lib/actions/reports";
-import { callApi } from "@/lib/api-client";
+import { callApi, fetchAiUsage } from "@/lib/api-client";
 import {
   currentMonthKey,
   formatMonthKey,
@@ -47,11 +47,13 @@ function AttentionItem({
   count,
   label,
   danger,
+  unit = "件",
 }: {
   href: string;
   count: number;
   label: string;
   danger?: boolean;
+  unit?: string;
 }) {
   return (
     <Link
@@ -60,7 +62,8 @@ function AttentionItem({
     >
       <span className="text-zinc-600 dark:text-zinc-300">{label}</span>
       <Badge tone={count === 0 ? "green" : danger ? "red" : "amber"}>
-        {count}件
+        {count}
+        {unit}
       </Badge>
     </Link>
   );
@@ -87,6 +90,11 @@ export function DashboardScreen() {
       ),
     [businessId, monthKey],
   );
+  // AI使用量は補助情報のため独立して取得し、失敗時は非表示にする
+  const { data: aiUsage } = useApiData(
+    () => fetchAiUsage(businessId ?? ""),
+    [businessId],
+  );
 
   if (!businessId) return <LoadingBlock />;
   if (initialLoading) return <LoadingBlock />;
@@ -100,7 +108,8 @@ export function DashboardScreen() {
     data.pendingSuggestionCount === 0 &&
     data.unprocessedReceiptCount === 0 &&
     data.unpaidExpenseCount === 0 &&
-    data.unpaidInvoiceCount === 0;
+    data.unpaidInvoiceCount === 0 &&
+    data.unclosedMonthCount === 0;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -126,7 +135,14 @@ export function DashboardScreen() {
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
-          <h2 className="mb-3 text-sm font-semibold">要対応</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">要対応</h2>
+            {aiUsage && (
+              <Badge tone={aiUsage.remaining === 0 ? "amber" : "indigo"}>
+                今時間のAI提案 残り{aiUsage.remaining}回
+              </Badge>
+            )}
+          </div>
           {allClear ? (
             <p className="py-4 text-center text-sm text-emerald-600 dark:text-emerald-400">
               未処理の項目はありません
@@ -159,6 +175,12 @@ export function DashboardScreen() {
                 count={data.unpaidInvoiceCount}
                 label={`未入金の請求書(期限超過 ${data.overdueInvoiceCount}件)`}
                 danger={data.overdueInvoiceCount > 0}
+              />
+              <AttentionItem
+                href="/closing"
+                count={data.unclosedMonthCount}
+                unit="ヶ月"
+                label="未締めの月(前月以前)"
               />
               {data.unpaidInvoiceAmount > 0 && (
                 <p className="text-right text-xs text-zinc-500">
