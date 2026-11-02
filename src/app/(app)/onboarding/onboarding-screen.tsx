@@ -51,6 +51,7 @@ const TAX_MODE_LABELS: Record<string, string> = {
   exempt: "免税事業者",
   simple: "簡易課税",
   standard: "本則課税",
+  special20: "2割特例(インボイス移行措置)",
 };
 
 const ACCOUNT_KIND_LABELS = {
@@ -333,6 +334,9 @@ export function OnboardingScreen() {
                     <option value="exempt">免税事業者</option>
                     <option value="simple">簡易課税</option>
                     <option value="standard">本則課税</option>
+                    <option value="special20">
+                      2割特例(インボイス移行措置)
+                    </option>
                   </Select>
                 </Field>
                 {error && <Alert tone="error">{error}</Alert>}

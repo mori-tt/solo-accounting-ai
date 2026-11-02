@@ -7,6 +7,7 @@ import {
   computeNetAmount,
   computeTaxableBase,
   computeTaxAmount,
+  isSpecial20ApplicablePeriod,
   isTaxableCategory,
   maxPossibleTaxAmount,
   sumTaxAmounts,
@@ -268,6 +269,82 @@ describe("computeConsumptionTaxPayable", () => {
     expect(report.taxPayable).toBe(600);
   });
 
+  it("2割特例は消費税額の80%を控除する(納付=約20%)", () => {
+    const period = { startDate: "2024-01-01", endDate: "2024-12-31" };
+    expect(
+      computeConsumptionTaxPayable(
+        "special20",
+        { outputTax: 1_000_000, inputTax: 999 },
+        { period },
+      ),
+    ).toEqual({
+      mode: "special20",
+      outputTax: 1_000_000,
+      deductibleInputTax: 800_000,
+      taxPayable: 200_000,
+    });
+    // 切捨て: 999×80% = 799.2 → 799、差引 200
+    const report = computeConsumptionTaxPayable(
+      "special20",
+      { outputTax: 999 },
+      { period },
+    );
+    expect(report.deductibleInputTax).toBe(799);
+    expect(report.taxPayable).toBe(200);
+  });
+
+  it("2割特例はperiod必須、適用期間外は拒否する", () => {
+    expectDomainError(
+      () => computeConsumptionTaxPayable("special20", { outputTax: 1_000 }),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxPayable(
+          "special20",
+          { outputTax: 1_000 },
+          {
+            period: { startDate: "2027-01-01", endDate: "2027-12-31" },
+          },
+        ),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxPayable(
+          "special20",
+          { outputTax: 1_000 },
+          {
+            period: { startDate: "2024-01-01", endDate: "2024-12-31" },
+            businessClass: 5,
+          },
+        ),
+      "VALIDATION_FAILED",
+    );
+  });
+
+  it("2割特例以外の方式ではperiodを指定できない", () => {
+    const period = { startDate: "2024-01-01", endDate: "2024-12-31" };
+    expectDomainError(
+      () =>
+        computeConsumptionTaxPayable(
+          "standard",
+          { outputTax: 1_000 },
+          { period },
+        ),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxPayable(
+          "exempt",
+          { outputTax: 1_000 },
+          { period },
+        ),
+      "VALIDATION_FAILED",
+    );
+  });
+
   it("簡易課税はbusinessClass必須、他方式では指定不可", () => {
     expectDomainError(
       () => computeConsumptionTaxPayable("simple", { outputTax: 1_000 }),
@@ -478,6 +555,97 @@ describe("computeConsumptionTaxFiling", () => {
     expect(filing.localTaxRefundable).toBe(0);
   });
 
+  it("2割特例は消費税額合計の80%を控除する(納付=約20%)", () => {
+    // 売上1,100万円(税込)→標準額1,000万→消費税78万
+    // 控除 780,000×80% = 624,000 → 差引 156,000
+    const filing = computeConsumptionTaxFiling(
+      "special20",
+      [{ rate: "standard", salesYen: 11_000_000, purchasesYen: 9_999_999 }],
+      { period: { startDate: "2024-01-01", endDate: "2024-12-31" } },
+    );
+    expect(filing).toEqual({
+      mode: "special20",
+      breakdown: [
+        {
+          rate: "standard",
+          taxableBase: 10_000_000,
+          nationalTax: 780_000,
+          // みなし仕入れは消費税額合計への適用のため税率別按分しない
+          deductibleInputTax: 0,
+        },
+      ],
+      totalTaxableBase: 10_000_000,
+      nationalTax: 780_000,
+      deductibleInputTax: 624_000,
+      balance: 156_000,
+      nationalTaxPayable: 156_000,
+      // 156,000 × 22/78 = 44,000
+      localTaxPayable: 44_000,
+      totalPayable: 200_000,
+      nationalTaxRefundable: 0,
+      localTaxRefundable: 0,
+    });
+  });
+
+  it("2割特例は軽減税率込みでも消費税額合計に80%を適用し還付しない", () => {
+    // 10%: 標準額 10,000,000 → 780,000 / 軽減8%: 標準額 1,000,000 → 62,400
+    // 合計 842,400 → 控除 floor(842,400×0.8) = 673,920 → 差引 168,480
+    const filing = computeConsumptionTaxFiling(
+      "special20",
+      [
+        { rate: "standard", salesYen: 11_000_000, purchasesYen: 9_999_999 },
+        { rate: "reduced", salesYen: 1_080_000 },
+      ],
+      { period: { startDate: "2026-04-01", endDate: "2027-03-31" } },
+    );
+    expect(filing.nationalTax).toBe(842_400);
+    expect(filing.deductibleInputTax).toBe(673_920);
+    expect(filing.balance).toBe(168_480);
+    expect(filing.nationalTaxPayable).toBe(168_400);
+    // 168,480 × 22/78 = 47,520 → 百円未満切捨て 47,500
+    expect(filing.localTaxPayable).toBe(47_500);
+    expect(filing.totalPayable).toBe(215_900);
+    expect(filing.nationalTaxRefundable).toBe(0);
+    expect(filing.localTaxRefundable).toBe(0);
+  });
+
+  it("2割特例はperiod必須、適用期間外は拒否する", () => {
+    const amounts = [{ rate: "standard", salesYen: 1_100_000 }] as const;
+    expectDomainError(
+      () => computeConsumptionTaxFiling("special20", [...amounts]),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("special20", [...amounts], {
+          period: { startDate: "2027-01-01", endDate: "2027-12-31" },
+        }),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("special20", [...amounts], {
+          period: { startDate: "2023-01-01", endDate: "2023-09-30" },
+        }),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("special20", [...amounts], {
+          period: { startDate: "2024-01-01", endDate: "2024-12-31" },
+          businessClass: 5,
+        }),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        computeConsumptionTaxFiling("standard", [...amounts], {
+          period: { startDate: "2024-01-01", endDate: "2024-12-31" },
+        }),
+      "VALIDATION_FAILED",
+    );
+  });
+
   it("空の入力は全額0", () => {
     const filing = computeConsumptionTaxFiling("standard", []);
     expect(filing.breakdown).toEqual([]);
@@ -537,6 +705,116 @@ describe("computeConsumptionTaxFiling", () => {
     expectDomainError(
       () => computeConsumptionTaxFiling("none" as never, []),
       "VALIDATION_FAILED",
+    );
+  });
+});
+
+describe("isSpecial20ApplicablePeriod", () => {
+  it("適用対象期間(2023-10-01〜2026-09-30)の日を含む課税期間は適用可", () => {
+    // 暦年課税期間の境界
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2023-01-01",
+        endDate: "2023-12-31",
+      }),
+    ).toBe(true);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      }),
+    ).toBe(true);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2026-01-01",
+        endDate: "2026-12-31",
+      }),
+    ).toBe(true);
+    // 4月始まりの課税期間
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2023-04-01",
+        endDate: "2024-03-31",
+      }),
+    ).toBe(true);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2026-04-01",
+        endDate: "2027-03-31",
+      }),
+    ).toBe(true);
+    // 適用対象期間と完全一致・その内側・1日だけの重なりも可
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2023-10-01",
+        endDate: "2026-09-30",
+      }),
+    ).toBe(true);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2023-10-01",
+        endDate: "2023-12-31",
+      }),
+    ).toBe(true);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2026-09-30",
+        endDate: "2026-12-31",
+      }),
+    ).toBe(true);
+  });
+
+  it("適用対象期間と重ならない課税期間は適用不可", () => {
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2022-01-01",
+        endDate: "2022-12-31",
+      }),
+    ).toBe(false);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2023-01-01",
+        endDate: "2023-09-30",
+      }),
+    ).toBe(false);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2027-01-01",
+        endDate: "2027-12-31",
+      }),
+    ).toBe(false);
+    expect(
+      isSpecial20ApplicablePeriod({
+        startDate: "2026-10-01",
+        endDate: "2027-09-30",
+      }),
+    ).toBe(false);
+  });
+
+  it("不正な期間・日付を拒否する", () => {
+    expectDomainError(
+      () =>
+        isSpecial20ApplicablePeriod({
+          startDate: "2024-12-31",
+          endDate: "2024-01-01",
+        }),
+      "VALIDATION_FAILED",
+    );
+    expectDomainError(
+      () =>
+        isSpecial20ApplicablePeriod({
+          startDate: "2024/01/01",
+          endDate: "2024-12-31",
+        }),
+      "INVALID_DATE",
+    );
+    expectDomainError(
+      () =>
+        isSpecial20ApplicablePeriod({
+          startDate: "2024-02-30",
+          endDate: "2024-12-31",
+        }),
+      "INVALID_DATE",
     );
   });
 });

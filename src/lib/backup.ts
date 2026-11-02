@@ -65,7 +65,7 @@ const backupBusinessSchema = z
   .object({
     name: z.string().min(1).max(100),
     fiscalYearStartMonth: z.number().int().min(1).max(12),
-    taxMode: z.enum(["exempt", "simple", "standard"]),
+    taxMode: z.enum(["exempt", "simple", "standard", "special20"]),
   })
   .partial();
 
