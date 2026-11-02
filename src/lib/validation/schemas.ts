@@ -63,6 +63,12 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
+/** パスワードリセットメール送信フォーム */
+export const passwordResetSchema = z.object({
+  email: z.email("メールアドレスの形式が正しくありません"),
+});
+export type PasswordResetInput = z.infer<typeof passwordResetSchema>;
+
 export const businessSchema = z.object({
   name: z.string().min(1, "事業名を入力してください").max(100),
   fiscalYearStartMonth: z
@@ -237,6 +243,8 @@ export const paymentSchema = z.object({
   invoiceId: z.string().min(1),
   date: dateString,
   amount: yenAmount,
+  /** 消込対象の収入取引ID(任意)。空文字は未指定扱い */
+  transactionId: z.string().max(200).optional(),
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
 

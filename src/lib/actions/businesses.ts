@@ -7,7 +7,7 @@ import type {
   CustomAccount,
   MemberRole,
 } from "@/lib/accounting/types";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { getAdminBucket, getAdminDb } from "@/lib/firebase/admin";
 import {
   findUidByEmail,
   deleteMember,
@@ -220,6 +220,47 @@ export async function updateMemberRole(
       action: "update",
       targetPath: `businesses/${businessId}/members/${memberUid}`,
     });
+    return null;
+  });
+}
+
+/**
+ * 事業の完全削除(オーナーのみ)。
+ * 確認として事業名の完全一致を要求し、Firestoreのbusinessドキュメントと
+ * 全サブコレクションを再帰削除する(members/transactions/expenses/
+ * receipts/customers/projects/invoices/payments/journalEntries/
+ * recurringTemplates/closingChecks/aiSuggestions/monthlySummaries/
+ * fiscalPeriods/auditLogs/idempotencyKeys が実在コレクション。
+ * recursiveDelete が存在する全コレクションを処理するため列挙は網羅確認用)
+ * に加え、Storageの receipts/{businessId}/
+ * 配下も削除する。users/{uid}・Firebase Authアカウントは残る。
+ * 監査ログは事業と共に消えるため削除操作自体のログは残らない。
+ */
+export async function deleteBusiness(
+  businessId: string,
+  confirmName: string,
+): Promise<ActionResult<null>> {
+  return run(async () => {
+    await requireOwner(businessId);
+    const db = getAdminDb();
+    const businessRef = db.collection("businesses").doc(businessId);
+    const snap = await businessRef.get();
+    if (!snap.exists) {
+      throw new ApiError("NOT_FOUND", "事業が見つかりません");
+    }
+    if (snap.data()?.name !== confirmName) {
+      throw new ApiError(
+        "INVALID_INPUT",
+        "確認のための事業名が一致しません",
+      );
+    }
+    // 先にStorageの証憑ファイルを消す。先にFirestoreを消すと
+    // 失敗時にファイルの残骸を事業単位で追えなくなるため
+    await getAdminBucket().deleteFiles({
+      prefix: `receipts/${businessId}/`,
+    });
+    // businessドキュメント + 全サブコレクションを再帰削除(Admin SDK)
+    await db.recursiveDelete(businessRef);
     return null;
   });
 }

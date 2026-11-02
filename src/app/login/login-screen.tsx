@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
@@ -166,6 +167,16 @@ export function LoginScreen() {
             {mode === "signin" ? "ログイン" : "アカウントを作成"}
           </Button>
         </form>
+        {mode === "signin" && (
+          <p className="mt-3 text-center">
+            <Link
+              href="/reset-password"
+              className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              パスワードを忘れた方はこちら
+            </Link>
+          </p>
+        )}
       </Card>
     </main>
   );
