@@ -5,6 +5,7 @@ rules_version = '2';
 // - 対応するFirestore memberドキュメントのロールで認可する
 // - viewerは読み取りのみ、editor/ownerはアップロード可
 // - ファイルサイズ(10MB)とMIMEタイプを制限する
+// - 証憑docが処理済み・締め済みtxに紐付く既存ファイルの上書き・削除は不可
 service firebase.storage {
   match /b/{bucket}/o {
 
@@ -14,6 +15,14 @@ service firebase.storage {
 
     function memberDoc(businessId) {
       return /databases/(default)/documents/businesses/$(businessId)/members/$(request.auth.uid);
+    }
+
+    function txDoc(businessId, txId) {
+      return /databases/(default)/documents/businesses/$(businessId)/transactions/$(txId);
+    }
+
+    function receiptDoc(businessId, receiptId) {
+      return /databases/(default)/documents/businesses/$(businessId)/receipts/$(receiptId);
     }
 
     function isMember(businessId) {
@@ -28,7 +37,26 @@ service firebase.storage {
       return isMember(businessId) && role(businessId) in ['owner', 'editor'];
     }
 
-    // 証憑として許可する形式と上限(10MB)
+    function txLocked(businessId, txId) {
+      return firestore.exists(txDoc(businessId, txId))
+        && firestore.get(txDoc(businessId, txId)).data.get('status', '') == 'locked';
+    }
+
+    // 既存ファイルの変更可否。証憑docがない(登録前・アップロード単体)は
+    // 許可。docがある場合は unprocessed かつリンク先txが締め済みでない
+    // こと(確定証憑の改ざん・監査証跡の破壊を防ぐ)
+    function receiptFileMutable(businessId, receiptId) {
+      return !firestore.exists(receiptDoc(businessId, receiptId))
+        || (firestore.get(receiptDoc(businessId, receiptId))
+            .data.get('status', '') == 'unprocessed'
+          && (!('transactionId' in firestore
+            .get(receiptDoc(businessId, receiptId)).data)
+            || !txLocked(businessId,
+              firestore.get(receiptDoc(businessId, receiptId))
+                .data.transactionId)));
+    }
+
+    // 証憑として許可する形式と上限(10MB)。receipts routeのMIME許可リストと一致させる
     function validFile() {
       return request.resource.size <= 10 * 1024 * 1024
         && request.resource.contentType in [
@@ -36,15 +64,25 @@ service firebase.storage {
           'image/png',
           'image/webp',
           'image/heic',
+          'image/heif',
           'application/pdf',
         ];
     }
 
     match /receipts/{businessId}/{receiptId}/{fileName} {
       allow read: if isMember(businessId);
-      // deleteではrequest.resourceがnullのためcreate/updateと分離する
-      allow create, update: if canWrite(businessId) && validFile();
-      allow delete: if canWrite(businessId);
+      // 証憑doc未登録(登録前アップロード)はサイズ・MIMEのみ検証するが、
+      // 上書きがcreateとして評価される場合に備えてdoc紐付け済みの
+      // ファイルはreceiptFileMutableも要求する
+      allow create: if canWrite(businessId)
+        && validFile()
+        && receiptFileMutable(businessId, receiptId);
+      // 既存ファイルの上書き・削除は紐付く証憑が未処理のときのみ
+      allow update: if canWrite(businessId)
+        && validFile()
+        && receiptFileMutable(businessId, receiptId);
+      allow delete: if canWrite(businessId)
+        && receiptFileMutable(businessId, receiptId);
     }
   }
 }

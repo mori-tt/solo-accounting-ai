@@ -29,3 +29,26 @@ export function toMemberRole(value: unknown): MemberRole | undefined {
 export function roleAtLeast(role: MemberRole, minRole: MemberRole): boolean {
   return ROLE_RANK[role] >= ROLE_RANK[minRole];
 }
+
+/**
+ * 実効ownerのuid集合を返す。
+ * - memberドキュメントの role === 'owner' のuid
+ * - memberドキュメントが無い・role不正な場合の business.ownerUid
+ *   (requireMembership が ownerUid へフォールバック付与するowner権限と同じ判定)
+ */
+export function effectiveOwnerUids(
+  memberRoles: ReadonlyMap<string, unknown>,
+  ownerUid: string | undefined,
+): Set<string> {
+  const owners = new Set<string>();
+  for (const [uid, role] of memberRoles) {
+    if (role === "owner") owners.add(uid);
+  }
+  if (
+    ownerUid !== undefined &&
+    toMemberRole(memberRoles.get(ownerUid)) === undefined
+  ) {
+    owners.add(ownerUid);
+  }
+  return owners;
+}

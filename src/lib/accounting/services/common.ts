@@ -26,6 +26,19 @@ export function newId(): string {
 }
 
 /**
+ * 冪等キーに操作種別の名前空間を付ける。
+ * 事業内の全コマンドが idempotencyKeys を共有するため、同じクライアント
+ * キーを別操作に使い回すと別種のコマンドの結果が誤リプレイされ、
+ * 書き込み自体が静かにスキップされる。scope 付きハッシュで操作を分離する。
+ */
+export function scopedIdempotencyKey(
+  scope: string,
+  key: string | undefined,
+): string | undefined {
+  return key === undefined ? undefined : `${scope}:${key}`;
+}
+
+/**
  * puts の各ドキュメントに対応する監査ログを生成する。
  * 監査ログには識別情報のみ記録し、ドキュメント内容は含めない。
  */
@@ -47,22 +60,34 @@ export function auditsFor(
   );
 }
 
+/** 指定日付が締め済み期間に含まれるか。 */
+export function isDateInClosedPeriod(
+  date: string,
+  periods: readonly FiscalPeriod[],
+): boolean {
+  return periods.some(
+    (period) =>
+      period.status === "closed" &&
+      isWithinPeriod(date, period.startDate, period.endDate),
+  );
+}
+
 /** 指定日付が締め済み期間に含まれる場合は PERIOD_CLOSED を投げる。 */
 export function assertDateInOpenPeriod(
   date: string,
   periods: readonly FiscalPeriod[],
 ): void {
-  for (const period of periods) {
-    if (
+  const closed = periods.find(
+    (period) =>
       period.status === "closed" &&
-      isWithinPeriod(date, period.startDate, period.endDate)
-    ) {
-      throw new DomainError(
-        "PERIOD_CLOSED",
-        `date ${date} belongs to closed fiscal period ${period.id}`,
-        { periodId: period.id },
-      );
-    }
+      isWithinPeriod(date, period.startDate, period.endDate),
+  );
+  if (closed) {
+    throw new DomainError(
+      "PERIOD_CLOSED",
+      `date ${date} belongs to closed fiscal period ${closed.id}`,
+      { periodId: closed.id },
+    );
   }
 }
 

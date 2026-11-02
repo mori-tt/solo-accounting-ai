@@ -16,6 +16,7 @@ import {
   auditsFor,
   newId,
   nowOf,
+  scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
 
@@ -97,7 +98,7 @@ export async function registerRecurringTemplate(
   };
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("recurringTemplate", input.idempotencyKey) },
     async () => ({
       batch: {
         puts: [{ collection: "recurringTemplates", id, data: template }],

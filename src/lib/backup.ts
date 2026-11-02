@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Firestore } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/result";
+import { isAllowedReceiptMime } from "@/lib/receipt-files";
 
 /**
  * 事業データのJSONバックアップ/復元。
@@ -202,6 +203,131 @@ export function summarizeBackup(
 
 // ---------- 復元 ----------
 
+/**
+ * 復元で書き戻さないコレクション(R2-2)。
+ * - auditLogs: 任意actorUid/action/createdAtの偽造ログ注入を防ぐ(append-only の信頼根拠)
+ * - aiSuggestions: 生成・内容確定はAdmin SDKの管轄。status/decidedByの偽造を防ぐ
+ * - monthlySummaries: Cloud Functionsが再計算する派生データ(クライアント書込み不可と同義)
+ */
+const NON_RESTORABLE_COLLECTIONS: ReadonlySet<string> = new Set([
+  "auditLogs",
+  "aiSuggestions",
+  "monthlySummaries",
+]);
+
+/**
+ * 復元ドキュメントの status 検証(firestore.rules と同じenum)。
+ * 'locked' は締め処理でのみ付与される値のため 'confirmed' へ正規化する
+ * (復元で全経路変更不可の不正docを作らない)。
+ * optional: アプリが status を持たないコレクション(expenses)は欠落を許容。
+ */
+const RESTORE_STATUS_RULES: Record<
+  string,
+  { allowed: readonly string[]; optional?: boolean } | undefined
+> = {
+  transactions: { allowed: ["draft", "confirmed"] },
+  expenses: { allowed: ["draft", "confirmed"], optional: true },
+  receipts: { allowed: ["unprocessed", "linked", "archived"] },
+  invoices: { allowed: ["draft", "issued", "paid", "overdue"] },
+  journalEntries: { allowed: ["draft", "confirmed"] },
+  closingChecks: { allowed: ["open", "resolved", "waived"] },
+  fiscalPeriods: { allowed: ["open", "closed"] },
+  fixedAssets: { allowed: ["active", "disposed"] },
+};
+
+/**
+ * 復元実行者のuidへ上書きする帰属フィールド。
+ * 他人名義の作成/締め/解決を偽装されないよう、復元者を正当な帰属先とする。
+ */
+const RESTORE_ACTOR_FIELDS: Record<string, readonly string[] | undefined> = {
+  transactions: ["createdBy"],
+  expenses: ["createdBy"],
+  receipts: ["createdBy"],
+  journalEntries: ["createdBy"],
+  recurringTemplates: ["createdBy"],
+  fixedAssets: ["createdBy"],
+  closingChecks: ["createdBy", "resolvedBy"],
+  fiscalPeriods: ["closedBy"],
+};
+
+/** Admin SDK専用フィールド。クライアント書き込み禁止と同じ扱いで復元時に除去 */
+const ADMIN_ONLY_FIELDS = ["aiSuggestion", "aiSuggestionId"] as const;
+
+/** closed期間への混入を検査する日付フィールド(YYYY-MM-DD) */
+const RESTORE_DATE_FIELDS: Record<string, readonly string[] | undefined> = {
+  transactions: ["date"],
+  expenses: ["date"],
+  payments: ["date"],
+  journalEntries: ["date"],
+  invoices: ["issueDate", "dueDate"],
+};
+
+/** 日付文字列がいずれかのclosed期間内か */
+function inClosedRange(
+  value: unknown,
+  ranges: readonly { startDate: string; endDate: string }[],
+): boolean {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  return ranges.some((r) => value >= r.startDate && value <= r.endDate);
+}
+
+/**
+ * 復元ドキュメントの sanitize(R2-2)。
+ * 帰属フィールドの復元者化・status正規化・Admin専用フィールド除去・
+ * closed期間混入のskip・membersのロール制限を行う。
+ * null を返したdocは書き込まない。
+ */
+function sanitizeRestoredDoc(
+  collection: string,
+  data: Record<string, unknown>,
+  targetId: string,
+  ctx: {
+    actorUid: string;
+    targetBusinessId: string;
+    closedRanges: readonly { startDate: string; endDate: string }[];
+  },
+): Record<string, unknown> | null {
+  const statusRule = RESTORE_STATUS_RULES[collection];
+  if (statusRule) {
+    const status = data.status;
+    if (status === "locked") {
+      data.status = "confirmed";
+    } else if (status === undefined) {
+      if (!statusRule.optional) return null;
+    } else if (!statusRule.allowed.includes(status as string)) {
+      return null;
+    }
+  }
+  for (const field of RESTORE_ACTOR_FIELDS[collection] ?? []) {
+    if (field in data) data[field] = ctx.actorUid;
+  }
+  for (const field of ADMIN_ONLY_FIELDS) {
+    delete data[field];
+  }
+  for (const field of RESTORE_DATE_FIELDS[collection] ?? []) {
+    if (inClosedRange(data[field], ctx.closedRanges)) return null;
+  }
+  if (collection === "members") {
+    // ownerロールの注入を防ぎ、uidフィールドをdoc IDに揃える
+    if (data.role !== "editor" && data.role !== "viewer") return null;
+    data.uid = targetId;
+    data.invitedBy = ctx.actorUid;
+  }
+  if (collection === "receipts") {
+    // storagePath/mimeTypeの任意値による任意オブジェクト参照を防ぐ
+    if (
+      typeof data.storagePath !== "string" ||
+      !data.storagePath.startsWith("receipts/") ||
+      !isAllowedReceiptMime(data.mimeType)
+    ) {
+      return null;
+    }
+  }
+  return data;
+}
+
 /** 単一参照の張り替え表。値がIDの場合のみ書き換える */
 const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
   {
@@ -270,9 +396,18 @@ export function planRestore(
   opts: {
     targetBusinessId: string;
     protectedUids?: readonly string[];
+    /** 復元実行者。帰属フィールド(createdBy等)をこのuidへ上書きする */
+    actorUid: string;
+    /** 復元先事業の既存closed期間。この範囲の日付を持つdocはskipする */
+    closedRanges?: readonly { startDate: string; endDate: string }[];
     newId: () => string;
   },
 ): RestorePlan {
+  const sanitizeCtx = {
+    actorUid: opts.actorUid,
+    targetBusinessId: opts.targetBusinessId,
+    closedRanges: opts.closedRanges ?? [],
+  };
   const protectedUids = new Set(opts.protectedUids ?? []);
 
   // pass1: ID衝突の解決(ランダム採番コレクションのみ)。
@@ -373,10 +508,15 @@ export function planRestore(
   let remappedCount = 0;
   for (const name of BACKUP_COLLECTIONS) {
     const docs = backup.collections[name] ?? [];
-    // claimedは確定済みの書き込み先ID(既存 + 本計画内で確保済み)
-    const claimed = new Set(existingIds.get(name) ?? []);
     const count = { written: 0, skipped: 0 };
     counts[name] = count;
+    // 監査・派生・AI管理のコレクションは復元対象外(R2-2)
+    if (NON_RESTORABLE_COLLECTIONS.has(name)) {
+      count.skipped = docs.length;
+      continue;
+    }
+    // claimedは確定済みの書き込み先ID(既存 + 本計画内で確保済み)
+    const claimed = new Set(existingIds.get(name) ?? []);
     for (const doc of docs) {
       if (name === "members" && protectedUids.has(doc.id)) {
         count.skipped++;
@@ -388,11 +528,17 @@ export function planRestore(
           continue;
         }
         claimed.add(doc.id);
-        writes.push({
-          collection: name,
-          id: doc.id,
-          data: rewriteDoc(name, doc, doc.id),
-        });
+        const sanitized = sanitizeRestoredDoc(
+          name,
+          rewriteDoc(name, doc, doc.id),
+          doc.id,
+          sanitizeCtx,
+        );
+        if (sanitized === null) {
+          count.skipped++;
+          continue;
+        }
+        writes.push({ collection: name, id: doc.id, data: sanitized });
         count.written++;
         continue;
       }
@@ -404,12 +550,18 @@ export function planRestore(
         } while (claimed.has(target));
       }
       claimed.add(target);
+      const sanitized = sanitizeRestoredDoc(
+        name,
+        rewriteDoc(name, doc, target),
+        target,
+        sanitizeCtx,
+      );
+      if (sanitized === null) {
+        count.skipped++;
+        continue;
+      }
       if (target !== doc.id) remappedCount++;
-      writes.push({
-        collection: name,
-        id: target,
-        data: rewriteDoc(name, doc, target),
-      });
+      writes.push({ collection: name, id: target, data: sanitized });
       count.written++;
     }
   }
@@ -450,11 +602,24 @@ export async function restoreBusinessBackup(
     existingIds.set(name, new Set(refs.map((r) => r.id)));
   }
 
+  // 既存のclosed期間。この範囲の日付を持つdocは
+  // 「締め済み期間のデータを変更しない」の不変条件のため復元しない
+  const periodsSnap = await businessRef.collection("fiscalPeriods").get();
+  const closedRanges = periodsSnap.docs
+    .map((d) => d.data())
+    .filter((p) => p.status === "closed")
+    .map((p) => ({
+      startDate: String(p.startDate),
+      endDate: String(p.endDate),
+    }));
+
   const plan = planRestore(backup, existingIds, {
     targetBusinessId: businessId,
     protectedUids: [actor.uid, ownerUid].filter(
       (v): v is string => typeof v === "string",
     ),
+    actorUid: actor.uid,
+    closedRanges,
     newId: () => businessRef.collection("transactions").doc().id,
   });
 

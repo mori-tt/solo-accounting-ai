@@ -80,12 +80,16 @@ export const businessSchema = z.object({
   /** 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い */
   allocationRatios: z
     .record(
-      z.string(),
+      z.string().max(50, "科目コードは50文字以内で入力してください"),
       z
         .number({ error: "事業割合は数値で入力してください" })
         .int("事業割合は整数で入力してください")
         .min(0, "事業割合は0〜100で入力してください")
         .max(100, "事業割合は0〜100で入力してください"),
+    )
+    .refine(
+      (r) => Object.keys(r).length <= 200,
+      "按分設定は200科目以内で登録してください",
     )
     .optional(),
   /**
@@ -174,7 +178,10 @@ export const transactionSchema = z
     type: z.enum(["income", "expense", "transfer"]),
     date: dateString,
     amount: yenAmount,
-    account: z.string().min(1, "勘定科目を選択してください"),
+    account: z
+      .string()
+      .min(1, "勘定科目を選択してください")
+      .max(50, "科目コードは50文字以内で入力してください"),
     counterparty: optionalText,
     description: optionalText,
     /**
@@ -208,7 +215,10 @@ export type TransactionSearchInput = z.infer<typeof transactionSearchSchema>;
 export const expenseSchema = z.object({
   date: dateString,
   amount: yenAmount,
-  account: z.string().min(1, "勘定科目を選択してください"),
+  account: z
+    .string()
+    .min(1, "勘定科目を選択してください")
+    .max(50, "科目コードは50文字以内で入力してください"),
   counterparty: optionalText,
   description: optionalText,
   taxCategory: taxCategorySchema,
@@ -225,7 +235,7 @@ export const customerSchema = z.object({
 export type CustomerInput = z.infer<typeof customerSchema>;
 
 export const projectSchema = z.object({
-  customerId: z.string().min(1, "顧客を選択してください"),
+  customerId: z.string().min(1, "顧客を選択してください").max(200),
   name: z.string().min(1, "案件名を入力してください").max(200),
 });
 export type ProjectInput = z.infer<typeof projectSchema>;
@@ -243,11 +253,14 @@ export type InvoiceItemInput = z.infer<typeof invoiceItemSchema>;
 
 export const invoiceSchema = z
   .object({
-    customerId: z.string().min(1, "顧客を選択してください"),
-    projectId: z.string().optional(),
+    customerId: z.string().min(1, "顧客を選択してください").max(200),
+    projectId: z.string().max(200).optional(),
     issueDate: dateString,
     dueDate: dateString,
-    items: z.array(invoiceItemSchema).min(1, "明細を1行以上入力してください"),
+    items: z
+      .array(invoiceItemSchema)
+      .min(1, "明細を1行以上入力してください")
+      .max(100, "明細は100行以内で入力してください"),
   })
   .refine((v) => v.dueDate >= v.issueDate, {
     message: "支払期日は発行日以降の日付にしてください",
@@ -256,7 +269,7 @@ export const invoiceSchema = z
 export type InvoiceInput = z.infer<typeof invoiceSchema>;
 
 export const paymentSchema = z.object({
-  invoiceId: z.string().min(1),
+  invoiceId: z.string().min(1).max(200),
   date: dateString,
   amount: yenAmount,
   /** 消込対象の収入取引ID(任意)。空文字は未指定扱い */
@@ -267,7 +280,10 @@ export type PaymentInput = z.infer<typeof paymentSchema>;
 export const recurringTemplateSchema = z.object({
   name: z.string().min(1, "テンプレート名を入力してください").max(200),
   type: z.enum(["income", "expense", "transfer"]),
-  account: z.string().min(1, "勘定科目を選択してください"),
+  account: z
+    .string()
+    .min(1, "勘定科目を選択してください")
+    .max(50, "科目コードは50文字以内で入力してください"),
   counterparty: optionalText,
   description: optionalText,
   amount: yenAmount,
