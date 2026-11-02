@@ -1,3 +1,4 @@
+import { receiptDownloadRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -19,6 +20,8 @@ export async function GET(
       throw new ApiError("INVALID_INPUT", "businessId が必要です");
     }
     await requireViewer(businessId);
+    // サーバー経由の帯域が課金対象のため businessId 単位で制限
+    receiptDownloadRateLimiter.consume(businessId);
 
     const receipt = await getStore().getReceipt(businessId, receiptId);
     if (!receipt) {

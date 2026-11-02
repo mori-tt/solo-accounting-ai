@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./result";
-import { createRateLimiter, RateLimitError } from "./rate-limit";
+import {
+  clientIpKey,
+  createRateLimiter,
+  RateLimitError,
+} from "./rate-limit";
 
 describe("createRateLimiter", () => {
   it("上限までは消費でき、超過で RateLimitError(ApiError RATE_LIMITED)", () => {
@@ -59,5 +63,41 @@ describe("createRateLimiter", () => {
     expect(() => limiter.consume("biz-1")).toThrow(RateLimitError);
     limiter.reset();
     expect(() => limiter.consume("biz-1")).not.toThrow();
+  });
+});
+
+describe("clientIpKey", () => {
+  function requestWith(headers: Record<string, string>): Request {
+    return new Request("http://localhost/api/session", { headers });
+  }
+
+  it("x-forwarded-for の先頭IPを使う(プロキシ経由)", () => {
+    const req = requestWith({
+      "x-forwarded-for": "203.0.113.1, 10.0.0.1, 10.0.0.2",
+    });
+    expect(clientIpKey(req)).toBe("203.0.113.1");
+  });
+
+  it("x-forwarded-for が無ければ x-real-ip にフォールバック", () => {
+    const req = requestWith({ "x-real-ip": "198.51.100.7" });
+    expect(clientIpKey(req)).toBe("198.51.100.7");
+  });
+
+  it("両方無ければ unknown(共有バケット)", () => {
+    expect(clientIpKey(requestWith({}))).toBe("unknown");
+  });
+
+  it("x-forwarded-for が空・空白のみなら x-real-ip/unknown へ", () => {
+    expect(
+      clientIpKey(requestWith({ "x-forwarded-for": " , " })),
+    ).toBe("unknown");
+    expect(
+      clientIpKey(
+        requestWith({
+          "x-forwarded-for": "",
+          "x-real-ip": "192.0.2.10",
+        }),
+      ),
+    ).toBe("192.0.2.10");
   });
 });
