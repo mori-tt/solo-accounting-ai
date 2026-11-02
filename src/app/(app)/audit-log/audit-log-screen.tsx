@@ -7,11 +7,13 @@ import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
 import { listAuditLogs } from "@/lib/actions/audit-logs";
 import { callApi } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
+import { CSV_UTF8_BOM } from "@/lib/csv";
 import {
   AUDIT_ACTIONS,
   AUDIT_TARGET_TYPES,
   auditActionLabel,
   auditTargetTypeLabel,
+  buildAuditLogCsv,
   describeAuditEntry,
   filterAuditLogs,
   parseAuditTargetPath,
@@ -92,6 +94,20 @@ export function AuditLogScreen() {
   );
   const visible = filtered.slice(0, visibleCount);
 
+  /** 絞り込み済みの一覧をCSVでダウンロード(電帳法の訂正削除履歴の外部提供用) */
+  const exportCsv = () => {
+    // BOM付UTF-8でExcelでも文字化けせず開ける
+    const blob = new Blob([CSV_UTF8_BOM + buildAuditLogCsv(filtered)], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
@@ -146,6 +162,13 @@ export function AuditLogScreen() {
             {filtered.length}件 / 全{data.length}件
           </span>
         )}
+        <Button
+          variant="secondary"
+          onClick={exportCsv}
+          disabled={filtered.length === 0}
+        >
+          CSV出力
+        </Button>
       </div>
 
       {error ? (

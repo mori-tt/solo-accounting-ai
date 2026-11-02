@@ -133,6 +133,9 @@ receipts(証憑ファイル)
 | fileName | string | |
 | mimeType | string | |
 | transactionId | string? | 紐付け先 |
+| transactionDate | string? | YYYY-MM-DD。電帳法の検索要件用メタデータ(取引年月日)。紐付け時に取引値をコピー、未紐付は手入力で補完 |
+| amount | number? | 円・整数・0以上。検索要件用メタデータ(取引金額) |
+| counterparty | string? | 検索要件用メタデータ(取引先) |
 | status | string | `unprocessed` / `linked` / `archived` |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
