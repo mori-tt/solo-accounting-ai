@@ -14,6 +14,7 @@ import {
   auditsFor,
   newId,
   nowOf,
+  scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
 
@@ -103,19 +104,24 @@ export async function registerFixedAsset(
   };
   const { value, replayed } = await store.transact(
     businessId,
-    { idempotencyKey: input.idempotencyKey },
-    async () => ({
-      batch: {
-        puts: [{ collection: "fixedAssets", id, data: asset }],
-        audits: auditsFor(
-          businessId,
-          [{ collection: "fixedAssets", id }],
-          "create",
-          actor,
-        ),
-      },
-      value: asset,
-    }),
+    { idempotencyKey: scopedIdempotencyKey("fixedAsset", input.idempotencyKey) },
+    async (tx) => {
+      // 取得日が締め済み期間に属する資産は登録できない
+      const periods = await tx.listFiscalPeriods(businessId);
+      assertDateInOpenPeriod(input.acquiredDate, periods);
+      return {
+        batch: {
+          puts: [{ collection: "fixedAssets", id, data: asset }],
+          audits: auditsFor(
+            businessId,
+            [{ collection: "fixedAssets", id }],
+            "create",
+            actor,
+          ),
+        },
+        value: asset,
+      };
+    },
   );
   return { asset: value, replayed };
 }
@@ -137,6 +143,10 @@ export async function updateFixedAsset(
         `fixedAsset ${assetId} not found`,
       );
     }
+    // 新旧いずれかの取得日が締め済み期間なら変更不可(締め期間の償却計算を変えるため)
+    const periods = await tx.listFiscalPeriods(businessId);
+    assertDateInOpenPeriod(current.acquiredDate, periods);
+    assertDateInOpenPeriod(input.acquiredDate, periods);
     const next: FixedAsset = {
       ...current,
       name: input.name,
@@ -192,6 +202,9 @@ export async function disposeFixedAsset(
         "disposedDate must not be before acquiredDate",
       );
     }
+    // 除却日が締め済み期間に属する場合は除却できない
+    const periods = await tx.listFiscalPeriods(businessId);
+    assertDateInOpenPeriod(date, periods);
     const next: FixedAsset = {
       ...current,
       status: "disposed",

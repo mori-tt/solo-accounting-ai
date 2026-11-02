@@ -2,7 +2,13 @@ import { assertFiscalStartMonth } from "../dates";
 import { DomainError } from "../errors";
 import type { AccountingStore } from "../store/types";
 import type { Business, TaxMode } from "../types";
-import { auditsFor, newId, nowOf, type ActorContext } from "./common";
+import {
+  auditsFor,
+  newId,
+  nowOf,
+  scopedIdempotencyKey,
+  type ActorContext,
+} from "./common";
 
 const TAX_MODES: readonly TaxMode[] = ["exempt", "simple", "standard"];
 
@@ -47,7 +53,7 @@ export async function registerBusiness(
 
   const { replayed, value } = await store.transact(
     id,
-    { idempotencyKey: input.idempotencyKey },
+    { idempotencyKey: scopedIdempotencyKey("business", input.idempotencyKey) },
     async (tx) => {
       const existing = await tx.getBusiness(id);
       if (existing) {
