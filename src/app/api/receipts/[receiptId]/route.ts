@@ -35,6 +35,9 @@ export async function GET(
         "Content-Type": receipt.mimeType,
         "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(receipt.fileName)}`,
         "Cache-Control": "private, max-age=60",
+        // アップロードされた証憑をブラウザが別種コンテンツとして
+        // 解釈するのを防ぐ(MIMEスニッフィング経由のXSS対策)
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (e) {

@@ -89,7 +89,8 @@ export async function signUpAndCreateBusiness(
 
 export async function signOut(page: Page): Promise<void> {
   await page.getByRole("button", { name: "ログアウト" }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  // 認証ゲートが行き先を ?next= に保持するためクエリ付きを許容する
+  await expect(page).toHaveURL(/\/login(\?|$)/);
 }
 
 export interface TransactionDraftInput {

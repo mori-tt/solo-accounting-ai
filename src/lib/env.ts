@@ -41,23 +41,61 @@ export class EnvValidationError extends Error {
   }
 }
 
+/**
+ * 確認対象キーの現在値を返す。
+ * クライアントバンドルでは `process.env` オブジェクト自体がポリフィル
+ * (中身が空)に置き換わるため、`env[key]` のような動的参照では
+ * NEXT_PUBLIC_* の値を拾えず全キー「未設定」と誤判定してしまう。
+ * インライン化されるのは `process.env.KEY` 形式の静的参照のみなので、
+ * ここでキーごとに静的に展開する
+ * (NEXT_PUBLIC_ でないキーはクライアントでは常に undefined になるが、
+ *  それはブラウザに値が出ないという正しい挙動なので問題ない)。
+ */
+function currentEnv(): EnvVars {
+  return {
+    NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:
+      process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID:
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:
+      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:
+      process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    NEXT_PUBLIC_USE_FIREBASE_EMULATOR:
+      process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR,
+    NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST:
+      process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST,
+    NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST:
+      process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST,
+    NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST:
+      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_HOST,
+    FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST,
+    FIREBASE_AUTH_EMULATOR_HOST: process.env.FIREBASE_AUTH_EMULATOR_HOST,
+    FIREBASE_STORAGE_EMULATOR_HOST: process.env.FIREBASE_STORAGE_EMULATOR_HOST,
+  };
+}
+
 /** 未設定(または空・空白のみ)の必須 NEXT_PUBLIC_FIREBASE_* を返す */
-export function missingFirebaseClientEnv(env: EnvVars = process.env): string[] {
+export function missingFirebaseClientEnv(env: EnvVars = currentEnv()): string[] {
   return REQUIRED_FIREBASE_CLIENT_ENV.filter((key) => !env[key]?.trim());
 }
 
-export function usesEmulator(env: EnvVars = process.env): boolean {
+export function usesEmulator(env: EnvVars = currentEnv()): boolean {
   return env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true";
 }
 
 /** Emulator使用フラグが無いのに残っている Emulator host 環境変数を返す */
-export function leftoverEmulatorHostEnv(env: EnvVars = process.env): string[] {
+export function leftoverEmulatorHostEnv(
+  env: EnvVars = currentEnv(),
+): string[] {
   if (usesEmulator(env)) return [];
   return EMULATOR_HOST_ENV.filter((key) => !!env[key]?.trim());
 }
 
 /** 必須の NEXT_PUBLIC_FIREBASE_* が空なら EnvValidationError を投げる */
-export function validateFirebaseClientEnv(env: EnvVars = process.env): void {
+export function validateFirebaseClientEnv(env: EnvVars = currentEnv()): void {
   const missing = missingFirebaseClientEnv(env);
   if (missing.length > 0) {
     throw new EnvValidationError(
@@ -72,7 +110,7 @@ export function validateFirebaseClientEnv(env: EnvVars = process.env): void {
  * 残っていたら警告する。実害を避けるため起動は継続する(警告のみ)。
  */
 export function warnIfProductionWithEmulatorHost(
-  env: EnvVars = process.env,
+  env: EnvVars = currentEnv(),
   warn: (message: string) => void = (m) => console.warn(m),
 ): void {
   const leftover = leftoverEmulatorHostEnv(env);
