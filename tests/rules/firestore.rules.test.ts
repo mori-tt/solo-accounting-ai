@@ -27,6 +27,7 @@ import {
   seedBusiness,
   tx,
   VIEWER,
+  withholdingRecord,
   anon,
   asUser,
   createTestEnv,
@@ -1841,6 +1842,189 @@ describe("expenses(R2-12, R2-21)", () => {
           receiptId: "r1",
           createdBy: EDITOR,
         }),
+    );
+  });
+});
+
+describe("withholdingRecords", () => {
+  const wPath = (biz: string, id: string) =>
+    `businesses/${biz}/withholdingRecords/${id}`;
+  const FP_CLOSED = `businesses/${BIZ}/fiscalPeriods/fy2026`;
+
+  it("memberは読める。非member・未認証は読めない", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-tx")]: tx("confirmed"),
+      [wPath(BIZ, "w-tx")]: withholdingRecord(),
+    });
+    await assertSucceeds(asUser(testEnv, VIEWER).doc(wPath(BIZ, "w-tx")).get());
+    await assertFails(asUser(testEnv, OUTSIDER).doc(wPath(BIZ, "w-tx")).get());
+    await assertFails(anon(testEnv).doc(wPath(BIZ, "w-tx")).get());
+  });
+
+  it("editorはリンク先expense取引に記録を作成できる", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-tx")]: tx("draft"),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor
+        .doc(wPath(BIZ, "w-tx"))
+        .set({ ...withholdingRecord(), createdBy: EDITOR }),
+    );
+  });
+
+  it("viewer・非memberは作成できない", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-tx")]: tx("draft"),
+      [tPath(OTHER_BIZ, "w-tx")]: tx("draft"),
+    });
+    await assertFails(
+      asUser(testEnv, VIEWER)
+        .doc(wPath(BIZ, "w-tx"))
+        .set({ ...withholdingRecord(), createdBy: VIEWER }),
+    );
+    // 他businessのrecordIdと一致するtxがあってもmemberでなければ不可
+    await assertFails(
+      asUser(testEnv, EDITOR)
+        .doc(wPath(OTHER_BIZ, "w-tx"))
+        .set({ ...withholdingRecord(), createdBy: EDITOR }),
+    );
+  });
+
+  it("transactionIdがdoc IDと一致しないものは作成できない", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-tx")]: tx("draft"),
+      [tPath(BIZ, "w-other")]: tx("draft"),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-tx"))
+        .set({
+          ...withholdingRecord({ transactionId: "w-other" }),
+          createdBy: EDITOR,
+        }),
+    );
+  });
+
+  it("expense以外の取引・存在しない取引には作成できない", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-income")]: { ...tx("confirmed"), type: "income" },
+    });
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-income"))
+        .set({
+          ...withholdingRecord({ transactionId: "w-income" }),
+          createdBy: EDITOR,
+        }),
+    );
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-ghost"))
+        .set({
+          ...withholdingRecord({ transactionId: "w-ghost" }),
+          createdBy: EDITOR,
+        }),
+    );
+  });
+
+  it("不正なフィールド値のレコードは作成できない", async () => {
+    await seed(testEnv, { [tPath(BIZ, "w-tx")]: tx("draft") });
+    const editor = asUser(testEnv, EDITOR);
+    // 区分がenum外
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-tx"))
+        .set({ ...withholdingRecord({ category: "other" }), createdBy: EDITOR }),
+    );
+    // 税額が負数
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-tx"))
+        .set({ ...withholdingRecord({ taxAmount: -1 }), createdBy: EDITOR }),
+    );
+    // createdByのなりすまし
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-tx"))
+        .set({ ...withholdingRecord(), createdBy: OWNER }),
+    );
+  });
+
+  it("locked・closed期間の取引には記録を作成・更新・削除できない", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-locked")]: tx("locked"),
+      [wPath(BIZ, "w-locked")]: withholdingRecord({
+        transactionId: "w-locked",
+      }),
+      [tPath(BIZ, "w-closed")]: { ...tx("confirmed"), date: "2026-10-15" },
+      [wPath(BIZ, "w-closed")]: withholdingRecord({
+        transactionId: "w-closed",
+      }),
+      // 記録未作成のclosed期間取引(作成拒否の検証用)
+      [tPath(BIZ, "w-closed-new")]: {
+        ...tx("confirmed"),
+        date: "2026-10-15",
+      },
+      [FP_CLOSED]: {
+        fiscalYear: 2026,
+        startDate: "2026-01-01",
+        endDate: "2026-12-31",
+        status: "closed",
+        closedBy: OWNER,
+      },
+    });
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    // locked取引のレコードは更新・削除・作成できない
+    await assertFails(
+      editor.doc(wPath(BIZ, "w-locked")).update({ taxAmount: 1 }),
+    );
+    await assertFails(owner.doc(wPath(BIZ, "w-locked")).delete());
+    // closed期間の取引のレコードも同様
+    await assertFails(
+      owner.doc(wPath(BIZ, "w-closed")).update({ taxAmount: 1 }),
+    );
+    await assertFails(owner.doc(wPath(BIZ, "w-closed")).delete());
+    await assertFails(
+      editor
+        .doc(wPath(BIZ, "w-closed-new"))
+        .set({
+          ...withholdingRecord({ transactionId: "w-closed-new" }),
+          createdBy: EDITOR,
+        }),
+    );
+  });
+
+  it("open期間のレコードはeditorが更新・削除できるが不変フィールドは守られる", async () => {
+    await seed(testEnv, {
+      [tPath(BIZ, "w-tx")]: tx("confirmed"),
+      [wPath(BIZ, "w-tx")]: withholdingRecord(),
+    });
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor.doc(wPath(BIZ, "w-tx")).update({ taxAmount: 20420 }),
+    );
+    // transactionId・createdByは変更不可
+    await assertFails(
+      editor.doc(wPath(BIZ, "w-tx")).update({ transactionId: "other" }),
+    );
+    await assertFails(
+      editor.doc(wPath(BIZ, "w-tx")).update({ createdBy: "other" }),
+    );
+    await assertSucceeds(editor.doc(wPath(BIZ, "w-tx")).delete());
+  });
+
+  it("リンク先取引が無い孤児レコードは削除できる", async () => {
+    await seed(testEnv, {
+      [wPath(BIZ, "w-orphan")]: withholdingRecord({
+        transactionId: "w-orphan",
+      }),
+    });
+    await assertSucceeds(
+      asUser(testEnv, EDITOR).doc(wPath(BIZ, "w-orphan")).delete(),
     );
   });
 });

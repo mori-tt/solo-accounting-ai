@@ -8,6 +8,7 @@ import {
   OPENING_EQUITY_ACCOUNT,
   openingBalanceJournalEntries,
   transactionToJournalEntry,
+  WITHHOLDING_ACCOUNT,
   type JournalEntry,
   type JournalTransaction,
 } from "./ledger";
@@ -91,6 +92,44 @@ describe("transactionToJournalEntry", () => {
     expect(e.date).toBe("2026-10-05");
     expect(e.description).toBe("desc-t1");
     expect(e.counterparty).toBe("cp-t1");
+  });
+
+  it("源泉徴収対象のexpenseは貸方を現金(差引額)と預り金に分離する", () => {
+    const e = transactionToJournalEntry(
+      tx("t1", "expense", "2026-10-05", 100_000, "outsourcing"),
+      10_210,
+    );
+    expect(e.lines).toEqual([
+      { account: "outsourcing", debit: 100_000, credit: 0 },
+      { account: CASH_ACCOUNT, debit: 0, credit: 89_790 },
+      { account: WITHHOLDING_ACCOUNT, debit: 0, credit: 10_210 },
+    ]);
+    // 貸借一致: 借方100,000 = 貸方89,790 + 10,210
+    const debit = e.lines.reduce((s, l) => s + l.debit, 0);
+    const credit = e.lines.reduce((s, l) => s + l.credit, 0);
+    expect(debit).toBe(credit);
+  });
+
+  it("源泉徴収税額0・income/transferでは2行のままにする", () => {
+    expect(
+      transactionToJournalEntry(
+        tx("t1", "expense", "2026-10-05", 100_000, "outsourcing"),
+        0,
+      ).lines,
+    ).toHaveLength(2);
+    // 税額が取引額を超える入力は分離しない(不正値はサービス層で拒否済み)
+    expect(
+      transactionToJournalEntry(
+        tx("t2", "expense", "2026-10-05", 100_000, "outsourcing"),
+        200_000,
+      ).lines,
+    ).toHaveLength(2);
+    expect(
+      transactionToJournalEntry(
+        tx("t3", "income", "2026-10-05", 100_000, "sales"),
+        10_210,
+      ).lines,
+    ).toHaveLength(2);
   });
 });
 

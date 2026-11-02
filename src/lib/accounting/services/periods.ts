@@ -141,16 +141,21 @@ async function computeCarryForward(
   for (const b of registered) {
     if (b.accountCode !== "") targets.add(b.accountCode);
   }
-  const [transactions, nextPeriod] = await Promise.all([
+  const [transactions, nextPeriod, withholdingRecords] = await Promise.all([
     reader.listTransactionsInRange(businessId, "0001-01-01", period.endDate),
     reader.getFiscalPeriod(businessId, `fy${nextFiscalYear}`),
+    reader.listWithholdingRecords(businessId),
   ]);
+  // 源泉徴収の税額を仕訳展開へ渡し、預り金残高を繰越対象に含める
+  const withholdingTax = new Map(
+    withholdingRecords.map((r) => [r.transactionId, r.taxAmount]),
+  );
   return {
     nextFiscalYear,
     nextYearClosed: nextPeriod?.status === "closed",
     targets,
     balances: computeCarryForwardBalances(
-      buildJournal(transactions),
+      buildJournal(transactions, withholdingTax),
       registered,
       period.fiscalYear,
       business.fiscalYearStartMonth,

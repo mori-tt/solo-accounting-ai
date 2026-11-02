@@ -31,6 +31,7 @@ export const BACKUP_COLLECTIONS = [
   "projects",
   "transactions",
   "expenses",
+  "withholdingRecords",
   "receipts",
   "invoices",
   "payments",
@@ -270,6 +271,7 @@ const RESTORE_STATUS_RULES: Record<
 const RESTORE_ACTOR_FIELDS: Record<string, readonly string[] | undefined> = {
   transactions: ["createdBy"],
   expenses: ["createdBy"],
+  withholdingRecords: ["createdBy"],
   receipts: ["createdBy"],
   journalEntries: ["createdBy"],
   recurringTemplates: ["createdBy"],
@@ -369,6 +371,7 @@ const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
       ["transactionId", "transactions"],
       ["receiptId", "receipts"],
     ],
+    withholdingRecords: [["transactionId", "transactions"]],
     receipts: [["transactionId", "transactions"]],
     projects: [["customerId", "customers"]],
     invoices: [
@@ -454,7 +457,11 @@ export function planRestore(
   // 2件目以降はpass2で個別に採番する(参照は先頭のドキュメントを指す)
   const remap = new Map<string, string>();
   for (const name of BACKUP_COLLECTIONS) {
-    if (FIXED_ID_COLLECTIONS.has(name)) continue;
+    // withholdingRecords は doc ID = transactionId であり、ランダム採番すると
+    // 取引との1:1対応が壊れる。書き込み先IDはリンク先取引の確定IDを使う
+    if (FIXED_ID_COLLECTIONS.has(name) || name === "withholdingRecords") {
+      continue;
+    }
     const assigned = new Set(existingIds.get(name) ?? []);
     const seen = new Set<string>();
     for (const doc of backup.collections[name] ?? []) {
@@ -544,6 +551,12 @@ export function planRestore(
   const counts: Record<string, { written: number; skipped: number }> = {};
   const writes: RestoreWrite[] = [];
   let remappedCount = 0;
+  // バックアップ内の取引日付表。withholdingRecords の closed期間混入検査用
+  // (レコード自体は日付を持たず、リンク先取引の日付が締め済み期間を決める)
+  const backupTxDates = new Map<string, string>();
+  for (const doc of backup.collections.transactions ?? []) {
+    if (typeof doc.date === "string") backupTxDates.set(doc.id, doc.date);
+  }
   for (const name of BACKUP_COLLECTIONS) {
     const docs = backup.collections[name] ?? [];
     const count = { written: 0, skipped: 0 };
@@ -558,6 +571,35 @@ export function planRestore(
     for (const doc of docs) {
       if (name === "members" && protectedUids.has(doc.id)) {
         count.skipped++;
+        continue;
+      }
+      if (name === "withholdingRecords") {
+        // doc ID = transactionId の1:1付属データ。書き込み先IDは
+        // リンク先取引の確定ID(リマップ適用後)に揃える。
+        // 取引がclosed期間の日付ならその取引自体が復元対象外のためskip
+        const target = remapId("transactions", doc.id);
+        if (
+          claimed.has(target) ||
+          inClosedRange(backupTxDates.get(doc.id), sanitizeCtx.closedRanges)
+        ) {
+          count.skipped++;
+          continue;
+        }
+        claimed.add(target);
+        const sanitized = sanitizeRestoredDoc(
+          name,
+          rewriteDoc(name, doc, target),
+          target,
+          sanitizeCtx,
+        );
+        // doc IDとtransactionIdの不一致はルール不変条件に反するためskip
+        if (sanitized === null || sanitized.transactionId !== target) {
+          count.skipped++;
+          continue;
+        }
+        if (target !== doc.id) remappedCount++;
+        writes.push({ collection: name, id: target, data: sanitized });
+        count.written++;
         continue;
       }
       if (FIXED_ID_COLLECTIONS.has(name)) {

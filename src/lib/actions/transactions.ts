@@ -5,6 +5,11 @@ import {
   normalizeTransactionTax,
   registerTransaction,
 } from "@/lib/accounting/services/transactions";
+import { planWithholdingRecord } from "@/lib/accounting/services/withholding";
+import type {
+  DeleteOp,
+  PutOp,
+} from "@/lib/accounting/store/types";
 import {
   assertDateInOpenPeriod,
   auditsFor,
@@ -65,6 +70,7 @@ export async function createTransaction(
         description: parsed.data.description,
         taxCategory: parsed.data.taxCategory ?? undefined,
         taxRate: parsed.data.taxRate ?? undefined,
+        withholding: parsed.data.withholding ?? undefined,
       },
     );
     return transaction;
@@ -125,22 +131,67 @@ export async function updateTransaction(
         taxRate: tax.taxRate,
         updatedAt: new Date().toISOString(),
       };
-      return {
-        batch: {
-          puts: [
-            {
-              collection: "transactions" as const,
-              id: transactionId,
-              data: next,
-            },
-          ],
-          audits: auditsFor(
+      const puts: PutOp[] = [
+        {
+          collection: "transactions" as const,
+          id: transactionId,
+          data: next,
+        },
+      ];
+      const deletes: DeleteOp[] = [];
+      const audits = auditsFor(
+        businessId,
+        [{ collection: "transactions", id: transactionId }],
+        "update",
+        actor,
+      );
+      // 源泉徴収記録は transactions の付属データとしてライフサイクルを
+      // 合わせる。値=更新/新規、null=解除、未指定=保持。
+      // expense 以外への種別変更時は記録を削除して不変条件を維持する
+      const existingRecord = await tx.getWithholdingRecord(
+        businessId,
+        transactionId,
+      );
+      const withholding = parsed.data.withholding;
+      if (parsed.data.type !== "expense" || withholding === null) {
+        if (existingRecord) {
+          deletes.push({
+            collection: "withholdingRecords" as const,
+            id: transactionId,
+          });
+          audits.push(
+            ...auditsFor(
+              businessId,
+              [{ collection: "withholdingRecords", id: transactionId }],
+              "delete",
+              actor,
+            ),
+          );
+        }
+      } else if (withholding !== undefined) {
+        const record = planWithholdingRecord(
+          next,
+          withholding,
+          actor,
+          next.updatedAt,
+          existingRecord,
+        );
+        puts.push({
+          collection: "withholdingRecords" as const,
+          id: transactionId,
+          data: record,
+        });
+        audits.push(
+          ...auditsFor(
             businessId,
-            [{ collection: "transactions", id: transactionId }],
-            "update",
+            [{ collection: "withholdingRecords", id: transactionId }],
+            existingRecord ? "update" : "create",
             actor,
           ),
-        },
+        );
+      }
+      return {
+        batch: { puts, deletes, audits },
         value: next,
       };
     });
@@ -191,16 +242,26 @@ export async function deleteTransaction(
       }
       const periods = await tx.listFiscalPeriods(businessId);
       assertDateInOpenPeriod(current.date, periods);
+      // 源泉徴収記録は取引の付属データなので取引と一緒に削除する
+      const deletes: DeleteOp[] = [
+        { collection: "transactions" as const, id: transactionId },
+      ];
+      const auditTargets = [{ collection: "transactions", id: transactionId }];
+      if (await tx.getWithholdingRecord(businessId, transactionId)) {
+        deletes.push({
+          collection: "withholdingRecords" as const,
+          id: transactionId,
+        });
+        auditTargets.push({
+          collection: "withholdingRecords",
+          id: transactionId,
+        });
+      }
       return {
         batch: {
           puts: [],
-          deletes: [{ collection: "transactions" as const, id: transactionId }],
-          audits: auditsFor(
-            businessId,
-            [{ collection: "transactions", id: transactionId }],
-            "delete",
-            actor,
-          ),
+          deletes,
+          audits: auditsFor(businessId, auditTargets, "delete", actor),
         },
         value: null,
       };
