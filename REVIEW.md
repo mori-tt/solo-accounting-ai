@@ -1354,3 +1354,16 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: UX仕上げ(スケルトン/空状態/loading)(Issue #82)
+- Worktree: ux-polish
+`app/(app)` 配下の全24 route に `loading.tsx` を追加し、`components/ui.tsx` にスケルトン系コンポーネントを末尾追記。空状態は全一覧画面で既に `EmptyState` 統一済みだったため画面側の変更は不要だった。
+- `components/ui.tsx`: `Skeleton`(骨組み矩形・`animate-pulse`)・`TableSkeleton`(ヘッダ+行を模した一覧用プレースホルダ・`Card` 利用)・`ScreenSkeleton`(PageHeader+テーブル形状のページ全体プレースホルダ・`role="status"`+`sr-only` で読み込み中を通知)を末尾追記。`EmptyState` は既存のため追加せず、既存 export は一切変更なし
+- `loading.tsx`: `app/(app)` 配下の全 route(dashboard/transactions/transactions-import/receipts/invoices/customers/projects/accounts/allocations/audit-log/backup/business-delete/closing/expenses-new/fixed-assets/opening-balances/recurring/reports-6件/search/settings)に `ScreenSkeleton` を返す `Loading` を配置。`cacheComponents`+`partialPrefetching` 有効のため、この fallback はプリフェッチされる App Shell の一部となり client navigation 時に即時表示される。詳細 route(`[id]` 動的セグメント)は本アプリに存在しないため一覧+レポートが対象
+- 空状態の確認: transactions/receipts/invoices/customers/projects/accounts/fixed-assets/recurring/audit-log/opening-balances/expenses-new/search/settings/dashboard/closing/全レポート画面は既に `EmptyState` 使用済み。残余の「まだ/なし」表記は成功メッセージ(`問題ありません`等)・帳票行(`(収入なし)`等の収支内訳書様式行)・select option・フォーム内ヒントであり空状態ではないため置換対象外と判断
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格(37 route 生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動は worktree 横断で1系統の制約あり)
+- 各画面の内部ローディング(`useApiData` の `initialLoading` → `LoadingBlock` スピナー)は従来どおり。`loading.tsx` は route segment 境界のフォールバックであり、画面内のデータ取得中表示とは別層として共存する
