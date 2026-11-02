@@ -141,12 +141,17 @@ service cloud.firestore {
     // ---------- businesses ----------
     match /businesses/{businessId} {
       allow get, list: if isMember(businessId);
+      // plan(料金プラン)は課金基盤(サーバー側)のみが設定する。
+      // クライアント作成時にplanを持ち込めない(自己アップグレード防止)
       allow create: if signedIn()
         && request.resource.data.name is string
-        && request.resource.data.ownerUid == request.auth.uid;
-      // ownerUidのクライアントからの移転は禁止
+        && request.resource.data.ownerUid == request.auth.uid
+        && !('plan' in request.resource.data);
+      // ownerUidのクライアントからの移転は禁止。
+      // planの変更もクライアントには許さない(課金基盤=Admin SDKのみ)
       allow update: if isOwner(businessId)
-        && request.resource.data.ownerUid == resource.data.ownerUid;
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && unaffected(['plan']);
       // 事業の削除はサブコレクション残骸を防ぐためサーバーサイドのみ
       allow delete: if false;
 

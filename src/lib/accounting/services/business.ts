@@ -75,6 +75,8 @@ export async function registerBusiness(
     invoiceRegistrationNumber: input.invoiceRegistrationNumber,
     issuerName: input.issuerName,
     issuerAddress: input.issuerAddress,
+    // 新規事業はfreeプラン固定。プラン変更は課金基盤(サーバー側)の専用経路
+    plan: "free",
     createdAt: at,
     updatedAt: at,
   };

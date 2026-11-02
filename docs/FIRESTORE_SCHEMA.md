@@ -89,6 +89,7 @@ receipts(証憑ファイル)
 | issuerAddress | string? | 請求書に記載する発行者住所 |
 | invoiceCounter | number? | 請求書番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 |
 | quoteCounter | number? | 見積番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 |
+| plan | string? | 料金プラン `free` / `pro`。未設定(課金導入前データ)は free 扱い。機能可否は `src/lib/billing.ts` の PlanEntitlements で判定し、変更はサーバー側(課金基盤)のみが行う(rulesでクライアント書き込み禁止) |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
 

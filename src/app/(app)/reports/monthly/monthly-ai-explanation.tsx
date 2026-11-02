@@ -11,6 +11,7 @@ import {
   decideAiSuggestion,
   runAiSuggestion,
 } from "@/lib/api-client";
+import { hasEntitlement } from "@/lib/billing";
 import { shiftMonthKey } from "@/lib/format";
 import { useAccounts } from "@/lib/hooks/use-accounts";
 import { useAISuggestions } from "@/lib/hooks/use-ai-suggestions";
@@ -31,8 +32,11 @@ export function MonthlyAIExplanation({
   persisted?: MonthlySummary;
   canEdit: boolean;
 }) {
-  const { businessId } = useApp();
+  const { businessId, business } = useApp();
   const { label } = useAccounts();
+  // entitlementチェック(クライアント側の表示制御)。実効ゲートは
+  // POST /api/ai/suggestions の assertFeatureEntitled。現行は全プラン有効
+  const aiEnabled = hasEntitlement(business?.plan, "ai_suggestions");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const {
@@ -81,7 +85,11 @@ export function MonthlyAIExplanation({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">AIによる月次の説明</h2>
         {canEdit &&
-          (persisted ? (
+          (!aiEnabled ? (
+            <p className="text-xs text-zinc-400">
+              現在のプランではAI機能を利用できません
+            </p>
+          ) : persisted ? (
             <Button
               variant="secondary"
               onClick={() => void generate()}

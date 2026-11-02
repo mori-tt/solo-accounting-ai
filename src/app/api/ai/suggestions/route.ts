@@ -2,6 +2,7 @@ import {
   assertSuggestionTarget,
   getAISuggestionService,
 } from "@/lib/api/ai";
+import { assertFeatureEntitled } from "@/lib/api/entitlements";
 import { aiApiRateLimiter, aiRunRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import {
@@ -67,6 +68,8 @@ export async function POST(request: Request) {
     }
     const { businessId, kind, target, input = {} } = parsed.data;
     const actor = await requireEditor(businessId);
+    // entitlementチェック(課金接続時の実効ゲート。現行は全プラン有効)
+    await assertFeatureEntitled(businessId, "ai_suggestions");
     // businessId単位の簡易レート制限(最良努力。rate-limit.ts参照)
     aiRunRateLimiter.consume(businessId);
     await assertSuggestionTarget(businessId, kind, target);
