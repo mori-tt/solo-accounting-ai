@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmailVerifyBanner } from "@/components/email-verify-banner";
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { LegalFooter } from "@/components/legal-footer";
 import { ScreenLoading } from "@/components/ui";
 
@@ -12,6 +13,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <Suspense fallback={<ScreenLoading />}>
       <EmailVerifyBanner />
+      <KeyboardShortcuts />
       <AppShell>{children}</AppShell>
       <LegalFooter />
     </Suspense>

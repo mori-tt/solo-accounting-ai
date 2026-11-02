@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/components/auth-provider";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useBrowserOnly } from "@/lib/hooks/use-browser-only";
@@ -480,7 +481,7 @@ export function TransactionsScreen() {
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [showFormState, setShowFormState] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [formBusy, setFormBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
@@ -490,6 +491,18 @@ export function TransactionsScreen() {
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  // キーボードショートカット「n」等から /transactions?new=1 で遷移した場合は
+  // 登録フォームを開く。開閉状態はURLパラメータから派生し、閉じる際に除去する
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const wantsNew = canEdit && searchParams.get("new") === "1";
+  const showForm = wantsNew || showFormState;
+  const closeForm = () => {
+    setShowFormState(false);
+    if (wantsNew) router.replace("/transactions");
+  };
+  const toggleForm = () => (showForm ? closeForm() : setShowFormState(true));
 
   const range = useMemo(() => monthKeyDateRange(monthKey), [monthKey]);
   const { data, initialLoading, error, reload } = useApiData(async () => {
@@ -696,7 +709,7 @@ export function TransactionsScreen() {
                 >
                   明細CSVインポート
                 </Link>
-                <Button onClick={() => setShowForm((v) => !v)}>
+                <Button onClick={toggleForm}>
                   {showForm ? "閉じる" : "取引を登録"}
                 </Button>
               </>
@@ -720,13 +733,13 @@ export function TransactionsScreen() {
                     idempotencyKey: crypto.randomUUID(),
                   }),
                 );
-                setShowForm(false);
+                closeForm();
                 reload();
               } finally {
                 setFormBusy(false);
               }
             }}
-            onCancel={() => setShowForm(false)}
+            onCancel={closeForm}
           />
         </Card>
       )}

@@ -4,7 +4,9 @@ import {
   auditTargetTypeLabel,
   describeAuditEntry,
   filterAuditLogs,
+  isImportKind,
   parseAuditTargetPath,
+  parseImportDocId,
   type AuditLogViewEntry,
 } from "./audit-log-view";
 
@@ -107,6 +109,60 @@ describe("describeAuditEntry", () => {
       describeAuditEntry({ action: "update", targetPath: "broken" }),
     ).toBe("対象を更新");
   });
+
+  it("インポートは種別+件数を含む説明文を返す", () => {
+    expect(
+      describeAuditEntry({
+        action: "import",
+        targetPath: "businesses/b1/imports/bank-csv:12",
+      }),
+    ).toBe("明細CSVから12件を取込");
+    expect(
+      describeAuditEntry({
+        action: "import",
+        targetPath: "businesses/b1/imports/transactions-csv:3",
+      }),
+    ).toBe("取引CSVから3件を取込");
+    expect(
+      describeAuditEntry({
+        action: "import",
+        targetPath: "businesses/b1/imports/bank-csv",
+      }),
+    ).toBe("明細CSVをインポート");
+    expect(
+      describeAuditEntry({
+        action: "import",
+        targetPath: "businesses/b1/imports/unknown:5",
+      }),
+    ).toBe("インポートを実行");
+  });
+});
+
+describe("parseImportDocId", () => {
+  it("kind:件数 形式を分解する", () => {
+    expect(parseImportDocId("bank-csv:12")).toEqual({
+      kind: "bank-csv",
+      count: 12,
+    });
+    expect(parseImportDocId("transactions-csv")).toEqual({
+      kind: "transactions-csv",
+      count: null,
+    });
+  });
+
+  it("未定義のkind・不正形式は undefined", () => {
+    expect(parseImportDocId("other:5")).toBeUndefined();
+    expect(parseImportDocId("bank-csv:abc")).toBeUndefined();
+    expect(parseImportDocId("")).toBeUndefined();
+  });
+
+  it("isImportKind は定義済み種別のみ true", () => {
+    expect(isImportKind("bank-csv")).toBe(true);
+    expect(isImportKind("transactions-csv")).toBe(true);
+    expect(isImportKind("other")).toBe(false);
+    expect(isImportKind(12)).toBe(false);
+    expect(isImportKind(undefined)).toBe(false);
+  });
 });
 
 const entry = (
@@ -145,6 +201,12 @@ describe("filterAuditLogs", () => {
     expect(
       filterAuditLogs(logs, { targetType: "invoices" }),
     ).toEqual([]);
+    expect(
+      filterAuditLogs(
+        [...logs, entry("a5", "2026-10-04T01:00:00.000Z", "import", "businesses/b1/imports/bank-csv:12")],
+        { targetType: "imports" },
+      ).map((l) => l.id),
+    ).toEqual(["a5"]);
   });
 
   it("期間は両端を含む", () => {

@@ -279,12 +279,15 @@ periodIdは `fy{fiscalYear}`(会計年度開始年)で決定的に採番する�
 | Field | Type | Note |
 |---|---|---|
 | actorUid | string | |
-| action | string | `create` / `update` / `delete` / `close` / `run_ai` / `approve_ai` / `reject_ai` |
+| action | string | `create` / `update` / `delete` / `close` / `run_ai` / `approve_ai` / `reject_ai` / `import` |
 | targetPath | string | 対象ドキュメントのパス |
 | createdAt | Timestamp | |
 
 ※ 個人情報・証憑内容のスナップショットは保存しない。対象の識別情報のみ記録する。
 AI関連のactionは `run_ai` / `approve_ai` / `reject_ai` を使う。
+CSVインポート実行は `import` を使い、targetPath は実コレクションを持たない
+`businesses/{businessId}/imports/{kind}:{登録件数}` 形式の擬似パス
+(kind は `bank-csv` / `transactions-csv`)。ファイル名・明細内容は記録しない。
 
 ※ `transactions`/`receipts` の `aiSuggestion` mapフィールドは廃止済み(ADR-0005)。
 AI提案はすべて `aiSuggestions` コレクションで管理する。

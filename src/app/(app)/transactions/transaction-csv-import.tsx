@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createTransaction } from "@/lib/actions/transactions";
+import { recordImportRun } from "@/lib/actions/imports";
 import { callApi } from "@/lib/api-client";
 import { useAccounts } from "@/lib/hooks/use-accounts";
 import {
@@ -112,7 +113,16 @@ export function TransactionCsvImport({
       }
     }
     setImporting(false);
-    if (succeeded > 0) onImported();
+    if (succeeded > 0) {
+      // 監査記録の失敗で取込結果を壊さないため握りつぶす
+      void callApi(() =>
+        recordImportRun(businessId, {
+          kind: "transactions-csv",
+          count: succeeded,
+        }),
+      ).catch(() => undefined);
+      onImported();
+    }
   };
 
   const errorCount = rows.filter((r) => r.errors.length > 0).length;

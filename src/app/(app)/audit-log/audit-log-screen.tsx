@@ -42,6 +42,7 @@ const ACTION_BADGE_TONE: Record<string, BadgeTone> = {
   run_ai: "sky",
   approve_ai: "sky",
   reject_ai: "gray",
+  import: "green",
 };
 
 /** 日付入力(YYYY-MM-DD)をその日のローカル開始・終了時刻のISOへ変換する */

@@ -1573,18 +1573,43 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: UX補助機能(キーボードショートカット+インポート履歴)(Issue #101)
+- Worktree: ux-extras
+### 実装内容
+キーボードショートカットと、CSVインポート実行の監査記録・履歴表示。依存追加なし。
+- `src/lib/hooks/use-keyboard-shortcuts.ts`(新規): `useKeyboardShortcuts({ enabled, canEdit })`。`g→d`=/dashboard、`g→t`=/transactions(前置キー `g` は1秒でタイムアウト)、`n`=`/transactions?new=1`(viewerはパラメータなしで一覧のみ)、`/`=/search遷移後にキーワード欄フォーカス(既に/searchなら直接フォーカス)、`?`=一覧ダイアログ開閉。input/textarea/select/contentEditable フォーカス中・修飾キー併用・defaultPrevented時は発動しない
+- `src/components/keyboard-shortcuts.tsx`(新規): フックのマウント専用クライアントコンポーネント。`status==="signed_in"` のみ有効化し、「?」でConfirmDialogと同パターン(portal+Escape+オーバーレイクリック)の一覧ダイアログを表示。定義は `KEYBOARD_SHORTCUTS` としてhook側に集約
+- `(app)/layout.tsx`: Suspense内に `<KeyboardShortcuts />` を1行追加(app-shell.tsxは未変更)
+- `/transactions?new=1`: transactions-screen で `useSearchParams` を読み登録フォームを開く。effect内setStateを避けるため `showForm = wantsNew || showFormState` に派生させ、閉じる系操作(閉じる/キャンセル/登録完了)で `router.replace("/transactions")` によりパラメータ除去。viewerは `canEdit` ガードで開かない
+- `/search` のキーワード TextInput に `data-shortcut="search-input"` を付与し、`/` ショートカット到着後のフォーカス対象に
+- `src/lib/actions/imports.ts`(新規): `recordImportRun(businessId, { kind, count })`。requireEditor後 `writeAuditLog` で action=`import`・targetPath=`businesses/{businessId}/imports/{kind}:{登録件数}` の擬似パスを記録
+- `src/lib/audit-log-view.ts`: action=`import`・対象種別=`imports` のラベル追加、`IMPORT_KINDS`(bank-csv=明細CSV/transactions-csv=取引CSV)・`isImportKind`・`parseImportDocId` 新設、`describeAuditEntry` に import 分岐(例:「明細CSVから12件を取込」)
+- 明細CSVインポート画面(`/transactions/import`): 「インポート履歴」セクション追加(`listAuditLogs`+`filterAuditLogs`+`describeAuditEntry` の監査ログ基盤を再利用。最新20件・日時/ユーザー/概要・監査ログへのリンク)。登録成功時に `recordImportRun` を fire-and-forget で記録して履歴を再取得
+- 取引一覧のCSV取込パネル(`TransactionCsvImport`)も kind=`transactions-csv` で同様に記録
+- 監査ログ画面: `import` のバッジ色追加。`docs/FIRESTORE_SCHEMA.md` の action 列挙に `import` と擬似パス形式を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(46ファイル551件、skip 10。`keyboard-shortcuts.test.tsx` 8件 + `audit-log-view.test.ts` に import 系ケース追加)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(firestore.rules変更なし。`import` actionはAdmin SDK経由のサーバー書き込みのみで、クライアントcreate権限の列挙追加は不要)
+### 判断事項・次の担当者への注意事項
+- `imports/{kind}:{count}` の targetPath は実コレクションではない擬似パス。「監査ログは識別情報のみ」方針を維持しつつ履歴に種別・件数を出すための表現(ファイル名・明細内容は記録しない)
+- `recordImportRun` の記録失敗はUIを壊さないよう握りつぶす(取込そのものは成功扱い)。記録漏れは履歴に出ないのみ
+- `n` のフォーム起動は `?new=1` パラメータ経由。手ブックマークでも開く。viewerには付与しない
+- 履歴は監査ログ全件取得→クライアント絞込(audit-log画面と同方針)。auditLogs肥大化時はサーバーサイドページングの検討対象(既存注記と同じ)
+- `KeyboardShortcuts` は Suspense 内配置のため画面フォールバック中はリスナー未マウント。`useApp` の status で signed_in 時のみ有効
 ## 2026-11-02: バージョン表示(Issue #99 項目1)
 - Worktree: wiring-ops
 - Issue #85 で一元化済みの `src/lib/version.ts`(`APP_VERSION`)を UI へ配線する「version表示」項目への対応。Issue #99 の残項目(monitoring配線・dev dep監査・バックアップ鮮度アラート・Emulatorキャッシュ)は未着手
 - `src/components/legal-footer.tsx`: 法務リンク末尾に `v{APP_VERSION}` を `<span>` で追加。本フッターは login・legal・認証済み全画面((app)/layout)で共通描画されるため1箇所の変更で全表示面をカバー
 - `src/app/page.tsx`: LP フッターのコピーライト右に `v{APP_VERSION}` を追加(自前footerを持つため別途配線)
 - `src/app/(app)/settings/settings-screen.tsx`: アカウントカードの `<dl>` に「アプリバージョン」項目を追加(ユーザーが版数を確認する慣例的な場所)
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功(worktree新規のため)
 - `pnpm lint` — 合格(receipts の既存 `<img>` warning 1件のみ、本変更と無関係)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(fresh worktree では LayoutProps 等の生成型が無いため typegen 先行が必要)
 - `pnpm test` — 合格(45ファイル539件、skip 10)
-- `pnpm build` — 合格
 - Firebase Emulator tests — 実施せず(rules・データ書き込み経路の変更なし。加えて別worktreeの Emulator が port 8080/9199/4400 を占有中で AGENTS.md の1系統制約により起動不可)
 ### 備考
 - 表示は `v1.0.0` 形式で統一。server component(LegalFooter・LP)と client component(settings)双方から import するが、version.ts は依存ゼロのため問題なし
@@ -1606,7 +1631,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### CI Emulator キャッシュ(項目5)
 - `.github/workflows/ci.yml` test-rules ジョブに `actions/cache@v4` で `~/.cache/firebase/emulators` をキャッシュ(key は pnpm-lock.yaml ハッシュ+restore-keys フォールバック)。Emulator JAR ダウンロード時間を CI から除去
 - `pnpm lint` — 合格(既存 `<img>` warning 1件のみ)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(45ファイル542件、skip 10。backupFreshness +3)
 - Firebase Emulator tests — 未実施(rules・データ経路の rules 非依存変更のみ。別 worktree の Emulator が port 占有中で AGENTS.md の1系統制約により起動不可)
 - lastBackupAt は `*At` 接尾辞のため store 経由の書き込みでは `toStore` が Timestamp 化するが、今回は FieldValue.serverTimestamp() を直接書くため型不整合なし(FIRESTORE_SCHEMA.md も Timestamp で記載)
@@ -1654,7 +1678,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test` — 合格(46ファイル548件、skip 10。business.test.ts 新規5件・sales.test.ts 連番2件・invoice-tax.test.ts 税率別集計3件追加)
 - `JAVA_HOME=... pnpm test:emulators` — 合格(7件)
 - `JAVA_HOME=... pnpm test:rules` — 合格(79件。validInvoiceは必須項目のみ検査のため新規フィールド追加の影響なし)
-### 判断事項・次の担当者への注意事項
 - 免税事業者(登録番号未設定)でも帳票は出力できるが登録番号行は省略される。適格請求書として交付するには設定画面での登録番号入力が前提
 - 請求書番号のフォーマットは `INV-`+6桁固定(prefix・桁数は formatInvoiceNumber に集約)。年頭リセットや任意接頭辞は未対応(要望があれば別タスク)
 - e2e は未実施(同時起動1系統の制約)。帳票プレビューは単体レンダリングのため DOM 構造は invoice-sheet.tsx を参照
