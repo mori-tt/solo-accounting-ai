@@ -219,6 +219,46 @@ describe("owner権限", () => {
   });
 });
 
+describe("基点owner(ownerUid)のmemberドキュメント保護", () => {
+  it("owner本人でもownerUidのmemberドキュメントは変更・削除できない", async () => {
+    const owner = asUser(testEnv, OWNER);
+    await assertFails(
+      owner.doc(`businesses/${BIZ}/members/${OWNER}`).update({ role: "viewer" }),
+    );
+    await assertFails(
+      owner.doc(`businesses/${BIZ}/members/${OWNER}`).delete(),
+    );
+  });
+
+  it("別のownerメンバーもownerUidのmemberドキュメントを降格・削除できない", async () => {
+    await seed(testEnv, {
+      [`businesses/${BIZ}/members/owner2`]: { role: "owner", invitedBy: OWNER },
+    });
+    const owner2 = asUser(testEnv, "owner2");
+    await assertFails(
+      owner2
+        .doc(`businesses/${BIZ}/members/${OWNER}`)
+        .update({ role: "viewer" }),
+    );
+    await assertFails(
+      owner2.doc(`businesses/${BIZ}/members/${OWNER}`).delete(),
+    );
+  });
+
+  it("ownerUid以外のmemberドキュメントは従来どおり変更・削除できる", async () => {
+    await seed(testEnv, {
+      [`businesses/${BIZ}/members/owner2`]: { role: "owner", invitedBy: OWNER },
+    });
+    const owner = asUser(testEnv, OWNER);
+    await assertSucceeds(
+      owner.doc(`businesses/${BIZ}/members/owner2`).update({ role: "viewer" }),
+    );
+    await assertSucceeds(
+      owner.doc(`businesses/${BIZ}/members/owner2`).delete(),
+    );
+  });
+});
+
 describe("管理者権限(Admin SDK)", () => {
   it("aiSuggestionsドキュメントをサーバーサイドから作成できる", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -333,6 +373,97 @@ describe("締め済み期間の保護", () => {
       owner.doc(`businesses/${BIZ}/fiscalPeriods/closed`).update({ status: "open" }),
     );
     await assertFails(owner.doc(`businesses/${BIZ}/fiscalPeriods/closed`).delete());
+  });
+});
+
+describe("締め済み期間の保護(請求書・入金)", () => {
+  const invPath = (id: string) => `businesses/${BIZ}/invoices/${id}`;
+  const payPath = (id: string) => `businesses/${BIZ}/payments/${id}`;
+  // seedBusiness の fiscalYearStartMonth=1 のため 2025年の日付は fy2025 に属する
+  const closedPeriod2025 = {
+    ...fiscalPeriod("closed"),
+    startDate: "2025-01-01",
+    endDate: "2025-12-31",
+  };
+  const invoice = (issueDate: string, status = "issued") => ({
+    customerId: "c1",
+    issueDate,
+    dueDate: "2025-12-31",
+    totalAmount: 10000,
+    status,
+  });
+  const payment = (date: string) => ({
+    invoiceId: "i-open",
+    date,
+    amount: 1000,
+  });
+
+  beforeEach(async () => {
+    await seed(testEnv, {
+      [`businesses/${BIZ}/fiscalPeriods/fy2025`]: closedPeriod2025,
+      [invPath("i-closed")]: invoice("2025-06-15"),
+      [invPath("i-open")]: invoice("2026-06-15"),
+      [invPath("i-open-draft")]: invoice("2026-06-15", "draft"),
+      [payPath("p-closed")]: payment("2025-06-15"),
+      [payPath("p-open")]: payment("2026-06-15"),
+    });
+  });
+
+  it("締め済み期間のissueDateを持つ請求書は作成・更新・削除できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    const owner = asUser(testEnv, OWNER);
+    await assertFails(
+      editor.doc(invPath("i-new")).set(invoice("2025-06-15", "draft")),
+    );
+    await assertFails(
+      editor.doc(invPath("i-closed")).update({ totalAmount: 1 }),
+    );
+    await assertFails(owner.doc(invPath("i-closed")).delete());
+  });
+
+  it("請求書のissueDateを締め済み期間へ・から移す変更も拒否する", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    // 未締め→締め済みへの遡及変更
+    await assertFails(
+      editor.doc(invPath("i-open")).update({ issueDate: "2025-06-15" }),
+    );
+    // 締め済み→未締めへの変更(締め済み期間データの改変に相当)
+    await assertFails(
+      editor.doc(invPath("i-closed")).update({ issueDate: "2026-06-15" }),
+    );
+  });
+
+  it("締め済み期間のdateを持つ入金は作成・更新・削除できない", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    await assertFails(
+      editor.doc(payPath("p-new")).set(payment("2025-06-15")),
+    );
+    await assertFails(
+      editor.doc(payPath("p-closed")).update({ amount: 1 }),
+    );
+    await assertFails(editor.doc(payPath("p-closed")).delete());
+  });
+
+  it("未締め期間の請求書・入金は従来どおり変更できる", async () => {
+    const editor = asUser(testEnv, EDITOR);
+    await assertSucceeds(
+      editor.doc(invPath("i-new")).set(invoice("2026-06-15", "draft")),
+    );
+    await assertSucceeds(
+      editor.doc(invPath("i-open")).update({ totalAmount: 1 }),
+    );
+    // editorが削除できるのはdraftのみ(既存仕様)
+    await assertSucceeds(editor.doc(invPath("i-open-draft")).delete());
+    await assertSucceeds(
+      asUser(testEnv, OWNER).doc(invPath("i-open")).delete(),
+    );
+    await assertSucceeds(
+      editor.doc(payPath("p-new")).set(payment("2026-06-15")),
+    );
+    await assertSucceeds(
+      editor.doc(payPath("p-open")).update({ amount: 1 }),
+    );
+    await assertSucceeds(editor.doc(payPath("p-open")).delete());
   });
 });
 

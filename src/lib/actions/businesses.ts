@@ -19,6 +19,7 @@ import {
   type MemberInfo,
   type UserProfile,
 } from "@/lib/api/queries";
+import { effectiveOwnerUids } from "@/lib/api/member-role";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { ApiError } from "@/lib/api/result";
 import {
@@ -167,6 +168,32 @@ export async function listBusinessMembers(
   });
 }
 
+/**
+ * apply でmemberロールの変更を適用した後も実効ownerが残ることを確認する。
+ * 最後のownerの降格・削除(非ownerロールでの再招待による降格を含む)を防ぐ。
+ */
+async function assertOwnerRemains(
+  businessId: string,
+  apply: (roles: Map<string, unknown>) => void,
+): Promise<void> {
+  const db = getAdminDb();
+  const businessRef = db.collection("businesses").doc(businessId);
+  const [businessSnap, membersSnap] = await Promise.all([
+    businessRef.get(),
+    businessRef.collection("members").get(),
+  ]);
+  const roles = new Map<string, unknown>(
+    membersSnap.docs.map((d) => [d.id, d.data().role]),
+  );
+  apply(roles);
+  if (effectiveOwnerUids(roles, businessSnap.data()?.ownerUid).size === 0) {
+    throw new ApiError(
+      "FORBIDDEN",
+      "事業のオーナーがいなくなるため、この操作はできません",
+    );
+  }
+}
+
 /** メンバー招待(オーナーのみ)。メールアドレスでAuthユーザーを引く。 */
 export async function inviteMember(
   businessId: string,
@@ -183,6 +210,11 @@ export async function inviteMember(
         "そのメールアドレスのユーザーが見つかりません。先にログイン画面でアカウント作成してもらってください。",
       );
     }
+    // 既存メンバーへの再招待はロール変更と同義のため、最後のownerの
+    // 降格にならないか確認する(新規メンバーの追加はowner数を減らさない)
+    await assertOwnerRemains(businessId, (roles) =>
+      roles.set(uid, parsed.data.role),
+    );
     await putMember(businessId, {
       uid,
       role: parsed.data.role,
@@ -214,6 +246,9 @@ export async function updateMemberRole(
     if (role !== "editor" && role !== "viewer") {
       throw new ApiError("INVALID_INPUT", "ロールが不正です");
     }
+    await assertOwnerRemains(businessId, (roles) =>
+      roles.set(memberUid, role),
+    );
     await putMember(businessId, { uid: memberUid, role, invitedBy: actor.uid });
     await writeAuditLog(businessId, {
       actorUid: actor.uid,
@@ -275,6 +310,7 @@ export async function removeMember(
     if (memberUid === actor.uid) {
       throw new ApiError("FORBIDDEN", "自分自身は削除できません");
     }
+    await assertOwnerRemains(businessId, (roles) => roles.delete(memberUid));
     await deleteMember(businessId, memberUid);
     await writeAuditLog(businessId, {
       actorUid: actor.uid,

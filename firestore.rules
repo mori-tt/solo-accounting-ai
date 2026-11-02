@@ -69,6 +69,23 @@ service cloud.firestore {
         && get(txDoc(businessId, txId)).data.get('status', '') == 'locked';
     }
 
+    function fiscalPeriodDoc(businessId, periodId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/fiscalPeriods/$(periodId);
+    }
+
+    // dateStr(YYYY-MM-DD)の属する会計期間がclosedかどうか。
+    // 期間IDはサービス層の決定的ID `fy{fiscalYear}`(periods.ts)と同じ規則で導く。
+    // 会計年度 = 「月 >= fiscalYearStartMonth なら当年、未満なら前年」。
+    // 形式不正な日付は split/int の評価エラーで拒否側に倒れる。
+    function dateInClosedPeriod(businessId, dateStr) {
+      let parts = dateStr.split('-');
+      let startMonth = get(businessDoc(businessId)).data.get('fiscalYearStartMonth', 1);
+      let fiscalYear = int(parts[1]) >= startMonth ? int(parts[0]) : int(parts[0]) - 1;
+      let periodId = 'fy' + string(fiscalYear);
+      return exists(fiscalPeriodDoc(businessId, periodId))
+        && get(fiscalPeriodDoc(businessId, periodId)).data.get('status', '') == 'closed';
+    }
+
     // ---------- users ----------
     // 本人のみ読み書き可(email等の個人情報を含むため他者には公開しない)
     match /users/{uid} {
@@ -103,10 +120,15 @@ service cloud.firestore {
             // 既存ownerが他メンバーを招待・追加する場合
             || isOwner(businessId)
           );
-        // 権限昇格防止のためmember管理はownerのみ
+        // 権限昇格防止のためmember管理はownerのみ。
+        // 基点owner(ownerUid)のmemberドキュメントは変更・削除できない。
+        // rulesではowner数を数えられないため最後のowner判定はアプリ層で行い、
+        // ここでは基点ownerの喪失(=事業の実効owner不在化)だけを防ぐ
         allow update: if isOwner(businessId)
-          && request.resource.data.role in ['owner', 'editor', 'viewer'];
-        allow delete: if isOwner(businessId);
+          && request.resource.data.role in ['owner', 'editor', 'viewer']
+          && uid != get(businessDoc(businessId)).data.ownerUid;
+        allow delete: if isOwner(businessId)
+          && uid != get(businessDoc(businessId)).data.ownerUid;
       }
 
       // ---------- transactions ----------
@@ -216,16 +238,22 @@ service cloud.firestore {
       }
 
       // ---------- invoices ----------
+      // issueDate が締め済み期間に属する請求書はクライアントから変更不可
+      // (入金など締め後の正当な更新はAdmin SDK経由のため影響しない)
       match /invoices/{invoiceId} {
         allow get, list: if isMember(businessId);
         allow create: if canEdit(businessId)
-          && validInvoice(request.resource.data);
+          && validInvoice(request.resource.data)
+          && !dateInClosedPeriod(businessId, request.resource.data.issueDate);
         allow update: if canEdit(businessId)
           && validInvoice(request.resource.data)
-          && unaffected(['createdAt']);
+          && unaffected(['createdAt'])
+          && !dateInClosedPeriod(businessId, resource.data.issueDate)
+          && !dateInClosedPeriod(businessId, request.resource.data.issueDate);
         // 発行済み・入金済み請求書の削除はownerのみ
-        allow delete: if isOwner(businessId)
-          || (hasRole(businessId, ['editor']) && resource.data.status == 'draft');
+        allow delete: if (isOwner(businessId)
+            || (hasRole(businessId, ['editor']) && resource.data.status == 'draft'))
+          && !dateInClosedPeriod(businessId, resource.data.issueDate);
       }
 
       function validInvoice(d) {
@@ -237,15 +265,20 @@ service cloud.firestore {
       }
 
       // ---------- payments ----------
+      // 入金日が締め済み期間に属する入金はクライアントから変更不可
       match /payments/{paymentId} {
         allow get, list: if isMember(businessId);
         allow create: if canEdit(businessId)
-          && validPayment(request.resource.data);
+          && validPayment(request.resource.data)
+          && !dateInClosedPeriod(businessId, request.resource.data.date);
         // 消込先invoiceIdの付け替えは禁止(監査上の整合性)
         allow update: if canEdit(businessId)
           && validPayment(request.resource.data)
-          && unaffected(['invoiceId', 'createdAt']);
-        allow delete: if canEdit(businessId);
+          && unaffected(['invoiceId', 'createdAt'])
+          && !dateInClosedPeriod(businessId, resource.data.date)
+          && !dateInClosedPeriod(businessId, request.resource.data.date);
+        allow delete: if canEdit(businessId)
+          && !dateInClosedPeriod(businessId, resource.data.date);
       }
 
       function validPayment(d) {
