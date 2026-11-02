@@ -60,6 +60,8 @@ export interface Business {
   allocationRatios?: Record<string, number>;
   /** 年度ごとの期首残高(資産系科目+任意コード)。未設定は空扱い */
   openingBalances?: OpeningBalance[];
+  /** 最終バックアップ(エクスポート)日時。未取得は undefined */
+  lastBackupAt?: string;
   /** 適格請求書発行事業者の登録番号(T+13桁)。未登録(免税事業者等)は未設定 */
   invoiceRegistrationNumber?: string;
   /** 請求書の発行者名(屋号・氏名)。未設定時は事業名を使う */

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { Button, Card } from "@/components/ui";
+import { captureException } from "@/lib/monitoring";
 
 // digest は本番でサーバーログと対応付けるための識別子(内容は含まない)
 function errorDigest(error: unknown): string | undefined {
@@ -18,14 +19,17 @@ export default function AppError({
   error: unknown;
   retry: () => void;
 }) {
-  useEffect(() => {
-    // クライアント側の診断用。個人情報・証憑内容はログに出さない
-    // (本番でサーバー由来のエラーは汎用メッセージ+digestに置き換わる)
-    console.error(error);
-  }, [error]);
-
   const message = error instanceof Error ? error.message : String(error);
   const digest = errorDigest(error);
+
+  useEffect(() => {
+    // 監視へ送信(構造化ログへフォールバック)。個人情報・証憑内容は送らない
+    // (本番でサーバー由来のエラーは汎用メッセージ+digestに置き換わる)
+    captureException(error, {
+      tags: { boundary: "app-error" },
+      extra: { digest },
+    });
+  }, [error, digest]);
   return (
     <div className="mx-auto max-w-md py-16">
       <Card className="text-center">

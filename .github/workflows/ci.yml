@@ -71,6 +71,17 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # Emulator JAR(~/.cache/firebase/emulators)は初回起動時に
+      # ダウンロードされるためキャッシュしてCI時間を短縮する。
+      # lockfile(firebase-toolsのバージョン)変化で無効化される
+      - name: Cache Firebase Emulator JARs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            firebase-emulators-${{ runner.os }}-
+
       # devDependency の firebase-tools で Emulator を起動して Security Rules を検証
       - name: Run Security Rules tests on Firebase Emulator
         run: pnpm test:rules

@@ -46,6 +46,8 @@ export interface MyBusiness {
   customAccounts?: CustomAccount[];
   /** 家事按分の事業割合(科目コード→0-100)。未設定科目は100%扱い */
   allocationRatios?: Record<string, number>;
+  /** 最終バックアップ(エクスポート)日時。未取得は undefined */
+  lastBackupAt?: string;
   /** 適格請求書発行事業者の登録番号(T+13桁)。未登録は未設定 */
   invoiceRegistrationNumber?: string;
   /** 請求書の発行者名。未設定時は事業名を使う */
@@ -83,6 +85,7 @@ export async function listMyBusinesses(): Promise<
         taxMode: business.taxMode,
         customAccounts: business.customAccounts,
         allocationRatios: business.allocationRatios,
+        lastBackupAt: business.lastBackupAt,
         invoiceRegistrationNumber: business.invoiceRegistrationNumber,
         issuerName: business.issuerName,
         issuerAddress: business.issuerAddress,

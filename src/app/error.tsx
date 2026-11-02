@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { Button, Card } from "@/components/ui";
+import { captureException } from "@/lib/monitoring";
 
 // ルートセグメント(login・(app)グループ外を含む)のエラー境界。
 // ルートレイアウト自体のエラーは global-error.tsx が拾う。
@@ -13,15 +14,19 @@ export default function RootError({
   error: unknown;
   retry: () => void;
 }) {
-  useEffect(() => {
-    // クライアント側の診断用。個人情報・証憑内容はログに出さない
-    console.error(error);
-  }, [error]);
-
   const digest =
     error instanceof Error && "digest" in error
       ? String(error.digest)
       : undefined;
+
+  useEffect(() => {
+    // 監視へ送信(構造化ログへフォールバック)。digestはサーバーログとの
+    // 対応付け用の識別子で個人情報を含まない。証憑内容等は送らない
+    captureException(error, {
+      tags: { boundary: "root-error" },
+      extra: { digest },
+    });
+  }, [error, digest]);
   return (
     <div className="mx-auto flex min-h-[60vh] max-w-md items-center">
       <Card className="w-full text-center">

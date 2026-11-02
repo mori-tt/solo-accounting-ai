@@ -1573,6 +1573,44 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: バージョン表示(Issue #99 項目1)
+- Worktree: wiring-ops
+- Issue #85 で一元化済みの `src/lib/version.ts`(`APP_VERSION`)を UI へ配線する「version表示」項目への対応。Issue #99 の残項目(monitoring配線・dev dep監査・バックアップ鮮度アラート・Emulatorキャッシュ)は未着手
+- `src/components/legal-footer.tsx`: 法務リンク末尾に `v{APP_VERSION}` を `<span>` で追加。本フッターは login・legal・認証済み全画面((app)/layout)で共通描画されるため1箇所の変更で全表示面をカバー
+- `src/app/page.tsx`: LP フッターのコピーライト右に `v{APP_VERSION}` を追加(自前footerを持つため別途配線)
+- `src/app/(app)/settings/settings-screen.tsx`: アカウントカードの `<dl>` に「アプリバージョン」項目を追加(ユーザーが版数を確認する慣例的な場所)
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(worktree新規のため)
+- `pnpm lint` — 合格(receipts の既存 `<img>` warning 1件のみ、本変更と無関係)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(fresh worktree では LayoutProps 等の生成型が無いため typegen 先行が必要)
+- `pnpm test` — 合格(45ファイル539件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 実施せず(rules・データ書き込み経路の変更なし。加えて別worktreeの Emulator が port 8080/9199/4400 を占有中で AGENTS.md の1系統制約により起動不可)
+### 備考
+- 表示は `v1.0.0` 形式で統一。server component(LegalFooter・LP)と client component(settings)双方から import するが、version.ts は依存ゼロのため問題なし
+## 2026-11-02: 配線/運用の後始末(Issue #99 項目2-5)
+- Worktree: wiring-ops(項目1のversion表示は別コミットで対応済)
+### 監視配線(項目2)
+- `src/lib/api/result.ts`: `toActionError` の想定外エラー分岐(INTERNAL化する落口)で `captureException(e, { tags: { source: "api-error-path" } })` を呼ぶよう配線。Route Handler の `toErrorResponse` と Server Action の `run` の双方がこの関数へ集約されるため1箇所でカバー。ApiError/DomainError 等の想定内エラーは捕捉しない(ユーザー起因の失敗を監視通知しない)
+- `src/app/error.tsx`・`src/app/(app)/error.tsx`: `useEffect` 内の `console.error` を `captureException` へ置換。context は `tags.boundary`(root-error/app-error)と `extra.digest`(サーバーログ対応付け用識別子)のみで個人情報・証憑内容は含めない
+- monitoring層は process.env ポリフィル(クライアントでは空オブジェクト、env.ts のコメント参照)前提でクライアントバンドル入りしても安全。SENTRY_DSN 未設定時は構造化ログへフォールバックする従来動作のまま
+- `global-error.tsx` は Issue 指定の「error.tsx×2」外のため未変更(ルートレイアウト崩壊時の最終境界。今後の拡張候補)
+### dev dep 監査(項目3)
+- `pnpm ls @testing-library/dom` で direct devDependency だが import は全て `@testing-library/react` 経由と確認。pnpm は peer dependency を自動導入するため直接指定は不要と判断し `pnpm remove` で package.json/pnpm-lock.yaml から除去。除去後も lockfile 整合・全テスト合格(10.4.2 は react の peer として引き続き解決される)
+### バックアップ鮮度アラート(項目4)
+- `Business`/`MyBusiness` に `lastBackupAt?: string` を追加し `listMyBusinesses` で populate
+- `GET /api/backup`: エクスポート成功後に business doc へ `lastBackupAt: FieldValue.serverTimestamp()` を記録。ダウンロード本体を落とさないよう別 try/catch + captureException(feature: backup)でベストエフォート化
+- `src/lib/backup.ts`: `backupFreshness(lastBackupAt, now)` を追加。never(未取得/不正日付・安全側)/stale(30日超過)/fresh を返す純粋関数。`BACKUP_STALE_DAYS = 30`
+- ダッシュボード: `business` ロード済みかつ never/stale の場合に警告Alert+/backupリンクを表示(business未取得の一瞬に誤警告しないよう undefined は保留)。backup.test.ts に freshness テスト3件追加
+- `docs/FIRESTORE_SCHEMA.md`: businesses テーブルに lastBackupAt 行を追記
+### CI Emulator キャッシュ(項目5)
+- `.github/workflows/ci.yml` test-rules ジョブに `actions/cache@v4` で `~/.cache/firebase/emulators` をキャッシュ(key は pnpm-lock.yaml ハッシュ+restore-keys フォールバック)。Emulator JAR ダウンロード時間を CI から除去
+- `pnpm lint` — 合格(既存 `<img>` warning 1件のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(45ファイル542件、skip 10。backupFreshness +3)
+- Firebase Emulator tests — 未実施(rules・データ経路の rules 非依存変更のみ。別 worktree の Emulator が port 占有中で AGENTS.md の1系統制約により起動不可)
+- lastBackupAt は `*At` 接尾辞のため store 経由の書き込みでは `toStore` が Timestamp 化するが、今回は FieldValue.serverTimestamp() を直接書くため型不整合なし(FIRESTORE_SCHEMA.md も Timestamp で記載)
+- エクスポートJSONの business 部分には直前の lastBackupAt が含まれうるが、復元時は name/fiscalYearStartMonth/taxMode のみ適用されるため書き戻されない
 ## 2026-11-02: 消費税申告用納付税額計算シート(Issue #95)
 - Worktree: consumption-tax-report
 - `src/app/(app)/reports/consumption-tax/` 新設(独立ページ。ナビはIssue制約で未変更のため、決算書画面から相互リンクで到達)
@@ -1586,13 +1624,11 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - taxMode=standard: そのまま計算シート表示。simple: 事業区分未選択時は選択を促す Alert(シート・印刷は出さない)、選択後に計算。exempt: 納付義務なしの Alert のみ(印刷不可)
 - taxCategory未設定の取引があれば警告Alert(課税対価に含まれず納付額が過小になる旨)
 - 印刷は既存 print-header パターン踏襲: PrintHeader(帳票名・対象期間・事業名・印刷日、print-only)+ print-sheet/print-table クラス。globals.css の共通ルールに載るため画面側に追加の `<style>` は不要
-### 実行したテスト
 - `pnpm lint` — 合格(0エラー。receipts-screen の img 警告1件は既存・本変更と無関係)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(LayoutProps は typegen 生成型のため install 直後は生成が必要)
 - `pnpm test` — 合格(46ファイル実行542件、skip 10。sheet テスト3件追加)
 - `pnpm build` — 合格(`/reports/consumption-tax` が static prerender ○ で生成)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。読み取り専用actionのみ追加)
-### 備考
 - みなし仕入率の事業区分は Business に保持されないため画面選択値を使う(年次レポートの概算が simple 時に null を返すのと同じ制約。確定データへの保存禁止ルールとも整合)。永続化が必要になれば settings 側の拡張が別タスク
 - 中間納付額の差引き・課税売上割合95%未満時の個別対応/一括比例配分・積上げ計算は未対応(エンジン側未実装の範囲)。帳票の注記に概算・転記用資料である旨を明記
 - types.ts・app-shell・nav・globals.css は Issue 指定どおり未変更
@@ -1616,7 +1652,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(作業前は `LayoutProps` の生成型欠落でtypecheck失敗。worktree直後は typegen が必要。AGENTS.md に追記推奨)
 - `pnpm lint` — 合格(新規warningなし。receipts-screen の `<img>` warning は既存)
 - `pnpm test` — 合格(46ファイル548件、skip 10。business.test.ts 新規5件・sales.test.ts 連番2件・invoice-tax.test.ts 税率別集計3件追加)
-- `pnpm build` — 合格
 - `JAVA_HOME=... pnpm test:emulators` — 合格(7件)
 - `JAVA_HOME=... pnpm test:rules` — 合格(79件。validInvoiceは必須項目のみ検査のため新規フィールド追加の影響なし)
 ### 判断事項・次の担当者への注意事項

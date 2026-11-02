@@ -44,6 +44,27 @@ export const BACKUP_COLLECTIONS = [
 
 export type BackupCollection = (typeof BACKUP_COLLECTIONS)[number];
 
+/** バックアップ鮮度アラートを出す閾値(日数) */
+export const BACKUP_STALE_DAYS = 30;
+
+export type BackupFreshness = "never" | "stale" | "fresh";
+
+/**
+ * 最終バックアップ日時から鮮度を判定する。
+ * never=未取得・不正な日付(安全側)、stale=30日超過、fresh=30日以内。
+ */
+export function backupFreshness(
+  lastBackupAt: string | undefined,
+  now: number = Date.now(),
+): BackupFreshness {
+  if (!lastBackupAt) return "never";
+  const t = new Date(lastBackupAt).getTime();
+  if (!Number.isFinite(t)) return "never";
+  return now - t > BACKUP_STALE_DAYS * 24 * 60 * 60 * 1000
+    ? "stale"
+    : "fresh";
+}
+
 /**
  * ドキュメントID自体が意味を持つコレクション
  * (members=uid / fiscalPeriods=fy{year} / monthlySummaries=yyyyMM)。
