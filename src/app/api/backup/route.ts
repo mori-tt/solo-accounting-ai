@@ -1,16 +1,19 @@
+import { FieldValue } from "firebase-admin/firestore";
+import { readRequestText } from "@/lib/api/body";
 import { writeAuditLog } from "@/lib/api/queries";
 import {
   backupExportRateLimiter,
   backupRestoreRateLimiter,
 } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
-import { requireEditor, requireOwner } from "@/lib/api/session";
+import { requireEditor, requireOwner, requireUid } from "@/lib/api/session";
 import {
   backupFileSchema,
   exportBusinessBackup,
   restoreBusinessBackup,
 } from "@/lib/backup";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { captureException } from "@/lib/monitoring";
 
 /** 復元リクエストのJSONボディ上限(暴走防止。証憑メタのみのため十分な上限) */
 const MAX_BACKUP_BODY_BYTES = 64 * 1024 * 1024;
@@ -31,6 +34,16 @@ export async function GET(request: Request) {
     // 全データ読み出しの重い処理のため businessId 単位で制限
     backupExportRateLimiter.consume(businessId);
     const backup = await exportBusinessBackup(getAdminDb(), businessId);
+    // 最終バックアップ日時を記録(ダッシュボードの鮮度アラート用)。
+    // 記録の失敗でダウンロード自体を落とさないため別tryで捕捉する
+    try {
+      await getAdminDb()
+        .collection("businesses")
+        .doc(businessId)
+        .update({ lastBackupAt: FieldValue.serverTimestamp() });
+    } catch (e) {
+      captureException(e, { tags: { feature: "backup" } });
+    }
     const date = backup.exportedAt.slice(0, 10);
     return new Response(JSON.stringify(backup), {
       headers: {
@@ -52,18 +65,20 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const contentLength = Number(
-      request.headers.get("content-length") ?? "0",
-    );
-    if (contentLength > MAX_BACKUP_BODY_BYTES) {
-      throw new ApiError(
-        "INVALID_INPUT",
-        "バックアップファイルが大きすぎます",
-      );
-    }
-    const body = (await request.json().catch(() => {
-      throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
-    })) as { businessId?: unknown; backup?: unknown };
+    // ボディ解析前に認証のみ先行(R2-5)。実バイト数の上限は
+    // ストリーム読みで強制する(content-length は迂回可能)
+    await requireUid();
+    const text = await readRequestText(request, MAX_BACKUP_BODY_BYTES);
+    const body = (() => {
+      try {
+        return JSON.parse(text) as {
+          businessId?: unknown;
+          backup?: unknown;
+        };
+      } catch {
+        throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
+      }
+    })();
     const businessId =
       typeof body?.businessId === "string" ? body.businessId : "";
     if (!businessId) {

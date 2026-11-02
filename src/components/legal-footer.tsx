@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { APP_VERSION } from "@/lib/version";
 
 const LEGAL_LINKS = [
   { href: "/legal/terms", label: "利用規約" },
@@ -23,6 +24,9 @@ export function LegalFooter() {
             {item.label}
           </Link>
         ))}
+        <span className="text-xs text-zinc-400 dark:text-zinc-500">
+          v{APP_VERSION}
+        </span>
       </nav>
     </footer>
   );

@@ -50,6 +50,7 @@ import {
   tableClass,
 } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
+import { InvoiceSheet } from "./invoice-sheet";
 
 interface ItemDraft {
   description: string;
@@ -464,6 +465,7 @@ export function InvoicesScreen() {
   const [showForm, setShowForm] = useState(false);
   const [payTarget, setPayTarget] = useState<string | null>(null);
   const [historyTarget, setHistoryTarget] = useState<string | null>(null);
+  const [printRow, setPrintRow] = useState<InvoiceRow | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string>();
 
@@ -507,6 +509,35 @@ export function InvoicesScreen() {
       });
     }
   };
+
+  // 帳票プレビュー表示中は一覧を丸ごと差し替え、ツールバーのみ no-print にする
+  if (printRow) {
+    const customer = data?.customers.find(
+      (c) => c.id === printRow.invoice.customerId,
+    );
+    const project = printRow.invoice.projectId
+      ? data?.projects.find((p) => p.id === printRow.invoice.projectId)
+      : undefined;
+    return (
+      <div className="mx-auto max-w-4xl">
+        <div className="no-print mb-4 flex items-center gap-2">
+          <Button onClick={() => window.print()}>印刷する</Button>
+          <Button variant="secondary" onClick={() => setPrintRow(null)}>
+            一覧に戻る
+          </Button>
+        </div>
+        <InvoiceSheet
+          invoice={printRow.invoice}
+          customerName={customer?.name ?? "-"}
+          customerAddress={customer?.address}
+          projectName={project?.name}
+          issuerName={business?.issuerName || business?.name}
+          issuerAddress={business?.issuerAddress}
+          registrationNumber={business?.invoiceRegistrationNumber}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -583,7 +614,20 @@ export function InvoicesScreen() {
                 <Fragment key={row.invoice.id}>
                   <tr>
                     <td className="whitespace-nowrap font-medium">
-                      {row.invoice.id}
+                      {row.invoice.invoiceNumber ?? row.invoice.id}
+                      <div>
+                        <button
+                          type="button"
+                          className="text-xs font-normal text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+                          onClick={() => {
+                            setPayTarget(null);
+                            setHistoryTarget(null);
+                            setPrintRow(row);
+                          }}
+                        >
+                          印刷プレビュー
+                        </button>
+                      </div>
                     </td>
                     <td>
                       {customerName.get(row.invoice.customerId) ?? "-"}

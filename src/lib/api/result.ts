@@ -1,4 +1,5 @@
 import { DomainError } from "@/lib/accounting/errors";
+import { captureException } from "@/lib/monitoring";
 
 /**
  * Server Action の戻り値。想定内の失敗は例外ではなく
@@ -54,6 +55,25 @@ const DOMAIN_ERROR_MESSAGES: Record<string, string> = {
   OVERPAID: "請求額を超える入金はできません",
 };
 
+/**
+ * Next.jsが内部制御フローに使う例外か判定する。
+ * prerender bailout等は `digest` を持ち、routeのcatchにも到達するが
+ * エラーではないため監視捕捉から除外する。
+ */
+function isFrameworkControlFlow(e: unknown): boolean {
+  if (!(e instanceof Error)) {
+    return false;
+  }
+  if (
+    "digest" in e &&
+    typeof (e as { digest: unknown }).digest === "string" &&
+    /^(DYNAMIC|NEXT_)/i.test((e as { digest: string }).digest)
+  ) {
+    return true;
+  }
+  return /bail out of prerendering|prerender interrupted/i.test(e.message);
+}
+
 /** 例外 → ユーザー向けエラー。内部情報を漏らさない。 */
 export function toActionError(e: unknown): ActionError {
   if (e instanceof ApiError) {
@@ -66,6 +86,13 @@ export function toActionError(e: unknown): ActionError {
     };
   }
   // 予期しないエラーは内容を隠す(個人情報・内部パスをUIに出さない)
+  // Route Handler / Server Action 双方の出口がここに集約されるため、
+  // 想定外エラーの監視捕捉もこの1箇所で行う(contextにPIIを含めない)。
+  // Next.jsの制御フロー例外(prerender bailout等・digest付き)は
+  // エラーではなくフレームワーク内部シグナルなので監視対象外とする。
+  if (!isFrameworkControlFlow(e)) {
+    captureException(e, { tags: { source: "api-error-path" } });
+  }
   return { code: "INTERNAL", message: "サーバーエラーが発生しました" };
 }
 
