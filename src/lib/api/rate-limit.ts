@@ -89,7 +89,7 @@ export function createRateLimiter(
 /**
  * /api/ai/* 用のレート制限(businessId単位・1時間窓)。
  * - RUN: AI提案生成(LLM/外部API呼び出しを伴うため厳しめに60回/時)
- * - READ_WRITE: 一覧取得・承認/却下(240回/時)
+ * - READ_WRITE: 一覧取得・承認/却下・利用可否や残数の読み取り(240回/時)
  */
 export const AI_RUN_LIMIT_PER_HOUR = 60;
 
@@ -100,5 +100,60 @@ export const aiRunRateLimiter = createRateLimiter({
 
 export const aiApiRateLimiter = createRateLimiter({
   limit: 240,
+  windowMs: 60 * 60 * 1000,
+});
+
+/**
+ * businessId を持たないエンドポイント(認証系)向けに、
+ * クライアントIPをレート制限キーとして取り出す。
+ * プロキシ配下では x-forwarded-for の先頭を使う。最良努力であり、
+ * ヘッダ偽装までは防げない点に注意(MAX_KEYS で Map 増大は抑制済み)。
+ */
+export function clientIpKey(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return request.headers.get("x-real-ip")?.trim() ?? "unknown";
+}
+
+/**
+ * /api/session 用(IP単位・1時間窓)。
+ * IDトークン検証は署名検証コストがあるため、ログイン+トークン更新の
+ * 正常利用(時間あたり数回)を大きく上回る30回/時で制限する。
+ */
+export const sessionRateLimiter = createRateLimiter({
+  limit: 30,
+  windowMs: 60 * 60 * 1000,
+});
+
+/**
+ * /api/backup 用(businessId単位・1時間窓)。
+ * - EXPORT: 事業の全データを読み出す重い処理(30回/時)
+ * - RESTORE: 全件書き込みを伴うためさらに厳しめ(10回/時)
+ */
+export const backupExportRateLimiter = createRateLimiter({
+  limit: 30,
+  windowMs: 60 * 60 * 1000,
+});
+
+export const backupRestoreRateLimiter = createRateLimiter({
+  limit: 10,
+  windowMs: 60 * 60 * 1000,
+});
+
+/**
+ * /api/receipts 用(businessId単位・1時間窓)。
+ * - UPLOAD: Storage書き込み+帯域の課金対象(120回/時)
+ * - DOWNLOAD: 一覧の<img>表示でまとめて要求されるため緩め(1200回/時)
+ */
+export const receiptUploadRateLimiter = createRateLimiter({
+  limit: 120,
+  windowMs: 60 * 60 * 1000,
+});
+
+export const receiptDownloadRateLimiter = createRateLimiter({
+  limit: 1200,
   windowMs: 60 * 60 * 1000,
 });

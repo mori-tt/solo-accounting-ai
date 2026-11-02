@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getAdminAuth } from "@/lib/firebase/admin";
+import { clientIpKey, sessionRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { SESSION_COOKIE } from "@/lib/api/session";
 import { upsertUserProfile } from "@/lib/api/queries";
@@ -13,6 +14,8 @@ const SESSION_MAX_AGE_SEC = 60 * 60; // IDトークンの有効期間(1h)に合�
  */
 export async function POST(request: Request) {
   try {
+    // verifyIdToken の署名検証コストを悪用した連打をIP単位で制限する
+    sessionRateLimiter.consume(clientIpKey(request));
     const body: unknown = await request.json().catch(() => {
       throw new ApiError("INVALID_INPUT", "JSONボディが不正です");
     });

@@ -1,5 +1,6 @@
 import {
   AI_RUN_LIMIT_PER_HOUR,
+  aiApiRateLimiter,
   aiRunRateLimiter,
 } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
@@ -19,6 +20,8 @@ export async function GET(request: Request) {
       throw new ApiError("INVALID_INPUT", "businessId が必要です");
     }
     await requireViewer(businessId);
+    // RUN残数の表示は run 枠を消費せず READ_WRITE 枠で制限する
+    aiApiRateLimiter.consume(businessId);
     return Response.json({
       ok: true,
       data: {

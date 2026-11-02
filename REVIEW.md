@@ -1354,3 +1354,40 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: セキュリティハードニング(Issue #78)
+- Worktree: security-hardening
+### 実装内容
+REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリティヘッダを追加し、`src/app/api/` 全ルートを監査してレート制限の適用漏れを修正した。新規依存追加なし(既存 `src/lib/api/rate-limit.ts`・`result.ts` を再利用)。
+- `next.config.ts`: `headers()` で全パスに以下を付与。`poweredByHeader: false` で `X-Powered-By` も除去
+  - `Content-Security-Policy`: nonceなしの静的CSP(middlewareを触れないIssue制約のため `node_modules/next/dist/docs` の "Without Nonces" 例に準拠)。`script-src 'self' 'unsafe-inline'`(+開発時のみ `'unsafe-eval'`)、`style-src 'self' 'unsafe-inline'`、`img-src 'self' blob: data:`、`font-src 'self'`、`object-src 'none'`、`base-uri 'self'`、`form-action 'self'`、`frame-ancestors 'none'`
+  - `connect-src`: `'self'` + 環境に応じて (a) Emulatorモード(`NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`): Auth/Firestore/Storage Emulator の `http://host:port`(`src/lib/firebase/config.ts` の `parseEmulatorHost`/`EMULATOR_DEFAULTS` をconfig側でも使い接続先を単一ソース化)、(b) 本番: `identitytoolkit.googleapis.com`/`securetoken.googleapis.com`/`https://{authDomain}`(クライアントSDKは firebase/auth のみ使用。firestore/storage は Admin SDK 経由のため不要)
+  - `upgrade-insecure-requests` は Emulator(http)利用時のみ除外(非localhostなemulator接続先を壊さないため)。localhost は仕様上除外対象だが環境依存を避けて明示判定とした
+  - `X-Frame-Options: DENY`(frame-ancestors 'none' と併用)、`X-Content-Type-Options: nosniff`(ユーザーアップロード証憑を inline 返却する `/api/receipts/{id}` の MIME偽装XSSにも有効)、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy: camera=(), microphone=(), geolocation=()`(証憑アップロードは file input のため camera 権限不要)
+- `src/lib/api/rate-limit.ts`: `clientIpKey(request)`(x-forwarded-for先頭→x-real-ip→"unknown")と `sessionRateLimiter`(IP単位30回/時)・`backupExportRateLimiter`(30回/時)・`backupRestoreRateLimiter`(10回/時)・`receiptUploadRateLimiter`(120回/時)・`receiptDownloadRateLimiter`(1200回/時)を追加。いずれも businessId 単位(session のみIP単位)
+### ルート監査結果(src/app/api/ 全8ハンドラ)
+| ルート | 判定 | 対応 |
+| --- | --- | --- |
+| POST /api/session | 認証系・制限なし | `sessionRateLimiter.consume(clientIpKey(request))` を verifyIdToken 前に追加 |
+| DELETE /api/session | Cookie破棄のみ・軽量 | 対象外 |
+| GET /api/backup | 全データ読出し・制限なし | `backupExportRateLimiter`(editor確認後) |
+| POST /api/backup | 全件書込み・制限なし | `backupRestoreRateLimiter`(owner確認後) |
+| POST /api/receipts | Storage課金・制限なし | `receiptUploadRateLimiter`(editor確認後) |
+| GET /api/receipts/[id] | 帯域課金・制限なし | `receiptDownloadRateLimiter`(viewer確認後) |
+| GET /api/ai/usage | 制限なし | `aiApiRateLimiter`(run枠は消費しない) |
+| GET /api/ai/receipt-ocr | 制限なし | `aiApiRateLimiter` |
+| POST /api/ai/receipt-ocr | aiRunRateLimiter 適用済 | 変更不要 |
+| GET・POST /api/ai/suggestions, PATCH [suggestionId] | 適用済 | 変更不要 |
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(43ファイル508件、skip 10。clientIpKey テスト4件追加)
+- `pnpm build` — 合格
+- `pnpm test:emulators` — 合格(7件) / `pnpm test:rules` — 合格(79件)
+- 実機検証: `pnpm dev` で Emulator向け `connect-src`(localhost:9099/8080/9199)+`'unsafe-eval'`+`upgrade-insecure-requests`なし、`pnpm start` で本番向け `connect-src`(googleapis)+`upgrade-insecure-requests`あり、を curl で確認
+### 設計上の判断・備考
+- `next.config.ts` から `./src/lib/firebase/config` を import している(依存ゼロの純粋モジュールのためconfig評価時に解決可。Emulator接続先の解釈を client.ts と共有)
+- IP単位の session 制限は最良努力(x-forwarded-for 偽装は防げない)。厳密な制限が必要なら rate-limit.ts のコメント通り共有ストア化が要となる
+- receipts GET の 1200回/時は一覧 `<img>` の一括要求(数十〜百件/ページ)を踏まえた緩め設定。正常利用で 429 にならない水準
+- 429 応答は `toErrorResponse` が `RateLimitError.retryAfterSec` → `Retry-After` ヘッダへ変換する既存仕組みで返る(画面側は `ApiClientError.code==="RATE_LIMITED"` のメッセージ表示)
+- 未対応(別タスク): nonceベースCSPへの移行(proxy/middleware導入が必要)、HSTS、Server Actions 側のレート制限、`api-client.ts` への 429 リトライ配慮
