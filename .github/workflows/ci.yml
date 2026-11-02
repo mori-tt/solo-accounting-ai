@@ -56,6 +56,16 @@ jobs:
       - name: Run next build
         run: pnpm build
 
+  functions-build:
+    name: functions build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-pnpm
+      - name: Build Cloud Functions
+        run: pnpm -C functions build
+
   test-rules:
     name: test:rules
     runs-on: ubuntu-latest

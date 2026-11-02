@@ -14,7 +14,8 @@
     "test:rules": "firebase emulators:exec --only firestore,storage --project demo-solo-accounting-ai 'vitest run --config vitest.rules.config.mts'",
     "test:e2e": "firebase emulators:exec --only auth,firestore,storage --project demo-solo-accounting-ai 'playwright test'",
     "test:emulators": "firebase emulators:exec --only firestore --project demo-solo-accounting-ai 'pnpm vitest run tests/emulator'",
-    "emulators": "firebase emulators:start"
+    "build:functions": "pnpm -C functions build",
+    "emulators": "pnpm run build:functions && firebase emulators:start"
   },
   "dependencies": {
     "client-only": "^0.0.1",

@@ -73,3 +73,12 @@
 - 理由: 提案のライフサイクル(生成→確認→採否)を単位として扱え、監査・再生成・複数対象への提案を統一モデルで扱える。AI出力が確定フィールドに混入する経路を構造的に排除できる
 - 影響: 採用時は「提案を読み→ユーザーが確定値へ反映」の2ステップが必須。`transactions`/`receipts` の `aiSuggestion` フィールドは廃止(Security Rulesで引き続き書き込み禁止)
 - 補足(2026-11-02): 実装のフィールド名は `kind` / `target:{type,id}` / `payload` / `reason` / `issues` / `attempts` / `retriable` / `lastError` / `decidedBy` / `decidedAt` / `rejectReason` で、statusは `pending`/`accepted`/`rejected`/`needs_review`。再実行・失敗記録を持てるよう `needs_review` を追加した(ai-suggestion-consolidationで旧実装を統合・削除済み)
+
+## ADR-0006: Cloud Functionsはアプリのドメイン層を共有コンパイルする
+
+- 日付: 2026-11-02
+- ステータス: accepted
+- コンテキスト: スケジュール実行(定期請求書生成・バックアップ)をCloud Functionsへ置くと、生成ロジックをアプリ側(src/lib/accounting)と二重実装するか共有するかの選択になる
+- 決定: `functions/` をpnpmワークスペースの独立パッケージとし、tsconfigの `rootDir:".."` で functions/src からアプリのドメイン層を直接importして同一コンパイル単位にする。関数側は編成層(schedule設定・事業列挙・ログ)のみ持ち、ドメインロジックは複写しない。監査のactor識別子は `system` とする
+- 理由: 定期請求書の生成規則(間隔・末日調整・締め済みガード・冪等ID)はアプリの手動実行と同一でなければならず、複写するとドリフトする。tsc出力は functions/lib 内で完結するため functions/ 単体でデプロイ可能
+- 影響: functionsのimport対象は相対importのみのモジュールに限定される(`@/`エイリアスは実行時に解決されない)。エクスポート系は `src/lib/backup-export.ts` のように共有前提のリーフモジュールとして切り出す。デプロイは未実施(コード提供のみ)

@@ -2,6 +2,11 @@ import { z } from "zod";
 import type { Firestore } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/result";
 import { isAllowedReceiptMime } from "@/lib/receipt-files";
+import {
+  BACKUP_COLLECTIONS,
+  BACKUP_VERSION,
+  type BackupDoc,
+} from "./backup-export";
 
 /**
  * 事業データのJSONバックアップ/復元。
@@ -9,6 +14,7 @@ import { isAllowedReceiptMime } from "@/lib/receipt-files";
  * - エクスポート: businesses/{businessId} とそのサブコレクション全件を
  *   1つのJSON(BACKUP_VERSION付き)にまとめる。Storageのファイル本体は含めず
  *   receiptsのメタデータ(storagePath等)のみを出力する。
+ *   エクスポート実体は ./backup-export(Cloud Functionsとも共有)を参照。
  * - 復元: 別businessIdへのインポートを許容し、ドキュメントIDが衝突した場合は
  *   新規採番して参照フィールド(customerId等)を張り替える。
  *
@@ -17,62 +23,21 @@ import { isAllowedReceiptMime } from "@/lib/receipt-files";
  * Firestore実処理は db 引数(Admin SDK)経由でサーバーサイドからのみ呼ぶこと。
  */
 
-export const BACKUP_VERSION = 1;
-
-/**
- * バックアップ対象の businesses/{businessId} 配下コレクション。
- * firestore.rules / docs/FIRESTORE_SCHEMA.md の実在コレクションに合わせる。
- * `idempotencyKeys` は内部機構(二重登録防止)のため対象外。
- * `users` は businessId スコープ外(個人情報)のため対象外。
- */
-export const BACKUP_COLLECTIONS = [
-  "members",
-  "customers",
-  "projects",
-  "transactions",
-  "expenses",
-  "withholdingRecords",
-  "receipts",
-  "invoices",
-  "quotes",
-  "payments",
-  "bills",
-  "billPayments",
-  "journalEntries",
-  "fiscalPeriods",
-  "closingChecks",
-  "recurringTemplates",
-  "recurringInvoiceTemplates",
-  "fixedAssets",
-  "aiSuggestions",
-  "monthlySummaries",
-  "auditLogs",
-  "inventoryItems",
-  "inventoryCounts",
-] as const;
-
-export type BackupCollection = (typeof BACKUP_COLLECTIONS)[number];
-
-/** バックアップ鮮度アラートを出す閾値(日数) */
-export const BACKUP_STALE_DAYS = 30;
-
-export type BackupFreshness = "never" | "stale" | "fresh";
-
-/**
- * 最終バックアップ日時から鮮度を判定する。
- * never=未取得・不正な日付(安全側)、stale=30日超過、fresh=30日以内。
- */
-export function backupFreshness(
-  lastBackupAt: string | undefined,
-  now: number = Date.now(),
-): BackupFreshness {
-  if (!lastBackupAt) return "never";
-  const t = new Date(lastBackupAt).getTime();
-  if (!Number.isFinite(t)) return "never";
-  return now - t > BACKUP_STALE_DAYS * 24 * 60 * 60 * 1000
-    ? "stale"
-    : "fresh";
-}
+// エクスポート側の公開APIはbackup-exportへ移動し、ここから再exportする
+// (既存の `@/lib/backup` 参照を維持するため)
+export {
+  BACKUP_COLLECTIONS,
+  BACKUP_STALE_DAYS,
+  BACKUP_VERSION,
+  backupFreshness,
+  exportBusinessBackup,
+} from "./backup-export";
+export type {
+  BackupCollection,
+  BackupDoc,
+  BackupFile,
+  BackupFreshness,
+} from "./backup-export";
 
 /**
  * ドキュメントID自体が意味を持つコレクション
@@ -86,21 +51,6 @@ const FIXED_ID_COLLECTIONS: ReadonlySet<string> = new Set([
   // fy{fiscalYear}の決定的ID(fiscalPeriodsと同じ採番)
   "inventoryCounts",
 ]);
-
-export interface BackupDoc {
-  id: string;
-  [key: string]: unknown;
-}
-
-export interface BackupFile {
-  version: number;
-  exportedAt: string;
-  /** エクスポート元のbusinessId(復元先とは別になりうる) */
-  businessId: string;
-  /** businessドキュメント。復元時はname/fiscalYearStartMonth/taxModeのみ適用 */
-  business?: Record<string, unknown>;
-  collections: Record<string, BackupDoc[]>;
-}
 
 const backupDocSchema = z.looseObject({
   id: z.string().min(1),
@@ -131,32 +81,6 @@ export const backupFileSchema = z.object({
 export type ParsedBackupFile = z.infer<typeof backupFileSchema>;
 
 /**
- * Firestoreの値をJSON化する。Timestamp等(toDate()を持つ値)は
- * ISO 8601文字列へ変換する。undefinedはキーごと除去する。
- */
-function toJsonValue(value: unknown): unknown {
-  if (value === null || value === undefined) return null;
-  if (value instanceof Date) return value.toISOString();
-  if (
-    typeof value === "object" &&
-    "toDate" in value &&
-    typeof (value as { toDate: unknown }).toDate === "function"
-  ) {
-    return ((value as { toDate: () => Date }).toDate()).toISOString();
-  }
-  if (Array.isArray(value)) return value.map(toJsonValue);
-  if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      if (v === undefined) continue;
-      out[k] = toJsonValue(v);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
  * 復元時の逆変換。store層(toStore)と同じ規約で `*At` フィールドの
  * ISO日時文字列を Date へ戻す(Admin SDKがTimestampとして保存する)。
  * paidAt 等の YYYY-MM-DD 文字列(日付のみ)はDate化しないよう、
@@ -183,36 +107,6 @@ function fromJsonDoc(data: Record<string, unknown>): Record<string, unknown> {
     return value;
   };
   return convert(undefined, data) as Record<string, unknown>;
-}
-
-/** 事業の全データをバックアップJSONとして組み立てる。呼び出し側で認可済みのこと */
-export async function exportBusinessBackup(
-  db: Firestore,
-  businessId: string,
-): Promise<BackupFile> {
-  const businessRef = db.collection("businesses").doc(businessId);
-  const businessSnap = await businessRef.get();
-  if (!businessSnap.exists) {
-    throw new ApiError("NOT_FOUND", "事業が見つかりません");
-  }
-
-  const collections: Record<string, BackupDoc[]> = {};
-  for (const name of BACKUP_COLLECTIONS) {
-    const snap = await businessRef.collection(name).get();
-    collections[name] = snap.docs.map((doc) => ({
-      ...(toJsonValue(doc.data()) as Record<string, unknown>),
-      // ドキュメントIDを正とする(データ内のidフィールドは冗長なので上書き)
-      id: doc.id,
-    }));
-  }
-
-  return {
-    version: BACKUP_VERSION,
-    exportedAt: new Date().toISOString(),
-    businessId,
-    business: toJsonValue(businessSnap.data() ?? {}) as Record<string, unknown>,
-    collections,
-  };
 }
 
 /** プレビュー用: コレクションごとのドキュメント件数 */
