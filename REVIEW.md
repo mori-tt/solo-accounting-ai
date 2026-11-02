@@ -1822,6 +1822,28 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
 - rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約
+## 2026-11-02: api-client耐障害性(Issue #111)
+- Worktree: api-resilience
+- 依存追加なし。`pnpm install --frozen-lockfile` 実行済み。変更は `src/lib/api-client.ts` のみ(+テスト新規)。`use-api-data.ts` は `errorCode` がエラーオブジェクトから透過されるため整合上の変更不要と判断し未変更
+- `src/lib/api-client.ts`:
+  - `fetchWithTimeout` 新設。AbortController+setTimeout で全fetchへタイムアウトを付与(デフォルト20s、`/api/session` は10s、OCR・backup復元POSTは重い処理のため60sへ個別延長)。呼び出し側 `init.signal` も併用しどちらかの発火で中断。失敗は ApiClientError に正規化: `TIMEOUT`(自前タイマー)/`ABORTED`(呼び出し側中断)/`NETWORK`(その他)
+  - `retryDelayMs` 新設。Retry-After(秒数 or HTTP-date)を解析し、上限30s以内ならその値、超過・過去日時・解釈不能ヘッダのみの場合は指数バックオフ(500ms×2^attempt、上限30s)。上限超過のRetry-Afterは null を返しリトライ中止(固定ウィンドウ1hの残り時間を素直に待つと画面が固まるため)
+  - `requestJson` をリトライループ化。(a)429: GET/HEADのみ最大2回リトライ(計3回試行)。POST/PATCH等はサーバー側で処理済みか判別できず二重実行の恐れがあるため自動再送しない(安全性判断)。(b)401: `refreshSession(true)` でセッションCookieを張り直して全メソッドで1回だけ再送(401=認証段階で拒否済みのため副作用リクエストの再送も安全)
+  - 401が再発行後も解消しない場合は `handleSessionExpired` へ。既定ハンドラは `getFirebaseAuth().signOut()` → `onIdTokenChanged` が signed_out へ遷移 → AppShell認証ゲートが `next` 付きで /login へ遷移(Firebaseサインアウトを挟むため「/login→signed_in→元画面→401」の往復ループにならない)。`setSessionExpiredHandler` で差し替え可能(nullで既定に戻る)。10秒デバウンス+`sessionRefreshed`フラグで同時401多発・無限ループを防止。`callApi`(Server Action経路)のUNAUTHORIZED解消不能時にも同ハンドラを適用
+  - `refreshSession`/`clearSession` も `fetchWithTimeout` 経由に変更(ハング防止)
+- `src/lib/api-client.test.ts`(新規): 16件。Retry-After待機/指数バックオフ/上限超過即エラー/連続429の最大回数/POST非リトライ/TIMEOUT・NETWORK正規化/401→再発行→リトライ成功(GET・POST)/再発行失敗・持続401でハンドラ発火/デフォルトハンドラのsignOut委譲/10sデバウンス/callApi の UNAUTHORIZED 再試行とセッション切れ発火
+- `pnpm lint` — 合格(既存warning 1件: receipts-screen `<img>`)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(51ファイル609件、skip 10。api-client.test.ts 16件新規)
+- `pnpm build` — 合格
+- Emulator系(`test:rules`/`test:emulators`)・`next dev` — 未実施(Issue制約で画面・サーバー経路に変更なし。firestore.rules 未変更)
+### 判断事項・備考
+- 429リトライの対象をGET/HEADに限定したのは、POST/PATCHの副作用リクエストがサーバー側で実行済みか判別できないため(consume()は処理前に走る設計だが、経路全体での冪等性をクライアントが保証できない)
+- Retry-After上限30s: 実際の429は1時間ウィンドウの残り秒数を返し得るため、待機を30sに打ち切る。上限超過時は自動リトライせずRATE_LIMITEDエラーとして画面表示へ委ねる
+- バックオフにジッタは未付与(単一ユーザーが自身のレート制限に当たるケースが主で、同時多発クライアントのサンダリングハードは想定しない)
+- `handleSessionExpired` はモジュール内タイムスタンプでデバウンス。`setSessionExpiredHandler` 再設定時にガードをリセットする仕様はテスト容易性のため意図的
+- `use-api-data.ts` への AbortSignal 配線(アンマウント時中断)は未実装。現状 `cancelled` フラグで setState は防げており、リクエスト自体の中断はタイムアウトが担保するため Issue 範囲としては不要と判断
+- Server Action(callApi)側のRATE_LIMITEDにはリトライなし(ActionResultがRetry-Afterを持たず、固定ウィンドウ向けの再送根拠が取れない)
 ## 2026-11-02: Server Actions レート制限(Issue #110)
 - Worktree: action-rate-limit
 - R2-18(Server Actions にレート制限がなく、読み取り系も無制限)への対応。
@@ -1858,9 +1880,7 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
     `{ok:false,error:{code:"RATE_LIMITED"}}` を返す既存経路に乗る
     (画面側は ApiClientError.code==="RATE_LIMITED" のメッセージ表示)
 - `pnpm lint` — 合格(0エラー。receipts-screen の img 警告1件は既存)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(50ファイル593件、skip 10)
-- `pnpm build` — 合格
 - Firebase Emulator tests — 未実施(rules・firestore書き込み経路の変更なし。
   limiterはサーバー内インメモリでEmulator外)
 - 残存: R2-18 の「N+1解消・件数上限」側は未対応(services層の変更が必要で
@@ -1892,3 +1912,4 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
     実運用で 45 分を超える/不安定な場合は spec 分割か shards 化を検討
 - `pnpm lint` — 合格(既存 warning 1件のみ)
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
+- `pnpm test` — 合格(50ファイル593件、skip 10)
