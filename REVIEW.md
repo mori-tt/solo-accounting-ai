@@ -1822,6 +1822,52 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)
 - rules テストで検出した実機差異は REVIEW_SECURITY_R2.md の「Rules 実装メモ」節に集約
+## 2026-11-02: Server Actions レート制限(Issue #110)
+- Worktree: action-rate-limit
+- R2-18(Server Actions にレート制限がなく、読み取り系も無制限)への対応。
+  Route Handler には limiter があったが Server Action には一切なく、
+  `getDashboard`(全期間取引+未払検出+AI提案)や `getAccountLedgerReport`
+  (全取引)のような重い集計を editor/viewer がループで呼べた
+- `src/lib/api/rate-limit.ts`(追加のみ): Server Actions 用に3ティアの
+  limiter を新設。既存 `createRateLimiter`・インメモリ最良努力方式を踏襲
+  - `actionReadRateLimiter`: 参照系・**uid単位** 600回/時。
+    uid単位はR2-18修正案どおり。1メンバーの暴走が事業共有枠を枯らし
+    他メンバーの画面を止める自己DoSを防ぐ(平均毎分10回で画面操作+
+    自動再取得を許容)
+  - `actionWriteRateLimiter`: 変更系・**businessId単位** 1200回/時。
+    銀行CSVインポートが行ごとに `createTransaction` を逐次呼ぶため
+    千件規模の一括取込+通常入力を許容する上限(行数上限は別タスク)
+  - `actionBulkRateLimiter`: 一括生成・破壊的操作・**businessId単位** 60回/時。
+    締め(全取引lock+繰越生成)・事業削除(再帰削除+Storage)・
+    月次再計算・定期/償却の一括生成・科目一括保存(削除時に全取引スキャン)
+- 適用ポリシー:
+  - 消費は `requireViewer/Editor/Owner/Uid/Membership` **通過後**に行う。
+    認可前に消費すると非メンバーが businessId を知るだけでその事業の
+    枠を外部から枯らせる(uidキーは認可が返す actor.uid を使う)
+  - 全15ファイル・全55箇所の認可通過点に consume を配置
+    (監査: `"use server"` 宣言は src/lib/actions/14ファイル +
+    src/app/(app)/reports/actions.ts。R2-18 が後者も対象に含むため適用)
+  - `createBusiness` は既存 `businessCreateRateLimiter`(uid・20/日)のまま
+  - `listInvoiceRows` は editor+ のみ内部で `refreshOverdueInvoices` の
+    書き込みを伴うが、主コストは読み取り・viewerは書き込みを起こせない
+    ため read 枠のみ消費
+  - Emulator でもスキップしない(`businessCreateRateLimiter` と同じ方針。
+    E2Eはテスト毎に新規 uid/businessId のため枠に到達しない。
+    本番と同じ制限経路がテストされる利点もある)
+  - 429 は `RateLimitError` → `run()`/`toActionError` 経由で
+    `{ok:false,error:{code:"RATE_LIMITED"}}` を返す既存経路に乗る
+    (画面側は ApiClientError.code==="RATE_LIMITED" のメッセージ表示)
+- `pnpm lint` — 合格(0エラー。receipts-screen の img 警告1件は既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(50ファイル593件、skip 10)
+- `pnpm build` — 合格
+- Firebase Emulator tests — 未実施(rules・firestore書き込み経路の変更なし。
+  limiterはサーバー内インメモリでEmulator外)
+- 残存: R2-18 の「N+1解消・件数上限」側は未対応(services層の変更が必要で
+  本タスクのtouch範囲外)。CSVインポートの行数上限も別タスク(現状は
+  write枠1200/時が実質の歯止め)。インメモリ制限のためサーバー再起動で
+  カウントはリセット、マルチインスタンスではインスタンス単位の
+  最良努力制限(厳密化は共有ストア化が別タスク)
 
 ## 2026-11-02: リポジトリメタ整備(Issue #115)
 - Worktree: repo-meta
@@ -1846,5 +1892,3 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
     実運用で 45 分を超える/不安定な場合は spec 分割か shards 化を検討
 - `pnpm lint` — 合格(既存 warning 1件のみ)
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
-- `pnpm test` — 合格(50ファイル593件、skip 10)
-- `pnpm build` — 合格

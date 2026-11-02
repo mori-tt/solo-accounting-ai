@@ -22,7 +22,12 @@ import {
 import { effectiveOwnerUids } from "@/lib/api/member-role";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { ApiError } from "@/lib/api/result";
-import { businessCreateRateLimiter } from "@/lib/api/rate-limit";
+import {
+  actionBulkRateLimiter,
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+  businessCreateRateLimiter,
+} from "@/lib/api/rate-limit";
 import {
   requireMembership,
   requireOwner,
@@ -62,6 +67,7 @@ export async function listMyBusinesses(): Promise<
 > {
   return run(async () => {
     const uid = await requireUid();
+    actionReadRateLimiter.consume(uid);
     const db = getAdminDb();
     const ids = await listMyBusinessIds(uid);
     const result: MyBusiness[] = [];
@@ -96,7 +102,11 @@ export async function listMyBusinesses(): Promise<
 }
 
 export async function getMyProfile(): Promise<ActionResult<UserProfile>> {
-  return run(async () => getUserProfile(await requireUid()));
+  return run(async () => {
+    const uid = await requireUid();
+    actionReadRateLimiter.consume(uid);
+    return getUserProfile(uid);
+  });
 }
 
 /** 事業の新規作成。作成者をownerメンバーとして登録する。 */
@@ -145,6 +155,7 @@ export async function updateBusinessSettings(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireOwner(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const store = getStore();
     const { value } = await store.transact(businessId, {}, async (tx) => {
       const current = await tx.getBusiness(businessId);
@@ -194,7 +205,8 @@ export async function listBusinessMembers(
   businessId: string,
 ): Promise<ActionResult<MemberInfo[]>> {
   return run(async () => {
-    await requireMembership(businessId, "viewer");
+    const actor = await requireMembership(businessId, "viewer");
+    actionReadRateLimiter.consume(actor.uid);
     return listMembers(businessId);
   });
 }
@@ -247,6 +259,7 @@ export async function inviteMember(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireOwner(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const uid = await findUidByEmail(parsed.data.email);
     if (!uid) {
       throw new ApiError(
@@ -296,6 +309,7 @@ export async function updateMemberRole(
 ): Promise<ActionResult<null>> {
   return run(async () => {
     const actor = await requireOwner(businessId);
+    actionWriteRateLimiter.consume(businessId);
     if (memberUid === actor.uid) {
       throw new ApiError(
         "FORBIDDEN",
@@ -344,6 +358,7 @@ export async function deleteBusiness(
 ): Promise<ActionResult<null>> {
   return run(async () => {
     await requireOwner(businessId);
+    actionBulkRateLimiter.consume(businessId);
     const db = getAdminDb();
     const businessRef = db.collection("businesses").doc(businessId);
     const snap = await businessRef.get();
@@ -374,6 +389,7 @@ export async function removeMember(
 ): Promise<ActionResult<null>> {
   return run(async () => {
     const actor = await requireOwner(businessId);
+    actionWriteRateLimiter.consume(businessId);
     if (memberUid === actor.uid) {
       throw new ApiError("FORBIDDEN", "自分自身は削除できません");
     }

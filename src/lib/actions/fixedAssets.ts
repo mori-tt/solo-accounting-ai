@@ -10,6 +10,11 @@ import {
   updateFixedAsset,
 } from "@/lib/accounting/services/fixedAssets";
 import type { FixedAsset } from "@/lib/accounting/types";
+import {
+  actionBulkRateLimiter,
+  actionReadRateLimiter,
+  actionWriteRateLimiter,
+} from "@/lib/api/rate-limit";
 import { fail, run, type ActionResult } from "@/lib/api/result";
 import { requireEditor, requireViewer } from "@/lib/api/session";
 import { getStore } from "@/lib/api/store";
@@ -45,7 +50,8 @@ export async function listFixedAssetRows(
   businessId: string,
 ): Promise<ActionResult<FixedAssetRow[]>> {
   return run(async () => {
-    await requireViewer(businessId);
+    const actor = await requireViewer(businessId);
+    actionReadRateLimiter.consume(actor.uid);
     const store = getStore();
     const business = await store.getBusiness(businessId);
     const startMonth = business?.fiscalYearStartMonth ?? 1;
@@ -83,6 +89,7 @@ export async function createFixedAsset(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { asset } = await registerFixedAsset(getStore(), businessId, actor, {
       idempotencyKey: input.idempotencyKey,
       name: parsed.data.name,
@@ -105,6 +112,7 @@ export async function updateFixedAssetAction(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { asset } = await updateFixedAsset(
       getStore(),
       businessId,
@@ -132,6 +140,7 @@ export async function disposeFixedAssetAction(
   if (!parsed.success) return fail("INVALID_INPUT", parsed.issues.join(" / "));
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionWriteRateLimiter.consume(businessId);
     const { asset } = await disposeFixedAsset(
       getStore(),
       businessId,
@@ -152,6 +161,7 @@ export async function bookDepreciationForCurrentYear(
 ): Promise<ActionResult<{ created: number; fiscalYear: number }>> {
   return run(async () => {
     const actor = await requireEditor(businessId);
+    actionBulkRateLimiter.consume(businessId);
     const { transactions, fiscalYear } = await bookCurrentYearDepreciation(
       getStore(),
       businessId,
