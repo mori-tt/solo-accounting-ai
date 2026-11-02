@@ -14,6 +14,13 @@ import {
 } from "@/lib/actions/businesses";
 import { callApi } from "@/lib/api-client";
 import {
+  buildSupportMail,
+  getMailSender,
+  SUPPORT_CATEGORIES,
+  SUPPORT_EMAIL,
+  type SupportCategory,
+} from "@/lib/mail";
+import {
   businessSchema,
   memberInviteSchema,
   parseForm,
@@ -33,6 +40,7 @@ import {
   NumberInput,
   PageHeader,
   Select,
+  Textarea,
   TextInput,
   tableClass,
 } from "@/components/ui";
@@ -506,6 +514,72 @@ function NewBusinessCard() {
   );
 }
 
+/**
+ * サポート連絡先カード。問い合わせ種別・内容から定型の問い合わせ
+ * メールを組み立て、既定のメーラーで下書きを開く(実送信はメーラー任せ)。
+ * 個人情報は自動的に本文へ含めない(自動付記はアプリバージョンのみ)。
+ */
+function SupportCard() {
+  const [category, setCategory] = useState<SupportCategory>(
+    SUPPORT_CATEGORIES[0],
+  );
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState<string>();
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(undefined);
+    const result = await getMailSender().send(
+      buildSupportMail({ category, message }),
+    );
+    if (!result.ok) setError(result.error);
+  };
+
+  return (
+    <Card>
+      <h2 className="mb-3 text-sm font-semibold">サポート・お問い合わせ</h2>
+      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+        不明点・不具合・ご要望はサポート窓口(
+        <a
+          href={`mailto:${SUPPORT_EMAIL}`}
+          className="text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400"
+        >
+          {SUPPORT_EMAIL}
+        </a>
+        )までご連絡ください。下のフォームからも既定のメーラーで
+        お問い合わせメールを作成できます。
+      </p>
+      <form onSubmit={submit} noValidate className="flex flex-col gap-3">
+        <Field label="お問い合わせ種別">
+          <Select
+            className="sm:w-72"
+            value={category}
+            onChange={(e) => setCategory(e.target.value as SupportCategory)}
+          >
+            {SUPPORT_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="お問い合わせ内容(任意)">
+          <Textarea
+            rows={4}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="例: ○○画面で△△を実行するとエラーになります"
+          />
+        </Field>
+        {error && <Alert tone="error">{error}</Alert>}
+        <div>
+          <Button type="submit">メーラーでお問い合わせを作成</Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 export function SettingsScreen() {
   useBrowserOnly();
   const { user, business } = useApp();
@@ -544,6 +618,7 @@ export function SettingsScreen() {
       <BusinessSettingsCard />
       <MembersCard />
       <NewBusinessCard />
+      <SupportCard />
     </div>
   );
 }

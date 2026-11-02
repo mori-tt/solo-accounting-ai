@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SUPPORT_EMAIL } from "@/lib/mail/support";
 import { APP_VERSION } from "@/lib/version";
 import { AuthRedirect } from "./auth-redirect";
 
@@ -404,6 +405,12 @@ export default function Home() {
                 {l.label}
               </Link>
             ))}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="text-xs text-zinc-500 hover:text-zinc-800 hover:underline dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+              お問い合わせ
+            </a>
           </nav>
         </div>
       </footer>
