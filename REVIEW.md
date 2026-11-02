@@ -1573,6 +1573,29 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: 消費税申告用納付税額計算シート(Issue #95)
+- Worktree: consumption-tax-report
+- `src/app/(app)/reports/consumption-tax/` 新設(独立ページ。ナビはIssue制約で未変更のため、決算書画面から相互リンクで到達)
+  - `page.tsx`/`loading.tsx`: filing・yearly と同型(Suspense+`instant=false`/ScreenSkeleton)
+  - `consumption-tax-screen.tsx`: YearNav + 印刷ボタン + 簡易課税時のみ事業区分(第1〜6種・みなし仕入率)Select。集計入力はServer Actionから取得し、納付額算出は `computeConsumptionTaxFiling` を画面側で実行(事業区分変更を再取得なしで即時反映するため。決算書画面の computeNetIncome と同型パターン)
+  - `consumption-tax-sheet.tsx`: 帳票本体。課税資産の譲渡等の対価(税込)→課税標準額(千円未満切捨て)→消費税額(7.8%/6.24%)→仕入税額控除→差引税額→納付税額(国税・百円切捨て)+地方消費税(差引×22/78・百円切捨て)→納付合計、を第二表の手順どおり税率別内訳つきで出力。差引が負なら還付税額・譲渡割額(1円精度)の行に切替
+  - `consumption-tax-sheet.test.tsx`: 本則・簡易・還付の3ケースのレンダリングテスト(formatYen経由で期待値生成)
+- `src/app/(app)/reports/actions.ts`: `getConsumptionTaxFilingData` 追加(viewer権限・businessId検証)。fiscalPeriodRange の期間内の確定済み取引を `buildConsumptionTaxSummary` へ渡し、`filingAmounts`(税率別課税対価/仕入対価・税込)と `unclassifiedCount` を返す。集計の保存なし(手計算値の保存禁止ルール準拠)
+- `src/app/(app)/reports/filing/filing-screen.tsx`: PageHeader actions に `/reports/consumption-tax` への Link を追加(既存の印刷ボタンと並置、1行差分)
+### 挙動
+- taxMode=standard: そのまま計算シート表示。simple: 事業区分未選択時は選択を促す Alert(シート・印刷は出さない)、選択後に計算。exempt: 納付義務なしの Alert のみ(印刷不可)
+- taxCategory未設定の取引があれば警告Alert(課税対価に含まれず納付額が過小になる旨)
+- 印刷は既存 print-header パターン踏襲: PrintHeader(帳票名・対象期間・事業名・印刷日、print-only)+ print-sheet/print-table クラス。globals.css の共通ルールに載るため画面側に追加の `<style>` は不要
+### 実行したテスト
+- `pnpm lint` — 合格(0エラー。receipts-screen の img 警告1件は既存・本変更と無関係)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(LayoutProps は typegen 生成型のため install 直後は生成が必要)
+- `pnpm test` — 合格(46ファイル実行542件、skip 10。sheet テスト3件追加)
+- `pnpm build` — 合格(`/reports/consumption-tax` が static prerender ○ で生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。読み取り専用actionのみ追加)
+### 備考
+- みなし仕入率の事業区分は Business に保持されないため画面選択値を使う(年次レポートの概算が simple 時に null を返すのと同じ制約。確定データへの保存禁止ルールとも整合)。永続化が必要になれば settings 側の拡張が別タスク
+- 中間納付額の差引き・課税売上割合95%未満時の個別対応/一括比例配分・積上げ計算は未対応(エンジン側未実装の範囲)。帳票の注記に概算・転記用資料である旨を明記
+- types.ts・app-shell・nav・globals.css は Issue 指定どおり未変更
 ## 2026-11-02: 適格請求書対応(Issue #94)
 - Worktree: invoice-compliance
 - `src/lib/accounting/types.ts`: `Business` に `invoiceRegistrationNumber`(T+13桁)・`issuerName`・`issuerAddress`・`invoiceCounter`(内部連番カウンタ)、`Invoice` に `invoiceNumber` を追加。いずれもオプショナルで既存データは後方互換
@@ -1661,7 +1684,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm test:rules` — 合格(86件)
 - `pnpm test:emulators` — 合格(7件)
 
-### 備考
 - `assertOwnerRemains` はmembersコレクションの読み→検証→putMember/deleteMemberが
   非トランザクションのため最良努力のガード(並行する2 owner操作の同時実行までは
   防げない)。rules側もowner数を数えられない制約上、厳密な排他は将来Functions等の
@@ -1696,7 +1718,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - R2-20: `escapeField` で先頭 `= + - @` 等に `'` 前置
 - R2-7: `clientIpKey` を XFF 最右採用 + createBusiness に uid レート制限
 - ルール実装メモ(REVIEW_SECURITY_R2.md 末尾): `matches()` は文字列全体一致、match内 wildcard は同スコープの function にのみ見える、put 上書きは emulator で create 評価されることがある — いずれも実機で確認してルール側を修正
-### 実行したテスト
 - `pnpm lint` — エラー0(既存 warning 1件のみ)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(48ファイル549件、skip 10)
