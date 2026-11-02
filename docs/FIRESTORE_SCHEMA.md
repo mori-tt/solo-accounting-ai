@@ -8,7 +8,9 @@ businessIdをまたいだアクセスを構造的に禁止する。
 
 - 金額フィールドは円単位の整数(`number`)で保存する
 - 日時はFirestore `Timestamp`。日付のみ必要な場合は `YYYY-MM-DD` 文字列を併用可
-- 全ドキュメントに `createdAt` / `updatedAt` / `createdBy` を持たせる
+- 多くのドキュメントに `createdAt` / `updatedAt` / `createdBy` を持たせる。
+  ただし expenses/payments/fiscalPeriods/monthlySummaries/auditLogs 等は
+  一部または全部を持たない(各コレクションのフィールド表を参照)
 - AI出力は `aiSuggestions` コレクションに隔離し、確定データ(本体フィールド)とは分離する
 - `status='locked'` は締め済みを示し、Admin SDKのみが設定できる
 
@@ -33,6 +35,7 @@ businesses/{businessId}/closingChecks/{checkId}
 businesses/{businessId}/aiSuggestions/{suggestionId}
 businesses/{businessId}/monthlySummaries/{yyyyMM}
 businesses/{businessId}/auditLogs/{auditLogId}
+businesses/{businessId}/idempotencyKeys/{hashedKey}
 ```
 
 ## データの流れ(領収書→確定仕訳)
@@ -59,7 +62,8 @@ receipts(証憑ファイル)
 |---|---|---|
 | displayName | string | |
 | email | string | |
-| createdAt | Timestamp | |
+| lastLoginAt | Timestamp | 最終ログイン(upsert)日時 |
+| createdAt | Timestamp | 初回作成時のみ設定 |
 
 ### businesses/{businessId}
 
@@ -84,6 +88,7 @@ receipts(証憑ファイル)
 
 | Field | Type | Note |
 |---|---|---|
+| uid | string | メンバーのuid(ドキュメントIDと同一。collectionGroupクエリ用に保持) |
 | role | string | `owner` / `editor` / `viewer` |
 | invitedBy | string | uid |
 | createdAt | Timestamp | |
@@ -100,6 +105,8 @@ receipts(証憑ファイル)
 | description | string | 摘要 |
 | receiptIds | string[] | 紐付く証憑 |
 | status | string | `draft` / `confirmed` / `locked`(締め済み) |
+| taxCategory | string? | `taxable` / `non_taxable` / `exempt` / `out_of_scope`。未設定は区分未分類(税フィールド導入前データ) |
+| taxRate | string? | `standard`(10%) / `reduced`(8%)。taxCategory=taxable のときのみ有効(省略時 standard) |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
@@ -107,19 +114,16 @@ receipts(証憑ファイル)
 ### businesses/{businessId}/expenses/{expenseId}
 
 確定経費。証憑・AI提案をユーザーが確認したうえで作成する。
+登録時に `type=expense` のTransactionと同一コミットで作成され、
+`transactionId` で1対1に対応する。状態はTransaction側の `status` で管理する。
 
 | Field | Type | Note |
 |---|---|---|
-| receiptId | string? | 証憑リンク |
-| transactionId | string? | 対応する支払Transaction(消込) |
-| taxCategory | string | 課税/非課税/免税/不課税 |
-| taxAmount | number | 消費税額(円・整数) |
+| transactionId | string | 対応する経費Transaction |
+| taxCategory | string | `taxable` / `non_taxable` / `exempt` / `out_of_scope` |
+| taxAmount | number | 消費税額(円・整数・0以上)。非課税・免税・不課税は0固定 |
 | paymentDueDate | string? | YYYY-MM-DD(未払管理) |
-| paidAt | string? | YYYY-MM-DD |
-| status | string | `draft` / `confirmed` / `locked`(締め済み) |
-| createdBy | string | uid |
-| createdAt | Timestamp | |
-| updatedAt | Timestamp | |
+| paidAt | string? | YYYY-MM-DD(支払済み日付) |
 
 ### businesses/{businessId}/receipts/{receiptId}
 
@@ -132,6 +136,7 @@ receipts(証憑ファイル)
 | status | string | `unprocessed` / `linked` / `archived` |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
+| updatedAt | Timestamp | |
 
 ### businesses/{businessId}/customers/{customerId}
 
@@ -165,6 +170,7 @@ receipts(証憑ファイル)
 | taxAmount | number? | 消費税合計(円・整数・明細ごと切り捨ての合算)。税フィールド導入前データは未設定 |
 | status | string | `draft` / `issued` / `paid` / `overdue` |
 | createdAt | Timestamp | |
+| updatedAt | Timestamp | |
 
 ### businesses/{businessId}/payments/{paymentId}
 
@@ -179,6 +185,11 @@ receipts(証憑ファイル)
 ### businesses/{businessId}/journalEntries/{journalEntryId}
 
 仕訳。`status='draft'` は仕訳候補、`confirmed` が確定仕訳。
+
+※ 現状このコレクションへの書き込み経路は未実装(Security Rulesと
+バックアップ対象の定義のみ)。仕訳データは `domain/ledger.ts` の
+`buildJournal` が transactions から都度計算する仮想仕訳として扱う。
+以下のフィールド表は実装時の設計予約。
 
 | Field | Type | Note |
 |---|---|---|
@@ -253,6 +264,10 @@ periodIdは `fy{fiscalYear}`(会計年度開始年)で決定的に採番する�
 
 締めチェックリスト項目。サーバー生成・またはユーザーによるカスタム項目。
 
+※ 現状このコレクションへの書き込み経路は未実装(Security Rulesと
+バックアップ対象の定義のみ)。締めチェックは `closingChecklist`
+(services/periods.ts)が期間のデータから都度計算して返す。
+
 | Field | Type | Note |
 |---|---|---|
 | fiscalPeriodId | string | 対象期間 |
@@ -300,6 +315,7 @@ AI提案のライフサイクルを管理するコレクション(ADR-0005)。
 
 | Field | Type | Note |
 |---|---|---|
+| businessId | string | 所属事業ID(パスに含まれるがドキュメントにも保持) |
 | kind | string | `receipt_extraction` / `account_suggestion` / `duplicate_detection` / `transaction_description` / `monthly_explanation` |
 | target | map | `{ type: receipt/transaction/monthlySummary, id }` 対象の識別情報 |
 | status | string | `pending` / `accepted` / `rejected` / `needs_review` |
