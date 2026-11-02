@@ -2352,9 +2352,42 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   - getDashboard に getBusiness+listFixedAssets の読み取り2件を追加。
     listFixedAssets は status+取得日の既存複合indexを利用
 
+## 2026-11-02: 複数年比較レポート(Issue #149)
+- Worktree: reports-compare
+### 実装内容
+年度をまたいだ売上・経費・利益の比較帳票(/reports/compare)。
+選択年度+前2年度の3年を比較し、前年同月比の増減率を表示する。依存追加なし。
+- `src/lib/accounting/domain/compare.ts`(新規): `yoyRate`((当年-前年)/前年%、
+  前年0以下はnull)と `buildYearComparison`。YearlyReport 群を年度昇順に並べ、
+  年間合計(annual)+月別(monthly)の各指標に amounts+yoyRates を付ける。
+  月別行は最新年の会計年度順(開始月が1月以外でも同じ暦月同士が比較される)
+- `src/app/(app)/reports/actions.ts`: `getYearComparisonReport` 追加。
+  最古年期首〜選択年期末を `listTransactionsInRange` で1回だけ読み、
+  `buildYearlyReport` を3年分適用(期間外取引は自動除外されるため振り分け不要)。
+  viewer権限+readレート制限。集計は保存しない(手計算値の保存禁止に準拠)
+- `src/app/(app)/reports/compare/`: page/loading/compare-screen。
+  月次比較(指標セレクタ: 売上/経費/利益、12行の月別推移+合計行)と
+  年次比較(売上/経費/利益×3年の年間合計)をトグル切替。
+  列構成は [古い年|中間年|前年比|選択年|前年比]。
+  印刷は既存パターン(no-print/PrintHeader/print-sheet/print-table)に従う
+- `src/components/nav-links.tsx`: レポート群に「複数年比較」追加
+  (年次レポートと決算書の間)。nav-links.test のリンク数 29→30
+### 判断事項
+- 前年比が定義できないケース(前年0円・前年赤字)は「-」表示。
+  0→0 は±0%、0→正は無限大、負→正負混在で率の意味が曖昧なため
+  算出しない方針(画面脚注に記載)
+- 月次比較は指標セレクタ式。3指標×3年を1表に展開すると13列超となり
+  画面・印刷ともに読めないため。年次比較は指標を行にした単一表
+- 比較対象は確定済み(confirmed/locked)取引のみで年次レポートと同一条件
+### Checks
+- `pnpm lint` — 合格(0 errors、既存warning 1件: receiptsの<img>)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(62ファイル764件、skip 10。compare.test 7件新規+nav更新)
+- `pnpm build` — 合格(/reports/compare ルート生成)
+- Firebase Emulator tests — 未実施(firestore.rules/firestore書き込み経路の
+  変更なし。追加はAdmin SDK経由の読み取りのみ)
 ## 2026-11-02: Dependabotグループ化 + 法務E2E flaky修正(Issue #144)
 - Worktree: ops-guard
-### 実装内容
 - `.github/dependabot.yml` に `groups` を追加
   - npm: `react`(react/react-dom/@types/react/@types/react-dom。分離PRで
     片方のみ更新→実行時不整合となる事故 #127 の再発防止が本Issue主目的)、
@@ -2383,9 +2416,7 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   遷移先 heading の描画確認を挟んでから次のリンクを操作
 - ログイン画面フッター遷移テストも同レースを持つため同関数を適用し、
   goBack後に legalNav の再描画待機を追加
-### Checks
 - `pnpm lint` — 合格(0 errors、既存warning1件: receiptsの<img>)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(61ファイル757件、skip 10)
 - `pnpm build` — 合格
 - E2E(legal.spec.ts, Firebase Emulator + JAVA_HOME=openjdk@21, E2E_PORT=3100)
