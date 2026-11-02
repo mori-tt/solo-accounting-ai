@@ -34,6 +34,8 @@ export const BACKUP_COLLECTIONS = [
   "receipts",
   "invoices",
   "payments",
+  "bills",
+  "billPayments",
   "journalEntries",
   "fiscalPeriods",
   "closingChecks",
@@ -254,6 +256,7 @@ const RESTORE_STATUS_RULES: Record<
   expenses: { allowed: ["draft", "confirmed"], optional: true },
   receipts: { allowed: ["unprocessed", "linked", "archived"] },
   invoices: { allowed: ["draft", "issued", "paid", "overdue"] },
+  bills: { allowed: ["unpaid", "paid"] },
   journalEntries: { allowed: ["draft", "confirmed"] },
   closingChecks: { allowed: ["open", "resolved", "waived"] },
   fiscalPeriods: { allowed: ["open", "closed"] },
@@ -273,6 +276,8 @@ const RESTORE_ACTOR_FIELDS: Record<string, readonly string[] | undefined> = {
   fixedAssets: ["createdBy"],
   closingChecks: ["createdBy", "resolvedBy"],
   fiscalPeriods: ["closedBy"],
+  bills: ["createdBy"],
+
   inventoryItems: ["createdBy"],
   inventoryCounts: ["createdBy"],
 };
@@ -287,6 +292,8 @@ const RESTORE_DATE_FIELDS: Record<string, readonly string[] | undefined> = {
   payments: ["date"],
   journalEntries: ["date"],
   invoices: ["issueDate", "dueDate"],
+  bills: ["receivedDate"],
+  billPayments: ["date"],
 };
 
 /** 日付文字列がいずれかのclosed期間内か */
@@ -370,6 +377,10 @@ const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
     ],
     payments: [
       ["invoiceId", "invoices"],
+      ["transactionId", "transactions"],
+    ],
+    billPayments: [
+      ["billId", "bills"],
       ["transactionId", "transactions"],
     ],
     closingChecks: [["fiscalPeriodId", "fiscalPeriods"]],

@@ -6,6 +6,8 @@ import {
 } from "@/lib/accounting/services/monthlySummary";
 import { findUnpaidExpenses } from "@/lib/accounting/services/expenses";
 import { findUnpaidInvoices } from "@/lib/accounting/services/sales";
+import { findUnpaidBills } from "@/lib/accounting/services/bills";
+
 import {
   filingDeadlineAlerts,
   type FilingDeadlineAlert,
@@ -91,6 +93,10 @@ export interface DashboardData {
   unpaidInvoiceCount: number;
   unpaidInvoiceAmount: number;
   overdueInvoiceCount: number;
+  /** 未払の受領請求書(買掛)。期日超過分と残額合計も返す */
+  unpaidBillCount: number;
+  unpaidBillAmount: number;
+  overdueBillCount: number;
   /** 前月以前で締め済み期間に含まれない月の数(open期間の月+取引がある月) */
   unclosedMonthCount: number;
   recentTransactions: Transaction[];
@@ -117,6 +123,7 @@ export async function getDashboard(
       receipts,
       unpaidExpenses,
       unpaidInvoices,
+      unpaidBills,
       suggestions,
       periods,
       business,
@@ -127,6 +134,7 @@ export async function getDashboard(
       store.listReceipts(businessId, "unprocessed"),
       findUnpaidExpenses(store, businessId, input.asOf),
       findUnpaidInvoices(store, businessId, input.asOf),
+      findUnpaidBills(store, businessId, input.asOf),
       getAISuggestionService().list(businessId, { limit: MAX_LIST_LIMIT }),
       store.listFiscalPeriods(businessId),
       store.getBusiness(businessId),
@@ -160,6 +168,9 @@ export async function getDashboard(
       unpaidInvoiceCount: unpaidInvoices.length,
       unpaidInvoiceAmount: unpaidInvoices.reduce((s, u) => s + u.remaining, 0),
       overdueInvoiceCount: unpaidInvoices.filter((u) => u.overdue).length,
+      unpaidBillCount: unpaidBills.length,
+      unpaidBillAmount: unpaidBills.reduce((s, u) => s + u.remaining, 0),
+      overdueBillCount: unpaidBills.filter((u) => u.overdue).length,
       unclosedMonthCount: countUnclosedMonths(
         periods,
         allTx.map((t) => monthKeyOf(t.date)),

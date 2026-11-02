@@ -288,6 +288,29 @@ export const paymentSchema = z.object({
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
 
+/** 受領請求書(買掛)の登録・編集フォーム */
+export const billSchema = z.object({
+  vendorName: z
+    .string()
+    .min(1, "取引先名を入力してください")
+    .max(200, "取引先名は200文字以内で入力してください"),
+  totalAmount: yenAmount,
+  receivedDate: dateString,
+  dueDate: dateString,
+  description: optionalText,
+});
+export type BillInput = z.infer<typeof billSchema>;
+
+/** 支払(消込)の記録フォーム。paymentSchema の買掛版 */
+export const billPaymentSchema = z.object({
+  billId: z.string().min(1).max(200),
+  date: dateString,
+  amount: yenAmount,
+  /** 消込対象の支出取引ID(任意)。空文字は未指定扱い */
+  transactionId: z.string().max(200).optional(),
+});
+export type BillPaymentInput = z.infer<typeof billPaymentSchema>;
+
 export const recurringTemplateSchema = z.object({
   name: z.string().min(1, "テンプレート名を入力してください").max(200),
   type: z.enum(["income", "expense", "transfer"]),

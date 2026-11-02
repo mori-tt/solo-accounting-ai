@@ -18,6 +18,7 @@ describe("NavLinks", () => {
     for (const heading of [
       "記帳",
       "売上・請求",
+      "仕入・支払",
       "レポート",
       "決算・管理",
     ]) {

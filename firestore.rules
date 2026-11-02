@@ -37,6 +37,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/businesses/$(businessId)/invoices/$(invoiceId);
     }
 
+    function billDoc(businessId, billId) {
+      return /databases/$(database)/documents/businesses/$(businessId)/bills/$(billId);
+    }
+
     function receiptDoc(businessId, receiptId) {
       return /databases/$(database)/documents/businesses/$(businessId)/receipts/$(receiptId);
     }
@@ -364,6 +368,72 @@ service cloud.firestore {
 
       function validPayment(d) {
         return d.invoiceId is string
+          && dateString(d.date)
+          && d.amount is int;
+      }
+
+      // ---------- bills ----------
+      // 受領請求書(買掛)。支払済みは請求内容・statusをクライアントから変更不可。
+      // paidへの変更はサーバー側の支払消込処理で行う
+      match /bills/{billId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validBill(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid
+          && !inClosedPeriod(businessId, request.resource.data.receivedDate);
+        allow update: if canEdit(businessId)
+          && validBill(request.resource.data)
+          && unaffected(['createdBy', 'createdAt'])
+          && !inClosedPeriod(businessId, request.resource.data.receivedDate)
+          && !inClosedPeriod(businessId, resource.data.receivedDate)
+          && (resource.data.status == 'unpaid'
+            || (request.resource.data.status == resource.data.status
+              && unaffected(['vendorName', 'totalAmount', 'receivedDate',
+                             'dueDate', 'description'])));
+        // 支払済み請求書の削除はownerのみ。closed期間の受領日は削除不可
+        allow delete: if (isOwner(businessId)
+            || (hasRole(businessId, ['editor'])
+              && resource.data.status == 'unpaid'))
+          && !inClosedPeriod(businessId, resource.data.receivedDate);
+      }
+
+      function validBill(d) {
+        return d.vendorName is string
+          && d.totalAmount is int
+          && dateString(d.receivedDate)
+          && dateString(d.dueDate)
+          && (!('description' in d) || d.description is string)
+          && d.status in ['unpaid', 'paid']
+          && d.createdBy is string;
+      }
+
+      // ---------- billPayments ----------
+      // 支払消込(paymentsの買掛版)。確定後の金額・日付・消込先は不変
+      match /billPayments/{paymentId} {
+        allow get, list: if isMember(businessId);
+        // billIdは消込先の実在請求書のみ(偽造paymentで支払済み化されるのを防ぐ)。
+        // 紐付け先transactionは支出取引に限定する
+        allow create: if canEdit(businessId)
+          && validBillPayment(request.resource.data)
+          && exists(billDoc(businessId, request.resource.data.billId))
+          && !inClosedPeriod(businessId, request.resource.data.date)
+          && (!('transactionId' in request.resource.data)
+            || (request.resource.data.transactionId is string
+              && exists(txDoc(businessId,
+                              request.resource.data.transactionId))
+              && get(txDoc(businessId,
+                           request.resource.data.transactionId))
+                .data.get('type', '') == 'expense'));
+        allow update: if canEdit(businessId)
+          && validBillPayment(request.resource.data)
+          && unaffected(['billId', 'amount', 'date', 'transactionId',
+                         'createdAt']);
+        allow delete: if isOwner(businessId)
+          && !inClosedPeriod(businessId, resource.data.date);
+      }
+
+      function validBillPayment(d) {
+        return d.billId is string
           && dateString(d.date)
           && d.amount is int;
       }

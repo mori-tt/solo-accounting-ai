@@ -31,6 +31,10 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "仕入・支払",
+    items: [{ href: "/bills", label: "支払・買掛" }],
+  },
+  {
     label: "レポート",
     items: [
       { href: "/reports/monthly", label: "月次レポート" },

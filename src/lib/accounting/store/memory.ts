@@ -1,5 +1,7 @@
 import type {
   AuditLogEntry,
+  Bill,
+  BillPayment,
   Business,
   Customer,
   Expense,
@@ -245,6 +247,32 @@ export class MemoryStore implements AccountingStore {
       businessId,
       "payments",
       (p) => p.invoiceId === invoiceId,
+    );
+  }
+
+  getBill(businessId: string, id: string): Promise<Bill | undefined> {
+    return this.get<Bill>(businessId, "bills", id);
+  }
+
+  listBills(businessId: string): Promise<Bill[]> {
+    return this.list<Bill>(businessId, "bills", () => true);
+  }
+
+  getBillPayment(
+    businessId: string,
+    id: string,
+  ): Promise<BillPayment | undefined> {
+    return this.get<BillPayment>(businessId, "billPayments", id);
+  }
+
+  listBillPaymentsForBill(
+    businessId: string,
+    billId: string,
+  ): Promise<BillPayment[]> {
+    return this.list<BillPayment>(
+      businessId,
+      "billPayments",
+      (p) => p.billId === billId,
     );
   }
 
