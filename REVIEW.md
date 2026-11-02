@@ -1354,6 +1354,19 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
 - 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
 - `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
+## 2026-11-02: UX仕上げ(スケルトン/空状態/loading)(Issue #82)
+- Worktree: ux-polish
+`app/(app)` 配下の全24 route に `loading.tsx` を追加し、`components/ui.tsx` にスケルトン系コンポーネントを末尾追記。空状態は全一覧画面で既に `EmptyState` 統一済みだったため画面側の変更は不要だった。
+- `components/ui.tsx`: `Skeleton`(骨組み矩形・`animate-pulse`)・`TableSkeleton`(ヘッダ+行を模した一覧用プレースホルダ・`Card` 利用)・`ScreenSkeleton`(PageHeader+テーブル形状のページ全体プレースホルダ・`role="status"`+`sr-only` で読み込み中を通知)を末尾追記。`EmptyState` は既存のため追加せず、既存 export は一切変更なし
+- `loading.tsx`: `app/(app)` 配下の全 route(dashboard/transactions/transactions-import/receipts/invoices/customers/projects/accounts/allocations/audit-log/backup/business-delete/closing/expenses-new/fixed-assets/opening-balances/recurring/reports-6件/search/settings)に `ScreenSkeleton` を返す `Loading` を配置。`cacheComponents`+`partialPrefetching` 有効のため、この fallback はプリフェッチされる App Shell の一部となり client navigation 時に即時表示される。詳細 route(`[id]` 動的セグメント)は本アプリに存在しないため一覧+レポートが対象
+- 空状態の確認: transactions/receipts/invoices/customers/projects/accounts/fixed-assets/recurring/audit-log/opening-balances/expenses-new/search/settings/dashboard/closing/全レポート画面は既に `EmptyState` 使用済み。残余の「まだ/なし」表記は成功メッセージ(`問題ありません`等)・帳票行(`(収入なし)`等の収支内訳書様式行)・select option・フォーム内ヒントであり空状態ではないため置換対象外と判断
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格(37 route 生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動は worktree 横断で1系統の制約あり)
+- 各画面の内部ローディング(`useApiData` の `initialLoading` → `LoadingBlock` スピナー)は従来どおり。`loading.tsx` は route segment 境界のフォールバックであり、画面内のデータ取得中表示とは別層として共存する
 ## 2026-11-02: 認証まわりの調査と修正(auth-polish)
 - Worktree: auth-polish
 
@@ -1396,8 +1409,6 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `playwright.config.ts`: `E2E_PORT` 環境変数でポートを変更可能に(`const port = process.env.E2E_PORT ?? "3000"`)。ローカルに別プロジェクトの dev server が :3000 を占有していても E2E を実行できるように(実際に :3000 が別アプリ orooro-ginza で占有されており、初回 E2E が誤ってそちらを叩いて失敗した経緯あり)
 
 ### 実行したテスト
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(41ファイル509件、skip 10)
 - `pnpm build` — 合格
 - `JAVA_HOME=... pnpm test:rules` — 合格(2ファイル79件)
@@ -1433,7 +1444,6 @@ Firebase `sendEmailVerification` によるメールアドレス確認フロー�
 - `app/signup/` ディレクトリは存在せず、新規登録は login-screen のトグル内(touch範囲の app/login/ 内で対応済み)
 - E2E 副作用: バナーのメールアドレス表示が `getByText(email)` と重複する件はバナー側からメール表示を除いて解消(テスト・app-shell 非改変)
 
-- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(42ファイル514件、skip 10。email-verify-banner.test.tsx 5件新規)
 - `JAVA_HOME=... E2E_PORT=3101 pnpm test:e2e` — 合格(31件。Auth emulator が sendEmailVerification の oobCode リンクを出力し実送信動作を確認)
@@ -1502,7 +1512,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
 - `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
 - `pnpm install --frozen-lockfile` — 成功
-- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
 - 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
@@ -1518,6 +1527,7 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `firebase.json`: `hosting` セクション新設。`/_next/static/**`(ハッシュ付き)を `public, max-age=31536000, immutable` の長期キャッシュ、それ以外(HTMLを含む `**`)を `public, max-age=0, must-revalidate` の短い再検証に。Hosting のヘッダールールは last match wins のため catch-all → 個別の順で記述
 - `firebase.json` `emulators.hosting.port`: 5005 に固定。hosting 追加により `pnpm emulators` で Hosting Emulator も起動するようになるが、デフォルト 5000 は macOS AirPlay Receiver(ControlCe 実在確認済み・LISTEN中)と衝突するため変更
 - `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
+### 実行したテスト
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
 - `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
