@@ -13,6 +13,13 @@ import type { YearlyReport } from "./yearly";
 /** 売上原価として扱う仕入科目コード(accounts.ts の "purchases" に対応) */
 export const PURCHASES_ACCOUNT = "purchases";
 
+/**
+ * 専従者給与として扱う科目コード(accounts.ts の "family_salary" に対応)。
+ * 収支内訳書では経費ではなく差引金額の下の専用欄へ記載するため、
+ * この科目の支出は経費部から分離して専従者給与欄の初期値にする。
+ */
+export const FAMILY_SALARY_ACCOUNT = "family_salary";
+
 /** 青色申告特別控除の上限額(65万円) */
 export const BLUE_RETURN_DEDUCTION_MAX = 650_000;
 
@@ -34,17 +41,23 @@ export interface IncomeStatement {
   purchaseRows: StatementRow[];
   /** 売上原価 計 */
   totalPurchases: number;
-  /** 経費の内訳(仕入以外の支出科目) */
+  /** 経費の内訳(仕入・専従者給与以外の支出科目) */
   expenseRows: StatementRow[];
   /** 経費 計 */
   totalExpenses: number;
   /** 差引金額 = 収入金額 - 売上原価 - 経費(赤字は負数) */
   grossIncome: number;
+  /**
+   * 専従者給与欄の初期値 = family_salary 科目の年間支出合計。
+   * 経費部には含めない(専用欄で差し引くため二重計上を防ぐ)。
+   */
+  familyEmployeeSalary: number;
 }
 
 /**
  * 年次集計から収支内訳書の収支部分を組み立てる。
- * 支出科目のうち仕入高(purchases)は売上原価、その他は経費に振り分ける。
+ * 支出科目のうち仕入高(purchases)は売上原価、専従者給与(family_salary)は
+ * 専用欄の初期値、その他は経費に振り分ける。
  */
 export function buildIncomeStatement(report: YearlyReport): IncomeStatement {
   const incomeRows: StatementRow[] = [];
@@ -53,6 +66,7 @@ export function buildIncomeStatement(report: YearlyReport): IncomeStatement {
   let totalIncome = 0;
   let totalPurchases = 0;
   let totalExpenses = 0;
+  let familyEmployeeSalary = 0;
 
   for (const row of report.accountTotals) {
     if (row.income > 0) {
@@ -63,6 +77,8 @@ export function buildIncomeStatement(report: YearlyReport): IncomeStatement {
       if (row.account === PURCHASES_ACCOUNT) {
         purchaseRows.push({ account: row.account, amount: row.expense });
         totalPurchases += row.expense;
+      } else if (row.account === FAMILY_SALARY_ACCOUNT) {
+        familyEmployeeSalary += row.expense;
       } else {
         expenseRows.push({ account: row.account, amount: row.expense });
         totalExpenses += row.expense;
@@ -80,6 +96,7 @@ export function buildIncomeStatement(report: YearlyReport): IncomeStatement {
     expenseRows,
     totalExpenses,
     grossIncome: totalIncome - totalPurchases - totalExpenses,
+    familyEmployeeSalary,
   };
 }
 

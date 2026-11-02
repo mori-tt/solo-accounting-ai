@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { setupStore } from "../testing";
+import { seedClosedPeriod, setupStore } from "../testing";
+import type { AccountingStore } from "../store/types";
+import type { OpeningBalance } from "../types";
 import { registerExpense } from "./expenses";
 import {
   closeFiscalPeriod,
@@ -242,5 +244,264 @@ describe("closeFiscalPeriod(締め)", () => {
     );
     expect(second.replayed).toBe(true);
     expect(second.period.status).toBe("closed");
+  });
+});
+
+/** 期首残高を business ドキュメントへ直接シードする(テスト専用) */
+async function seedOpeningBalances(
+  store: AccountingStore,
+  businessId: string,
+  balances: OpeningBalance[],
+): Promise<void> {
+  await store.transact(businessId, {}, async (tx) => {
+    const business = await tx.getBusiness(businessId);
+    return {
+      batch: {
+        puts: [
+          {
+            collection: "businesses" as const,
+            id: businessId,
+            data: { ...business, openingBalances: balances },
+          },
+        ],
+        audits: [],
+      },
+      value: undefined,
+    };
+  });
+}
+
+async function confirm(
+  store: AccountingStore,
+  businessId: string,
+  actor: { uid: string; at?: string },
+  input: Parameters<typeof registerTransaction>[3],
+): Promise<void> {
+  const { transaction } = await registerTransaction(
+    store,
+    businessId,
+    actor,
+    input,
+  );
+  await confirmTransaction(store, businessId, actor, transaction.id);
+}
+
+describe("翌年度への繰越", () => {
+  it("締めチェックに繰越プレビューを含める", async () => {
+    const { store, businessId, actor } = await setupStore(1);
+    await ensureFiscalPeriodForDate(store, businessId, actor, "2025-03-01");
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf1",
+      type: "income",
+      date: "2025-03-10",
+      amount: 100_000,
+      account: "sales",
+    });
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf2",
+      type: "transfer",
+      date: "2025-03-20",
+      amount: 30_000,
+      account: "deposits",
+    });
+    await seedOpeningBalances(store, businessId, [
+      { fiscalYear: 2026, accountCode: "cash", amount: 999 },
+    ]);
+
+    const checklist = await closingChecklist(
+      store,
+      businessId,
+      "fy2025",
+      "2025-04-10",
+    );
+    expect(checklist.carryForward?.nextFiscalYear).toBe(2026);
+    // 現金 = 売上100,000 - 振替30,000 / 預金 = 30,000 / 売掛金 = 0
+    expect(checklist.carryForward?.balances).toEqual([
+      { accountCode: "cash", amount: 70_000 },
+      { accountCode: "deposits", amount: 30_000 },
+      { accountCode: "receivables", amount: 0 },
+    ]);
+    // 翌年度の既存レコードが上書き確認用に返る
+    expect(checklist.carryForward?.existing).toEqual([
+      { fiscalYear: 2026, accountCode: "cash", amount: 999 },
+    ]);
+  });
+
+  it("締め済み期間のチェックリストには繰越プレビューが無い", async () => {
+    const { store, businessId, actor } = await seedPeriodWithData();
+    await closeFiscalPeriod(store, businessId, actor, "fy2025", "close-c0");
+    const checklist = await closingChecklist(
+      store,
+      businessId,
+      "fy2025",
+      "2026-01-10",
+    );
+    expect(checklist.carryForward).toBeUndefined();
+  });
+
+  it("carryForward指定で翌年度の期首残高を同時に生成する", async () => {
+    const { store, businessId, actor } = await setupStore(1);
+    await ensureFiscalPeriodForDate(store, businessId, actor, "2025-03-01");
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf1",
+      type: "income",
+      date: "2025-03-10",
+      amount: 100_000,
+      account: "sales",
+    });
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf2",
+      type: "transfer",
+      date: "2025-03-20",
+      amount: 30_000,
+      account: "deposits",
+    });
+
+    const result = await closeFiscalPeriod(
+      store,
+      businessId,
+      actor,
+      "fy2025",
+      "close-cf",
+      { carryForward: true },
+    );
+    const expected: OpeningBalance[] = [
+      { fiscalYear: 2026, accountCode: "cash", amount: 70_000 },
+      { fiscalYear: 2026, accountCode: "deposits", amount: 30_000 },
+    ];
+    // 残高0の売掛金はレコードを生成しない
+    expect(result.carriedForward).toEqual({
+      fiscalYear: 2026,
+      balances: expected,
+    });
+    const business = await store.getBusiness(businessId);
+    expect(business?.openingBalances).toEqual(expected);
+
+    // 事業ドキュメントの更新監査も残る
+    const logs = await store.listAuditLogs(businessId);
+    expect(
+      logs.some(
+        (l) =>
+          l.action === "update" &&
+          l.targetPath === `businesses/${businessId}`,
+      ),
+    ).toBe(true);
+  });
+
+  it("翌年度の既存レコードは計算値で上書きし他年度は保持する", async () => {
+    const { store, businessId, actor } = await setupStore(1);
+    await ensureFiscalPeriodForDate(store, businessId, actor, "2025-03-01");
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf1",
+      type: "income",
+      date: "2025-03-10",
+      amount: 80_000,
+      account: "sales",
+    });
+    await seedOpeningBalances(store, businessId, [
+      { fiscalYear: 2025, accountCode: "receivables", amount: 12_000 },
+      { fiscalYear: 2026, accountCode: "cash", amount: 999_999 },
+      { fiscalYear: 2026, accountCode: "custom_asset", amount: 500 },
+    ]);
+
+    await closeFiscalPeriod(store, businessId, actor, "fy2025", "close-cf", {
+      carryForward: true,
+    });
+
+    const business = await store.getBusiness(businessId);
+    expect(business?.openingBalances).toEqual([
+      // 締めた年度のレコードはそのまま保持
+      { fiscalYear: 2025, accountCode: "receivables", amount: 12_000 },
+      // 翌年度: 現金=期首残高登録済みだが計算値80,000で上書き、
+      // 売掛金=2025年度期首残高12,000が繰り越される
+      { fiscalYear: 2026, accountCode: "cash", amount: 80_000 },
+      { fiscalYear: 2026, accountCode: "receivables", amount: 12_000 },
+      // 翌年度にだけ登録された科目も対象(残高0に計算され除去)
+    ]);
+  });
+
+  it("carryForward未指定なら期首残高を変更しない", async () => {
+    const { store, businessId, actor } = await seedPeriodWithData();
+    const result = await closeFiscalPeriod(
+      store,
+      businessId,
+      actor,
+      "fy2025",
+      "close-nocf",
+    );
+    expect(result.carriedForward).toBeNull();
+    const business = await store.getBusiness(businessId);
+    expect(business?.openingBalances).toBeUndefined();
+  });
+
+  it("翌年度が締め済みなら生成をスキップし期首残高を変更しない", async () => {
+    const { store, businessId, actor } = await setupStore(1);
+    await ensureFiscalPeriodForDate(store, businessId, actor, "2025-03-01");
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf1",
+      type: "income",
+      date: "2025-03-10",
+      amount: 50_000,
+      account: "sales",
+    });
+    // 翌年度(fy2026)を締め済みとしてシード
+    await seedClosedPeriod(store, businessId, {
+      id: "fy2026",
+      fiscalYear: 2026,
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+    });
+
+    const checklist = await closingChecklist(
+      store,
+      businessId,
+      "fy2025",
+      "2025-04-10",
+    );
+    expect(checklist.carryForward?.nextYearClosed).toBe(true);
+
+    const result = await closeFiscalPeriod(
+      store,
+      businessId,
+      actor,
+      "fy2025",
+      "close-cf",
+      { carryForward: true },
+    );
+    expect(result.period.status).toBe("closed");
+    expect(result.carriedForward).toEqual({
+      fiscalYear: 2026,
+      balances: [],
+      skippedClosedYear: true,
+    });
+    const business = await store.getBusiness(businessId);
+    expect(business?.openingBalances).toBeUndefined();
+  });
+
+  it("繰越付き締めのリプレイは同じ結果を返し再計算しない", async () => {
+    const { store, businessId, actor } = await setupStore(1);
+    await ensureFiscalPeriodForDate(store, businessId, actor, "2025-03-01");
+    await confirm(store, businessId, actor, {
+      idempotencyKey: "tx-cf1",
+      type: "income",
+      date: "2025-03-10",
+      amount: 50_000,
+      account: "sales",
+    });
+    await closeFiscalPeriod(store, businessId, actor, "fy2025", "close-cf", {
+      carryForward: true,
+    });
+    const second = await closeFiscalPeriod(
+      store,
+      businessId,
+      actor,
+      "fy2025",
+      "close-cf",
+      { carryForward: true },
+    );
+    expect(second.replayed).toBe(true);
+    expect(second.carriedForward?.balances).toEqual([
+      { fiscalYear: 2026, accountCode: "cash", amount: 50_000 },
+    ]);
   });
 });

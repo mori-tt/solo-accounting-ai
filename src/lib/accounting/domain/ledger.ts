@@ -1,4 +1,5 @@
 import { assertISODate, compareISODate, type ISODate } from "./dates";
+import { fiscalPeriodRange } from "./fiscal";
 import { addYen } from "./money";
 import type { TransactionEntity } from "./types";
 
@@ -93,6 +94,14 @@ export function buildJournal(
     );
 }
 
+/** 期首残高レコードの最小形(types.ts の OpeningBalance と同じ構造) */
+export interface OpeningBalanceRecord {
+  fiscalYear: number;
+  accountCode: string;
+  /** 円・整数。借方残高を正、貸方残高を負とする */
+  amount: number;
+}
+
 /**
  * 期首残高設定を繰越用の仮想仕訳へ展開する。
  * 各残高は資本勘定(OPENING_EQUITY_ACCOUNT)を相手科目とする
@@ -107,11 +116,7 @@ export function buildJournal(
  * amount = 0 や対象年度でないレコードは出力しない。
  */
 export function openingBalanceJournalEntries(
-  balances: readonly {
-    fiscalYear: number;
-    accountCode: string;
-    amount: number;
-  }[],
+  balances: readonly OpeningBalanceRecord[],
   fiscalYear: number,
   date: ISODate,
 ): JournalEntry[] {
@@ -296,4 +301,72 @@ export function buildTrialBalance(
     creditTotal,
     balanced: debitTotal === creditTotal,
   };
+}
+
+/** 翌年度へ繰り越す科目ごとの期末残高 */
+export interface CarryForwardBalance {
+  accountCode: string;
+  /** 期末残高(円・整数。借方残高を正、貸方残高を負とする) */
+  amount: number;
+}
+
+/**
+ * 年度締め用の繰越残高を計算する。
+ * 対象科目それぞれについて、期首残高を「その時点の残高スナップショット」
+ * として扱い、締める年度以前に登録された最も新しい期首残高を基点に
+ * それ以降の仕訳(借方-貸方)を積み上げて期末残高を求める。
+ * 期首残高が無い科目は全期間の仕訳を積み上げる。
+ *
+ * これにより、繰越で生成した翌年度期首残高と過年度の実取引が
+ * 二重に計上されることを防ぐ(期首残高には基点年度より前の
+ * 取引結果が含まれているため、基点年度以降の仕訳のみを足す)。
+ * 締める年度の期末より後の仕訳は計算から除外する。
+ *
+ * 戻り値は対象科目すべてを含む(残高0・仕訳なしの科目も0で返す)。
+ * 保存時に 0 を書き出すかどうかは呼び出し側が決める。
+ */
+export function computeCarryForwardBalances(
+  entries: readonly JournalEntry[],
+  openingBalances: readonly OpeningBalanceRecord[],
+  fiscalYear: number,
+  fiscalYearStartMonth: number,
+  accountCodes: readonly string[],
+): CarryForwardBalance[] {
+  const range = fiscalPeriodRange(fiscalYear, fiscalYearStartMonth);
+
+  // 科目ごとに、締める年度以下で最も新しい期首残高を基点として選ぶ
+  const baseByAccount = new Map<string, { startDate: ISODate; amount: number }>();
+  for (const b of openingBalances) {
+    if (b.fiscalYear > fiscalYear || b.accountCode === "") continue;
+    const startDate = fiscalPeriodRange(
+      b.fiscalYear,
+      fiscalYearStartMonth,
+    ).startDate;
+    const current = baseByAccount.get(b.accountCode);
+    if (current === undefined || startDate > current.startDate) {
+      baseByAccount.set(b.accountCode, { startDate, amount: b.amount });
+    }
+  }
+
+  const results: CarryForwardBalance[] = [];
+  for (const accountCode of new Set(accountCodes)) {
+    const base = baseByAccount.get(accountCode);
+    let amount = base?.amount ?? 0;
+    for (const entry of entries) {
+      // 基点年度より前の仕訳は期首残高に含まれるため読み飛ばす。
+      // 締める年度の期末より後の仕訳も対象外。
+      if (
+        entry.date > range.endDate ||
+        (base !== undefined && entry.date < base.startDate)
+      ) {
+        continue;
+      }
+      for (const line of entry.lines) {
+        if (line.account !== accountCode) continue;
+        amount = addYen(amount, line.debit - line.credit);
+      }
+    }
+    results.push({ accountCode, amount });
+  }
+  return results.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
 }
