@@ -20,6 +20,14 @@ import {
 } from "@/lib/validation/schemas";
 import type { MemberRole, TaxMode } from "@/lib/accounting/types";
 import {
+  BILLING_FEATURES,
+  businessPlanOf,
+  BUSINESS_PLANS,
+  FEATURE_LABELS,
+  PLAN_ENTITLEMENTS,
+  PLAN_LABELS,
+} from "@/lib/billing";
+import {
   Alert,
   Badge,
   Button,
@@ -221,6 +229,77 @@ function BusinessSettingsCard() {
           </div>
         </dl>
       )}
+    </Card>
+  );
+}
+
+/**
+ * 料金プランの表示セクション。
+ * 現行プランと機能比較(PLAN_ENTITLEMENTSから組み立て)を表示するのみで、
+ * プラン変更はまだ行えない。決済プロバイダ(Stripe等)との接続時は
+ * このカードの「プランを変更」が課金ポータルへの遷移点になる。
+ */
+function PlanCard() {
+  const { business } = useApp();
+  // plan未設定(課金導入前データ)はfree扱い。値の正規化はbilling層に集約
+  const plan = businessPlanOf(business);
+
+  return (
+    <Card>
+      <h2 className="mb-3 text-sm font-semibold">プラン</h2>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-xs text-zinc-500">現在のプラン</span>
+        <Badge tone="indigo">{PLAN_LABELS[plan]}</Badge>
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <table className={tableClass}>
+          <thead>
+            <tr>
+              <th>機能</th>
+              {BUSINESS_PLANS.map((p) => (
+                <th key={p}>
+                  {PLAN_LABELS[p]}
+                  {p === plan && (
+                    <span className="ml-1 text-indigo-600 dark:text-indigo-400">
+                      (現在)
+                    </span>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {BILLING_FEATURES.map((feature) => (
+              <tr key={feature}>
+                <td>{FEATURE_LABELS[feature]}</td>
+                {BUSINESS_PLANS.map((p) => (
+                  <td key={p}>
+                    {PLAN_ENTITLEMENTS[p][feature] ? (
+                      "○"
+                    ) : (
+                      <span className="text-zinc-400">—</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+        <p className="mb-2 text-xs text-zinc-500">
+          課金機能は未接続です。決済プロバイダ(Stripe等)との連携後に
+          プラン変更・支払い管理をここから行えるようになります。
+        </p>
+        {/* 課金接続点: 決済プロバイダ導入時はこのボタンを
+            チェックアウト/カスタマーポータルへの遷移に置き換え、
+            webhook側で Business.plan を更新する */}
+        <Button variant="secondary" disabled>
+          プランを変更(準備中)
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -542,6 +621,7 @@ export function SettingsScreen() {
       </Card>
 
       <BusinessSettingsCard />
+      <PlanCard />
       <MembersCard />
       <NewBusinessCard />
     </div>

@@ -11,6 +11,13 @@ export type TaxMode = "exempt" | "simple" | "standard";
 
 export type MemberRole = "owner" | "editor" | "viewer";
 
+/**
+ * 料金プラン。機能可否の判定は src/lib/billing.ts の
+ * PlanEntitlements が担う。決済プロバイダ接続前のため値の更新は
+ * サーバー側(Admin SDK)のみが行い、クライアントからは変更できない
+ */
+export type BusinessPlan = "free" | "pro";
+
 export type TransactionType = "income" | "expense" | "transfer";
 
 export type TransactionStatus = "draft" | "confirmed" | "locked";
@@ -77,6 +84,8 @@ export interface Business {
   invoiceCounter?: number;
   /** 見積番号の採番カウンタ(発行済みの最終連番)。未採番は未設定 */
   quoteCounter?: number;
+  /** 料金プラン。未設定(課金導入前のデータ)は free 扱い */
+  plan?: BusinessPlan;
   createdAt: string;
   updatedAt: string;
 }

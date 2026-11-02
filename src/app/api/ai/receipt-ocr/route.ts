@@ -12,6 +12,7 @@ import {
   fallbackReason,
   normalizeAIResponse,
 } from "@/lib/ai/schemas";
+import { assertFeatureEntitled } from "@/lib/api/entitlements";
 import { aiApiRateLimiter, aiRunRateLimiter } from "@/lib/api/rate-limit";
 import { ApiError, toErrorResponse } from "@/lib/api/result";
 import { requireEditor, requireUid, requireViewer } from "@/lib/api/session";
@@ -80,6 +81,8 @@ export async function POST(request: Request) {
     const { businessId, receiptId } = parsed.data;
     // 有償OCR/LLM呼出しはviewerに開放しない(R2-6)
     await requireEditor(businessId);
+    // entitlementチェック(課金接続時の実効ゲート。現行は全プラン有効)
+    await assertFeatureEntitled(businessId, "ai_receipt_ocr");
     // OCRはLLM課金対象のため businessId 単位で制限(suggestions と同じ枠組み)
     aiRunRateLimiter.consume(businessId);
 
