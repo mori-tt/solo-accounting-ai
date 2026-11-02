@@ -49,6 +49,33 @@
 - 事業割合0%や按分後0円の場合は取引を生成せず lastBookedFiscalYear のみ進める(必要経費に計上できないため)
 - listFixedAssets の status フィルタ(status+acquiredDate index使用)は現状サービスから未使用(全件取得してコード内フィルタ)。active資産のみの照会が必要になった場合に使用する
 - Emulator利用: `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home` export 後 `pnpm test:rules` のみ実行(next dev 未使用)
+## 2026-11-02: 専従者給与のデータ化と翌年度繰越の自動化(Issue #60)
+- Worktree: family-salary
+専従者給与科目の追加・収支内訳書の専従者給与欄を勘定合計から初期表示(手入力上書き可)、および締め時の翌年度期首残高自動生成(繰越)。依存追加なし。
+- `src/lib/accounts.ts`: `{ code: "family_salary", label: "専従者給与", kind: "expense" }` を追加(常時利用可。経費科目)
+- `src/lib/accounting/domain/filing.ts`: `IncomeStatement` に `familyEmployeeSalary` を追加。`buildIncomeStatement` が `family_salary` 科目の年間合計を同フィールドに集約し、一般経費の `expenseRows`/`totalExpenses` からは除外(差引金額で二重控除しない。帳票の「専従者給与」欄で別途控除する構成のため)
+- `src/lib/accounting/domain/ledger.ts`: `computeCarryForwardBalances(journal, openingBalances, fiscalYear, fiscalYearStartMonth, targetAccounts)` を追加。指定年度の期首残高+当年度分の確定済み仕訳から対象科目の期末残高を計算(勘定の normal balance 規則と opening_equity 仮想仕訳を踏襲・円単位整数)
+- `src/lib/accounting/services/periods.ts`:
+  - `computeCarryForward` を新設。対象科目 = `OPENING_BALANCE_ACCOUNT_OPTIONS` のプリセット資産科目(cash/deposits/receivables)+全年度の `openingBalances` 登録済み科目。締めチェック(`closingChecklist`)で `period.status === "open"` の場合のみ `carryForward` プレビュー(nextFiscalYear/balances/existing/nextYearClosed)を返す
+  - `closeFiscalPeriod(store, businessId, actor, periodId, idempotencyKey, { carryForward })` — `carryForward: true` 時のみ、期末残高0円を除く残高で翌年度 `openingBalances` を生成。対象科目の翌年度レコードは計算値で置換、対象外・他年度のレコードは温存。期首残高の更新・取引ロック・期間クローズを同一 `store.transact` 内で原子化(既存の冪等キー方式も維持)
+  - 翌年度期間が既に closed の場合は期首残高を変更せず `carriedForward.skippedClosedYear: true` でスキップ(締め済み期間のデータ直接変更禁止ルール)
+  - `ClosingChecklist.carryForward` / `CarriedForwardResult` 型を追加
+- `src/lib/actions/closing.ts`: `closePeriod(periodId, options?: { carryForward?: boolean })` — owner権限のままオプションを透過し、結果に `carriedForward`(fiscalYear/balances/skippedClosedYear)を同梱するよう拡張
+- `src/app/(app)/closing/closing-screen.tsx`: 「翌年度へ繰越」カードを追加。プレビューの期末残高テーブル、翌年度に既存レコードがある場合の上書き警告、`nextYearClosed` 時の警告表示(チェックボックス不可)、owner向けチェックボックス「締めと同時に{翌年度}年度の期首残高を自動生成する」、上書きが必要な場合のみ confirm() で再確認してから `closePeriod(id, { carryForward: true })`。締め結果カードにロック件数+生成残高テーブル(0件・スキップ時は警告メッセージ)+期首残高画面リンクを表示
+- `src/app/(app)/reports/filing/filing-screen.tsx`: 専従者給与欄を `data.statement.familyEmployeeSalary` から初期表示。UI実装は「自動値をキーとした上書き状態」(`{ auto, value } | null`)で副作用なしに表現(react-hooks の set-state-in-effect/set-state-in-render 両ルールを回避)。年度切替・取得値変化で自動的にリセットされ、手入力中は自動値が変わるまで上書きを維持。ヒント文言「専従者給与科目の年間合計を初期表示(上書き可)」
+- `src/app/(app)/reports/filing/filing-sheet.tsx`: 欄内注記を「科目の年間合計を初期表示、手入力で上書き可」趣旨に修正(手入力のみ前提の文言を解消)
+- 期首残高画面(opening-balances-screen.tsx)・アクションには変更なし(生成後の確認・修正は既存画面を利用)
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen && pnpm typecheck` — 合格
+- `pnpm test` — 合格(37ファイル499件・skip 10。新規: filing.test.ts に family_salary 集計/経費除外/0円/手動値継続、ledger.test.ts に繰越残高計算、periods.test.ts にプレビュー/既存レコード置換/ゼロ除外/他年度温存/オプション未指定時の非実行/冪等リプレイ/翌年度締め済みスキップ)
+- `pnpm build` — 合格(/closing, /opening-balances, /reports/filing を含む全ルート生成)
+- Emulator系・`next dev` は指示により未実施(rules変更なし)
+### 未解決事項・次の担当者への注意事項
+- 繰越は `period.status === "open"` の期間のみプレビュー・実行される。締め済み期間の再実行は不可(締め自体が再実行不可のため)
+- 繰越対象科目はプリセット3科目+登録済み科目に限定し、売掛・買掛の自動判定等は行わない(明示的な期首残高として登録された科目のみを信頼する設計)。負債科目(マイナス残高)も計算値が正しくない限り生成しないが、0円レコードは作成しない
+- 翌年度に期首残高が既存の場合の上書きは confirm() 確認あり、かつ締めと同時のみ実行。締め後に期首残高を直接編集する場合は既存の opening-balances 画面がそのまま使える(開いている期間のみ編集可の既存ガードに従う)
+- `family_salary` を使った取引が過去年度に存在しても当該年度の収支内訳書では正しく年度内合計のみ初期表示される(集計は年間 accountTotals ベース)
 ## 2026-11-02: 入金消込の取引紐付け強化(Issue #65)
 - Worktree: payment-matching
 請求書の入金記録時に対応する収入取引(売上取引)を選択して消込を記録し、消込状態を一覧で可視化。`Payment.transactionId` は既存フィールドをそのまま使用(types.ts変更不要)。依存追加なし。
@@ -107,7 +134,6 @@
 - `pnpm test` — 合格(38ファイル485件、skip 10。print-header.test.tsx 2件追加)
 - `pnpm build` — 合格(3ルートとも静的生成)
 - Emulator系は未実施(タスク指定により起動禁止。rules 未変更)
-### 未解決事項・次の担当者への注意事項
 - `@media print` がグローバル化されたため、**全ページ**の印刷で aside/header が非表示になる(元々帳票以外の印刷は想定されていなかったため影響は軽微)。filing-screen の局所 `<style>` は重複するが残置き(変更範囲外)
 - monthly/filing の確認: filing は Issue #42 で印刷対応済み(window.print+no-print+print-sheet)。monthly は印刷ボタン/no-print 指定なしで未対応だが、今回の変更範囲外のため確認のみ(グローバル化によりナビ類は消えるが画面UIはそのまま出る)。対応する場合は別タスクで
 - 印刷日は `todayDateString()` のレンダー時点値(印刷実行時刻とは厳密には異なる)

@@ -4,6 +4,7 @@ import {
   closeFiscalPeriod,
   closingChecklist,
   ensureFiscalPeriodForDate,
+  type CarriedForwardResult,
   type ClosingChecklist,
 } from "@/lib/accounting/services/periods";
 import type { FiscalPeriod } from "@/lib/accounting/types";
@@ -48,13 +49,19 @@ export async function getClosingChecklist(
 /**
  * 会計期間を締める(オーナーのみ・元に戻せない)。
  * 期間内のconfirmed取引はすべて locked になる。
+ * options.carryForward 指定時は翌年度の期首残高も同時に自動生成する。
  */
 export async function closeFiscalPeriodAction(
   businessId: string,
   periodId: string,
   idempotencyKey: string,
+  options?: { carryForward?: boolean },
 ): Promise<
-  ActionResult<{ period: FiscalPeriod; lockedTransactions: number }>
+  ActionResult<{
+    period: FiscalPeriod;
+    lockedTransactions: number;
+    carriedForward: CarriedForwardResult | null;
+  }>
 > {
   return run(async () => {
     const actor = await requireOwner(businessId);
@@ -64,10 +71,12 @@ export async function closeFiscalPeriodAction(
       actor,
       periodId,
       idempotencyKey,
+      { carryForward: options?.carryForward === true },
     );
     return {
       period: result.period,
       lockedTransactions: result.lockedTransactions,
+      carriedForward: result.carriedForward,
     };
   });
 }

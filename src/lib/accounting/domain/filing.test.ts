@@ -72,6 +72,38 @@ describe("buildIncomeStatement", () => {
     expect(s.expenseRows).toEqual([]);
     expect(s.totalIncome).toBe(0);
     expect(s.grossIncome).toBe(0);
+    expect(s.familyEmployeeSalary).toBe(0);
+  });
+
+  it("family_salary科目は経費から分離して専従者給与の初期値にする", () => {
+    const s = buildIncomeStatement(
+      reportOf([
+        tx("t1", { account: "sales", amount: 1_000_000 }),
+        tx("t2", {
+          type: "expense",
+          account: "family_salary",
+          amount: 300_000,
+        }),
+        tx("t3", {
+          type: "expense",
+          account: "family_salary",
+          amount: 100_000,
+        }),
+        tx("t4", {
+          type: "expense",
+          account: "rent",
+          amount: 120_000,
+        }),
+      ]),
+    );
+    // 経費部には載せず(二重計上防止)、専従者給与欄の初期値に集計する
+    expect(s.expenseRows).toEqual([
+      { account: "rent", amount: 120_000 },
+    ]);
+    expect(s.totalExpenses).toBe(120_000);
+    expect(s.familyEmployeeSalary).toBe(400_000);
+    // 差引金額には専従者給与を含めない(所得計算時に専用欄で差し引く)
+    expect(s.grossIncome).toBe(1_000_000 - 120_000);
   });
 
   it("赤字(経費が収入を超過)は差引金額が負になる", () => {
