@@ -109,6 +109,42 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 pnpm emulators
 - デプロイ前チェック: `pnpm lint` / `pnpm exec next typegen && pnpm typecheck` /
   `pnpm test` / `pnpm build` / `pnpm test:rules`
 
+### Firebase Hosting / CDN キャッシュ
+
+`firebase.json` の `hosting` セクションは、静的アセットを Firebase
+Hosting(CDN)へ配置する場合のキャッシュ方針を定義する:
+
+- `/_next/static/**`(コンテンツハッシュ付き):
+  `public, max-age=31536000, immutable` — 長期キャッシュ可
+- それ以外(HTML を含む `**`):
+  `public, max-age=0, must-revalidate` — 再検証を強制し、動的 HTML が
+  CDN/ブラウザに残り続けるのを防ぐ
+
+ヘッダールールは「全マッチを走査し最後にマッチした定義で上書き」
+(last match wins)のため、catch-all(`**`)を先に、個別ルール
+(`/_next/static/**`)を後に書く。順序を逆にすると immutable が
+効かなくなるので注意。
+
+静的アセットを Hosting へ載せる場合は、ビルド成果物の `.next/static`
+を `public/_next/static` へコピーしてからデプロイする(生成物のため
+コミットしない):
+
+```bash
+pnpm build
+mkdir -p public/_next/static && rsync -a --delete .next/static/ public/_next/static/
+firebase deploy --only hosting --project <本番プロジェクトID>
+```
+
+アプリ本体(SSR / Route Handler / Server Action)は従来どおり Node.js
+実行環境(Cloud Run / Firebase App Hosting 等)へデプロイし、
+独自ドメインや rewrite 経由で Hosting CDN と併用する構成を想定する。
+
+備考: `hosting` セクション追加により `pnpm emulators` で Hosting
+Emulator も起動する。デフォルト port 5000 は macOS の
+AirPlay Receiver(ControlCenter)と衝突するため 5005 に固定済み。
+開発時のアプリ自体は `pnpm dev` 経由のため Hosting Emulator は
+必須ではない。
+
 ## Testing Notes
 
 - `pnpm typecheck` は `LayoutProps` 等のグローバル型に依存する。
