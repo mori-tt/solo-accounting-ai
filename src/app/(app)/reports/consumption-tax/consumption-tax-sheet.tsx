@@ -41,6 +41,9 @@ function ModeLabel({
   mode: TaxMode;
   businessClass?: SimplifiedBusinessClass;
 }) {
+  if (mode === "special20") {
+    return <>2割特例(インボイス制度移行措置)</>;
+  }
   if (mode === "simple" && businessClass !== undefined) {
     return (
       <>
@@ -187,6 +190,15 @@ export function ConsumptionTaxSheet({
                 {formatYen(filing.deductibleInputTax)}
               </td>
             </tr>
+          ) : mode === "special20" ? (
+            <tr>
+              <td className="pl-4">
+                控除対象仕入税額(2割特例・消費税額×80%)
+              </td>
+              <td className="text-right tabular-nums">
+                {formatYen(filing.deductibleInputTax)}
+              </td>
+            </tr>
           ) : (
             <>
               <tr>
@@ -300,6 +312,8 @@ export function ConsumptionTaxSheet({
         加算税等は含みません。
         {mode === "simple" &&
           " みなし仕入率は画面上の選択値で、実際の事業区分と異なる場合は申告前に確認してください。"}
+        {mode === "special20" &&
+          " 2割特例は免税事業者が適格請求書発行事業者の登録により課税事業者になった場合の経過措置で、適用は2023/10/1〜2026/9/30の日の属する課税期間に限られます。登録によらず課税事業者の場合等、適用要件は申告前に確認してください。"}
       </p>
     </div>
   );

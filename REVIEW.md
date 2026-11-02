@@ -16,6 +16,39 @@
 
 ## Log
 
+## 2026-11-02: 消費税2割特例(インボイス制度移行措置)の課税方式対応(Issue #145)
+- Worktree: tax-2wari
+免税事業者が適格請求書発行事業者の登録で課税事業者になった場合の経過措置「2割特例」(納付税額=課税標準額の消費税額×20%)を、課税方式 `special20` として追加。適用対象は2023-10-01〜2026-09-30の日の属する課税期間に限定。依存追加なし。
+### 実装内容
+- `src/lib/accounting/types.ts`: `TaxMode` に `"special20"` を追加(適用期間の要件をJSDocに記載)
+- `src/lib/accounting/domain/tax.ts`:
+  - `TAX_MODES` に `"special20"` 追加。`SPECIAL20_DEEMED_PURCHASE_FRACTION = 4/5`(一律80%のみなし仕入率。申告書の「控除対象仕入税額=消費税額×80%」の手順に対応)
+  - `SPECIAL20_APPLICABLE_PERIOD`(2023-10-01〜2026-09-30)と `isSpecial20ApplicablePeriod(range)` を追加。「期間内の日の属する課税期間」要件を期間重なり判定で検証(開始>終了の逆転期間は VALIDATION_FAILED、不正日付は INVALID_DATE)
+  - 両関数の options を `ConsumptionTaxOptions`(`businessClass?`+`period?`)へ拡張。`period` は special20 で必須・他方式では指定拒否(`businessClass` の simple 専用ルールと同型の厳格バリデーション)
+  - `computeConsumptionTaxPayable`: special20 は `deductibleInputTax = floor(outputTax×80%)`、`taxPayable = outputTax − 控除額`
+  - `computeConsumptionTaxFiling`: special20 は `deductibleInputTax = floor(nationalTax合計×80%)`。税率別 breakdown の控除額は簡易課税と同じく0(合計への一括適用)。控除額は売上税額を超えないため還付は発生しない
+- バリデーション・保存系: `validation/schemas.ts`(businessSchema)、`backup.ts`(backupBusinessSchema)、`services/business.ts`(TAX_MODES) に `special20` を追加。firestore.rules は taxMode を検証していないため変更なし
+- 設定系UI: settings-screen の `TAX_MODE_LABELS` に「2割特例(インボイス移行措置)」追加(選択肢・表示とも `Object.entries` 駆動のため同時反映)。onboarding-screen・app-shell(初回事業作成)にも選択肢を追加(app-shell は `useState` の型を `TaxMode` へ修正)
+- `reports/actions.ts` の `getYearlyReport`: special20 は適用期間と重なる場合のみ `computeConsumptionTaxFiling` に `period` 付きで実行し、期間外は `taxFiling=null` を返す(画面側で「適用期間外」案内を出すため)
+- `yearly-screen.tsx`: 課税方式ラベルに2割特例追加。special20 で税Filing=null(適用期間外)のとき「適用期間外」Alertを表示。概算カードの方式表記に2割特例を追加
+- `consumption-tax-screen.tsx`: special20 は `data.range` が適用期間と重なるときのみ filing を計算(`{ period: data.range }` を渡す)。期間外は警告Alert(期間・年度日付を併記)を表示してシートを出さない
+- `consumption-tax-sheet.tsx`: ModeLabel に「2割特例(インボイス制度移行措置)」、仕入税額控除セクションに「控除対象仕入税額(2割特例・消費税額×80%)」行を追加(本則課税の支払対価行・簡易課税のみなし仕入率行は出さない)。脚注に適用要件・期間制限を追記
+- ドキュメント: `docs/ACCOUNTING_RULES.md`・`docs/FIRESTORE_SCHEMA.md` の taxMode 列挙に `special20` を追記
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm test` — 合格(61ファイル767件、skip 10。`tax.test.ts` に special20 計算・period バリデーション・`isSpecial20ApplicablePeriod` 境界値、`consumption-tax-sheet.test.tsx` に2割特例帳票の計7件追加)
+- `pnpm build` — 合格
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル156件)
+- `pnpm test:emulators` — 合格(2ファイル7件)
+### 判断事項・次の担当者への注意事項
+- 控除額は「消費税額合計×80%の切捨て」で算出するため、差引税額は厳密には売上税額の20%ではなく端数分だけ大きくなり得る(例: 消費税999円→控除799→差引200円)。申告書(付表2-3)の「控除対象仕入税額=消費税額×80%」の手順どおりの挙動
+- 納付税額は従来どおり国税・地方消費税とも百円未満切捨て。小額では百円切捨て後0になる場合がある(例: 差引21円→納付0)
+- special20 は消費税申告期限アラート対象(`deadlines.ts` の `taxMode !== "exempt"` に自動適合)。還付は発生しない計算構造
+- 適用期間は「期間内の日を含む課税期間」(重なり判定)。暦年課税期間なら2023・2024・2025・2026年が対象。2026-10-01以降開始の期間は適用不可
+- 特例の適用要件(インボイス登録による免税→課税転換であること、簡易課税選択の有無等)はアプリでは検証できないため、期間妥当性のみドメインで強制し、要件の確認は画面・帳票の注意書きに委ねる設計
+- `computeConsumptionTaxPayable` はアプリ画面から未参照(テスト専用の集計API)だが、filing と同じバリデーション規則を適用して対称性を保った
 ## 2026-11-02: 帳票発行(見積書・見積→請求変換・納品書・領収書・請求書PDF)(Issue #129)
 - Worktree: docs-issuance
 見積書コレクション新設、見積→請求転換、請求書ベースの納品書・入金ベースの発行領収書の帳票追加、印刷/PDF導線の改善。依存追加なし。

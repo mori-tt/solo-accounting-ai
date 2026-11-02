@@ -79,7 +79,7 @@ receipts(証憑ファイル)
 | name | string | 事業名 |
 | ownerUid | string | 作成者 |
 | fiscalYearStartMonth | number | 会計年度開始月(1-12) |
-| taxMode | string | `exempt` / `simple` / `standard` 消費税課税方式 |
+| taxMode | string | `exempt` / `simple` / `standard` / `special20`(2割特例・インボイス移行措置) 消費税課税方式 |
 | customAccounts | object[] | 任意・最大50件。`{ code, label, kind: income\|expense, parentCode?, disabled? }` カスタム勘定科目・補助科目 |
 | allocationRatios | map? | 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い |
 | openingBalances | array | 期首残高 `{ fiscalYear, accountCode, amount }[]`。amountは円・整数、借方残高を正・貸方残高を負とする。任意 |

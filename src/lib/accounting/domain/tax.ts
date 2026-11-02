@@ -1,3 +1,4 @@
+import { assertISODate, type ISODate } from "./dates";
 import { DomainError } from "./errors";
 import { addYen, assertNonNegativeYen } from "./money";
 import type { TaxCategory, TaxMode } from "./types";
@@ -10,7 +11,12 @@ export type SimplifiedBusinessClass = 1 | 2 | 3 | 4 | 5 | 6;
 
 type Fraction = readonly [numerator: number, denominator: number];
 
-const TAX_MODES: readonly TaxMode[] = ["exempt", "simple", "standard"];
+const TAX_MODES: readonly TaxMode[] = [
+  "exempt",
+  "simple",
+  "standard",
+  "special20",
+];
 
 /**
  * 税率は既約分数で保持し、浮動小数点を介さず整数演算だけで
@@ -33,6 +39,58 @@ const DEEMED_PURCHASE_FRACTIONS: Record<SimplifiedBusinessClass, Fraction> = {
   5: [5, 10],
   6: [4, 10],
 };
+
+/**
+ * 2割特例(インボイス制度移行措置)のみなし仕入率。
+ * 免税事業者が適格請求書発行事業者の登録で課税事業者になった場合の
+ * 経過措置で、業種にかかわらず一律80%とみなされる。
+ */
+const SPECIAL20_DEEMED_PURCHASE_FRACTION: Fraction = [4, 5];
+
+/**
+ * 2割特例の適用対象期間(2023-10-01 〜 2026-09-30)。
+ * この期間内の日を含む課税期間に限り特例を適用できる。
+ */
+export const SPECIAL20_APPLICABLE_PERIOD: {
+  startDate: ISODate;
+  endDate: ISODate;
+} = { startDate: "2023-10-01", endDate: "2026-09-30" };
+
+/**
+ * 課税期間が2割特例の適用対象期間と重なるかどうか。
+ * 「2023-10-01〜2026-09-30の日の属する課税期間」の要件を
+ * 期間の重なり判定として表現したもの。
+ */
+export function isSpecial20ApplicablePeriod(range: {
+  startDate: ISODate;
+  endDate: ISODate;
+}): boolean {
+  assertISODate(range.startDate, "startDate");
+  assertISODate(range.endDate, "endDate");
+  if (range.startDate > range.endDate) {
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      "startDate must be on or before endDate",
+    );
+  }
+  return (
+    range.startDate <= SPECIAL20_APPLICABLE_PERIOD.endDate &&
+    range.endDate >= SPECIAL20_APPLICABLE_PERIOD.startDate
+  );
+}
+
+/** mode=special20 で必須の課税期間を検証する。 */
+function assertSpecial20Period(period: {
+  startDate: ISODate;
+  endDate: ISODate;
+}): void {
+  if (!isSpecial20ApplicablePeriod(period)) {
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      `special20 period must include dates within ${SPECIAL20_APPLICABLE_PERIOD.startDate} to ${SPECIAL20_APPLICABLE_PERIOD.endDate}`,
+    );
+  }
+}
 
 function floorFraction(amountYen: number, [numerator, denominator]: Fraction): number {
   const product = amountYen * numerator;
@@ -142,10 +200,21 @@ export interface ConsumptionTaxTotals {
   inputTax?: number;
 }
 
+export interface ConsumptionTaxOptions {
+  /** 簡易課税の事業区分(第1〜6種)。mode=simple のとき必須、他方式では指定不可 */
+  businessClass?: SimplifiedBusinessClass;
+  /**
+   * 対象課税期間。mode=special20 のとき必須、他方式では指定不可。
+   * 2割特例の適用対象期間(2023-10-01〜2026-09-30の日の属する課税期間)
+   * との重なりを検証するために使う。
+   */
+  period?: { startDate: ISODate; endDate: ISODate };
+}
+
 export interface ConsumptionTaxReport {
   mode: TaxMode;
   outputTax: number;
-  /** 仕入税額控除額。簡易課税はみなし仕入れで算出した額 */
+  /** 仕入税額控除額。簡易課税・2割特例はみなし仕入れで算出した額 */
   deductibleInputTax: number;
   /** 納付税額。負数は還付相当額(本則課税のみ発生し得る) */
   taxPayable: number;
@@ -156,11 +225,13 @@ export interface ConsumptionTaxReport {
  * - exempt: 免税事業者。納付義務なし
  * - standard: 本則課税。outputTax - inputTax
  * - simple: 簡易課税。outputTax - floor(outputTax × みなし仕入率)
+ * - special20: 2割特例。outputTax - floor(outputTax × 80%)
+ *   (= 売上税額の約20%が納付額。適用対象の課税期間を period で指定・必須)
  */
 export function computeConsumptionTaxPayable(
   mode: TaxMode,
   totals: ConsumptionTaxTotals,
-  options: { businessClass?: SimplifiedBusinessClass } = {},
+  options: ConsumptionTaxOptions = {},
 ): ConsumptionTaxReport {
   if (!TAX_MODES.includes(mode)) {
     throw new DomainError(
@@ -172,15 +243,21 @@ export function computeConsumptionTaxPayable(
   const inputTax = totals.inputTax ?? 0;
   assertNonNegativeYen(outputTax, "outputTax");
   assertNonNegativeYen(inputTax, "inputTax");
-  const { businessClass } = options;
+  const { businessClass, period } = options;
+  if (businessClass !== undefined && mode !== "simple") {
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      "businessClass is only valid for simple mode",
+    );
+  }
+  if (period !== undefined && mode !== "special20") {
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      "period is only valid for special20 mode",
+    );
+  }
 
   if (mode === "exempt") {
-    if (businessClass !== undefined) {
-      throw new DomainError(
-        "VALIDATION_FAILED",
-        "businessClass is only valid for simple mode",
-      );
-    }
     return { mode, outputTax, deductibleInputTax: 0, taxPayable: 0 };
   }
 
@@ -204,12 +281,26 @@ export function computeConsumptionTaxPayable(
     };
   }
 
-  if (businessClass !== undefined) {
-    throw new DomainError(
-      "VALIDATION_FAILED",
-      "businessClass is only valid for simple mode",
+  if (mode === "special20") {
+    if (period === undefined) {
+      throw new DomainError(
+        "VALIDATION_FAILED",
+        "period is required for special20 mode",
+      );
+    }
+    assertSpecial20Period(period);
+    const deductibleInputTax = floorFraction(
+      outputTax,
+      SPECIAL20_DEEMED_PURCHASE_FRACTION,
     );
+    return {
+      mode,
+      outputTax,
+      deductibleInputTax,
+      taxPayable: outputTax - deductibleInputTax,
+    };
   }
+
   return {
     mode,
     outputTax,
@@ -291,7 +382,8 @@ export interface FilingRateBreakdown {
   nationalTax: number;
   /**
    * 控除対象仕入税額(本則課税のみ算出、支払対価 × 7.8/110 or 6.24/108)。
-   * 簡易課税はみなし仕入れが消費税額合計への適用のため税率別按分せず 0。
+   * 簡易課税・2割特例はみなし仕入れが消費税額合計への適用のため
+   * 税率別按分せず 0。
    */
   deductibleInputTax: number;
 }
@@ -304,7 +396,7 @@ export interface ConsumptionTaxFiling {
   totalTaxableBase: number;
   /** 課税標準額に対する消費税額(国税)の合計 */
   nationalTax: number;
-  /** 控除対象仕入税額の合計。簡易課税はみなし仕入れ算出額 */
+  /** 控除対象仕入税額の合計。簡易課税・2割特例はみなし仕入れ算出額 */
   deductibleInputTax: number;
   /**
    * 差引税額(国税・百円未満切捨て前)。地方消費税の課税標準となる
@@ -331,12 +423,14 @@ export interface ConsumptionTaxFiling {
  * - exempt: 納付義務なし。全額0、breakdown空
  * - standard: 本則課税。税率別に仕入税額を控除、残が負なら還付
  * - simple: 簡易課税。控除額 = 消費税額合計 × みなし仕入率(businessClass 必須)
+ * - special20: 2割特例。控除額 = 消費税額合計 × 80%(period 必須・
+ *   適用対象期間との重なりを検証)。控除額は売上税額を超えないため還付は生じない
  * 納付額は国税・地方税とも百円未満切捨て、還付額は1円精度。
  */
 export function computeConsumptionTaxFiling(
   mode: TaxMode,
   amounts: readonly FilingTaxableAmounts[],
-  options: { businessClass?: SimplifiedBusinessClass } = {},
+  options: ConsumptionTaxOptions = {},
 ): ConsumptionTaxFiling {
   if (!TAX_MODES.includes(mode)) {
     throw new DomainError(
@@ -344,12 +438,27 @@ export function computeConsumptionTaxFiling(
       `mode must be one of ${TAX_MODES.join("/")}`,
     );
   }
-  const { businessClass } = options;
+  const { businessClass, period } = options;
   if (mode !== "simple" && businessClass !== undefined) {
     throw new DomainError(
       "VALIDATION_FAILED",
       "businessClass is only valid for simple mode",
     );
+  }
+  if (mode !== "special20" && period !== undefined) {
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      "period is only valid for special20 mode",
+    );
+  }
+  if (mode === "special20") {
+    if (period === undefined) {
+      throw new DomainError(
+        "VALIDATION_FAILED",
+        "period is required for special20 mode",
+      );
+    }
+    assertSpecial20Period(period);
   }
 
   const totals = new Map<
@@ -427,6 +536,12 @@ export function computeConsumptionTaxFiling(
       );
     }
     filing.deductibleInputTax = floorFraction(filing.nationalTax, fraction);
+  }
+  if (mode === "special20") {
+    filing.deductibleInputTax = floorFraction(
+      filing.nationalTax,
+      SPECIAL20_DEEMED_PURCHASE_FRACTION,
+    );
   }
 
   const balance = filing.nationalTax - filing.deductibleInputTax;

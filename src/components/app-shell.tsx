@@ -17,6 +17,7 @@ import {
   TextInput,
 } from "./ui";
 import { createBusiness } from "@/lib/actions/businesses";
+import type { TaxMode } from "@/lib/accounting/types";
 import { businessSchema, parseForm } from "@/lib/validation/schemas";
 import { NavLinks } from "./nav-links";
 
@@ -25,9 +26,7 @@ function BusinessOnboarding() {
   const { reloadBusinesses } = useApp();
   const [name, setName] = useState("");
   const [startMonth, setStartMonth] = useState("1");
-  const [taxMode, setTaxMode] = useState<"exempt" | "simple" | "standard">(
-    "exempt",
-  );
+  const [taxMode, setTaxMode] = useState<TaxMode>("exempt");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
@@ -96,6 +95,9 @@ function BusinessOnboarding() {
               <option value="exempt">免税事業者</option>
               <option value="simple">簡易課税</option>
               <option value="standard">本則課税</option>
+              <option value="special20">
+                2割特例(インボイス移行措置)
+              </option>
             </Select>
           </Field>
           {error && <Alert tone="error">{error}</Alert>}

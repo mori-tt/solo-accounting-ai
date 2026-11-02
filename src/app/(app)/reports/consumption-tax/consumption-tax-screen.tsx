@@ -10,6 +10,8 @@ import { callApi } from "@/lib/api-client";
 import { fiscalYearOf } from "@/lib/accounting/domain/fiscal";
 import {
   computeConsumptionTaxFiling,
+  isSpecial20ApplicablePeriod,
+  SPECIAL20_APPLICABLE_PERIOD,
   type SimplifiedBusinessClass,
 } from "@/lib/accounting/domain/tax";
 import { formatDateJP, todayDateString } from "@/lib/format";
@@ -58,19 +60,27 @@ export function ConsumptionTaxScreen() {
     [businessId, fiscalYear],
   );
 
+  // 2割特例は適用対象期間(2023/10-2026/9の日の属する課税期間)外なら計算しない
+  const special20OutOfPeriod =
+    data?.taxMode === "special20" &&
+    !isSpecial20ApplicablePeriod(data.range);
+
   // 集計入力はサーバー取得、納付額の算出はドメイン関数を画面側で実行する
   // (事業区分の変更を再取得なしで即時反映するため。決算書画面のcomputeNetIncomeと同型)
-  const filing = data
-    ? data.taxMode === "simple" && businessClass === null
-      ? null
-      : computeConsumptionTaxFiling(
-          data.taxMode,
-          data.filingAmounts,
-          data.taxMode === "simple" && businessClass !== null
-            ? { businessClass }
-            : {},
-        )
-    : null;
+  const filing =
+    data && !special20OutOfPeriod
+      ? data.taxMode === "simple" && businessClass === null
+        ? null
+        : computeConsumptionTaxFiling(
+            data.taxMode,
+            data.filingAmounts,
+            data.taxMode === "simple" && businessClass !== null
+              ? { businessClass }
+              : data.taxMode === "special20"
+                ? { period: data.range }
+                : {},
+          )
+      : null;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -159,6 +169,19 @@ export function ConsumptionTaxScreen() {
             <div className="no-print">
               <Alert tone="info">
                 免税事業者のため消費税の納付義務はありません。
+                課税方式は設定画面で変更できます。
+              </Alert>
+            </div>
+          ) : special20OutOfPeriod ? (
+            <div className="no-print">
+              <Alert tone="warning">
+                2割特例は
+                {formatDateJP(SPECIAL20_APPLICABLE_PERIOD.startDate)}〜
+                {formatDateJP(SPECIAL20_APPLICABLE_PERIOD.endDate)}
+                の日の属する課税期間に限り適用できます。
+                この会計年度({formatDateJP(data.range.startDate)}〜
+                {formatDateJP(data.range.endDate)}
+                )は適用期間外のため計算しません。
                 課税方式は設定画面で変更できます。
               </Alert>
             </div>

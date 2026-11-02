@@ -25,6 +25,7 @@ import {
 } from "@/lib/accounting/domain/fiscal";
 import {
   computeConsumptionTaxFiling,
+  isSpecial20ApplicablePeriod,
   type ConsumptionTaxFiling,
   type FilingTaxableAmounts,
 } from "@/lib/accounting/domain/tax";
@@ -199,6 +200,7 @@ export interface YearlyReportData {
   /**
    * 申告レベルの消費税概算。簡易課税は事業区分(みなし仕入率)が
    * 未設定のため null(概算を出さない)。免税事業者は納付額0の結果。
+   * 2割特例は対象年度が適用期間外なら null。
    */
   taxFiling: ConsumptionTaxFiling | null;
 }
@@ -222,12 +224,16 @@ export async function getYearlyReport(
     if (!business) {
       throw new ApiError("NOT_FOUND", "事業が見つかりません");
     }
-    const { startDate, endDate } = fiscalPeriodRange(
+    const range = fiscalPeriodRange(
       fiscalYear,
       business.fiscalYearStartMonth,
     );
     const [transactions, expenses] = await Promise.all([
-      store.listTransactionsInRange(businessId, startDate, endDate),
+      store.listTransactionsInRange(
+        businessId,
+        range.startDate,
+        range.endDate,
+      ),
       store.listExpenses(businessId),
     ]);
     const report = buildYearlyReport(
@@ -237,9 +243,15 @@ export async function getYearlyReport(
     );
     const tax = buildConsumptionTaxSummary(transactions, expenses);
     const taxFiling =
-      business.taxMode === "simple"
+      business.taxMode === "simple" ||
+      (business.taxMode === "special20" &&
+        !isSpecial20ApplicablePeriod(range))
         ? null
-        : computeConsumptionTaxFiling(business.taxMode, tax.filingAmounts);
+        : computeConsumptionTaxFiling(
+            business.taxMode,
+            tax.filingAmounts,
+            business.taxMode === "special20" ? { period: range } : {},
+          );
     return {
       fiscalYear,
       fiscalYearStartMonth: business.fiscalYearStartMonth,

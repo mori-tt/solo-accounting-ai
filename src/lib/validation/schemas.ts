@@ -76,7 +76,7 @@ export const businessSchema = z.object({
     .int("1〜12の整数で入力してください")
     .min(1, "1〜12で入力してください")
     .max(12, "1〜12で入力してください"),
-  taxMode: z.enum(["exempt", "simple", "standard"]),
+  taxMode: z.enum(["exempt", "simple", "standard", "special20"]),
   /** 家事按分の事業割合(科目コード→0-100の整数%)。未設定科目は100%扱い */
   allocationRatios: z
     .record(

@@ -43,6 +43,7 @@ const TAX_MODE_LABELS: Record<TaxMode, string> = {
   exempt: "免税事業者",
   simple: "簡易課税",
   standard: "本則課税",
+  special20: "2割特例(インボイス移行措置)",
 };
 
 const ROLE_LABELS: Record<MemberRole, string> = {

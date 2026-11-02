@@ -36,6 +36,7 @@ const TAX_MODE_LABELS: Record<string, string> = {
   exempt: "免税事業者",
   simple: "簡易課税",
   standard: "本則課税",
+  special20: "2割特例",
 };
 
 /** "YYYY-MM" → "YYYY年M月" */
@@ -298,6 +299,15 @@ export function YearlyScreen() {
                 設定されていないため概算は表示していません。
               </Alert>
             </Card>
+          ) : data.taxMode === "special20" && data.taxFiling === null ? (
+            <Card className="mt-6">
+              <h2 className="mb-2 text-sm font-semibold">消費税の申告概算</h2>
+              <Alert tone="info">
+                2割特例は2023年10月1日〜2026年9月30日の日の属する課税期間に
+                限り適用できます。この会計年度は適用期間外のため、
+                概算は表示していません。
+              </Alert>
+            </Card>
           ) : (
             data.taxFiling && (
               <Card className="mt-6">
@@ -306,7 +316,9 @@ export function YearlyScreen() {
                   <span className="ml-2 text-xs font-normal text-zinc-400">
                     {data.taxMode === "exempt"
                       ? "免税事業者"
-                      : "本則課税・割戻し方式"}
+                      : data.taxMode === "special20"
+                        ? "2割特例"
+                        : "本則課税・割戻し方式"}
                   </span>
                 </h2>
                 {data.taxMode === "exempt" ? (
