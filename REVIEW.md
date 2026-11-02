@@ -45,6 +45,27 @@
 - 繰越対象科目はプリセット3科目+登録済み科目に限定し、売掛・買掛の自動判定等は行わない(明示的な期首残高として登録された科目のみを信頼する設計)。負債科目(マイナス残高)も計算値が正しくない限り生成しないが、0円レコードは作成しない
 - 翌年度に期首残高が既存の場合の上書きは confirm() 確認あり、かつ締めと同時のみ実行。締め後に期首残高を直接編集する場合は既存の opening-balances 画面がそのまま使える(開いている期間のみ編集可の既存ガードに従う)
 - `family_salary` を使った取引が過去年度に存在しても当該年度の収支内訳書では正しく年度内合計のみ初期表示される(集計は年間 accountTotals ベース)
+## 2026-11-02: ダッシュボードのアラート通知とAI使用量表示(Issue #62)
+- Worktree: alerts-quota
+依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
+- `src/lib/api/rate-limit.ts`: `AI_RUN_LIMIT_PER_HOUR = 60` をexportし `aiRunRateLimiter` の limit に使用(APIが上限値を定数から返せるようにした)
+- `src/app/api/ai/usage/route.ts`(新規): `GET ?businessId=` → `requireViewer` 後 `{ remaining: aiRunRateLimiter.remaining(businessId), limit: AI_RUN_LIMIT_PER_HOUR }` を返す軽量API。既存Route Handlerパターン(ApiError/toErrorResponse・`{ok,data}`エンベロープ)踏襲。回数消費はしない
+- `src/lib/api-client.ts`: `AiUsage` 型と `fetchAiUsage(businessId)` を追加(requestJson経由)
+- `src/lib/unclosed-months.ts`(新規・純粋関数): `countUnclosedMonths(periods, transactionMonthKeys, currentMonthKey)`。「前月以前で未締めの月」= open期間がカバーする月 ∪ 取引が存在する月(いずれも前月以前) − closed期間内の月。締め単位は会計期間で月境界に揃うため月キー範囲で判定。取引も期間も無い月は締める対象が無いため除外
+- `src/lib/actions/reports.ts`: `DashboardData.unclosedMonthCount` 追加。`Promise.all` に `store.listFiscalPeriods` を1本追加し、取得済み `allTx` の月キーと合わせてカウント(viewer可の既存action内で完結)
+- `dashboard-screen.tsx`: 要対応カードに「未締めの月(前月以前)」項目追加(`AttentionItem` に `unit` propを追加し `Nヶ月` 表示、リンク先 `/closing`、allClear条件にも追加)。カード見出し右側に「今時間のAI提案 残りN回」Badge(0回時amber)。AI使用量は `useApiData(fetchAiUsage)` で本体とは独立して取得し、失敗・未取得時は何も表示しない(Alertではなく非表示フォールバック)
+- Issue指定のアラート(a)未入金・期限超過の請求書/(b)未処理領収書は既存の要対応カードに `/invoices`・`/receipts` 導線付きで実装済みだったため、不足していた(c)未締め月のみ追加
+- `src/lib/unclosed-months.test.ts`(新規): 7件。空・取引月のみ・当月除外・open期間月(前月で頭打ち)・closed期間除外・和集合・重複除去
+- `pnpm exec next typegen` — 成功(/api/ai/usage のroute型生成)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(38ファイル491件、skip 10)
+- `pnpm build` — 合格(`/api/ai/usage` が動的ルートとして登録)
+- Firebase Emulator tests — 未実施(Issue制約でEmulator禁止。firestore.rules変更なし)
+### 判断事項・次の担当者への注意事項
+- 「未締めの月」の定義: 締め単位が会計期間(年単位)しか存在しないため、月がclosed期間に含まれるかで判定した。open期間の月は取引有無に関わらず未締めとしてカウント(最大で期間長分)。取引があるが期間未作成の月も未締めに含める(期間作成→締めの導線が必要なため)
+- AI使用量はサーバー再起動でインメモリの消費数がリセットされる既知の性質(rate-limit.tsのコメントどおり最良努力制限)。表示値は参考値
+- `fetchAiUsage` はセッション切れ時の再取得リトライ(callApi相当)を持たない。補助表示のため失敗時は非表示のまま
 ## 2026-11-02: 帳簿の印刷出力(仕訳帳・元帳・試算表)(Issue #59)
 - Worktree: ledger-print
 `reports/journal`・`reports/ledger`・`reports/trial-balance` の3画面に `window.print()` 印刷対応。依存追加なし。
@@ -62,7 +83,6 @@
 - monthly/filing の確認: filing は Issue #42 で印刷対応済み(window.print+no-print+print-sheet)。monthly は印刷ボタン/no-print 指定なしで未対応だが、今回の変更範囲外のため確認のみ(グローバル化によりナビ類は消えるが画面UIはそのまま出る)。対応する場合は別タスクで
 - 印刷日は `todayDateString()` のレンダー時点値(印刷実行時刻とは厳密には異なる)
 - 帳票の @page(用紙サイズ/余白)指定は未追加。ブラウザ既定のまま
-
 ## 2026-11-02: カスタム勘定科目・補助科目(Issue #46)
 - Worktree: custom-accounts
 ### 実装内容
@@ -1166,9 +1186,34 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 全角元号アルファベット(Ｒ等)は数字のみ半角化するため列名・日付ともに対象外(半角表記のみ受理)
 - `api-client.ts`・`csv.ts`・`accounts.ts`・`firestore.rules`・設定画面は変更なし(許容範囲内で不要だった)
 - E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク
+## 2026-11-02: グローバル検索と入力履歴サジェスト(Issue #61)
+- Worktree: search-suggest
+### 実装内容
+- `/search` 新規画面(`src/app/(app)/search/`): フリーテキストで摘要・取引先・科目・金額を横断検索。確定済み(confirmed/locked)のみ、businessIdは `requireViewer` でスコープ。期間は「全会計期間(既定)/直近1年/期間を指定(任意の片側のみも可)」。結果は日付降順テーブルで、各行に取引一覧へのリンク(50件ずつ「さらに読み込む」)
+- `src/lib/search.ts`(新規): `transactionMatchesQuery`(空白区切りトークンのAND。各トークンは 摘要/取引先/科目コード/科目名/金額 のいずれかに部分一致。金額は数字以外を落として比較)と `normalizeSearchText`(NFKC正規化で全角英数・半角カナ・全角スペースを吸収)、`recentDistinctValues`(直近利用順distinct)
+- `src/lib/actions/search.ts`(新規): `searchTransactions`。`listTransactionsInRange` で範囲取得後、科目ラベル(標準+カスタム科目)を解決してマッチング。未指定期間は `0001-01-01`〜`9999-12-31`
+- `src/lib/validation/schemas.ts`: `transactionSearchSchema`(query≤200文字、任意期間、startDate≤endDateのrefine)追加
+- `src/lib/actions/transactions.ts`: `listTransactionInputHistory` 追加。全期間の取引(下書き含む)から取引先・摘要のdistinct値を直近利用順で返す
+- `transaction-form.tsx`: 取引先・摘要に `<datalist>` オートコンプリート。履歴はフォーム内で `listTransactionInputHistory` を取得(親画面は変更不可のため自己完結)。摘要は datalist 非対応の `Textarea` から `TextInput` へ変更(もともと rows=1 の単一行)
+- `app-shell.tsx`: ナビ「取引一覧」の次に「検索」を1行追加
+- `src/lib/search.test.ts`(新規): 14件。正規化(全角/半角カナ/空白畳み)、横断一致(摘要/取引先/科目コード/科目名/金額各表記)、ANDトークン、空クエリ全件一致、distinct順序/空除外/limit
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(38ファイル496件、skip 10。search.test.ts 14件含む)
+- `pnpm build` — 合格(`/search` が静的ルートとして生成)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし。起動自体がIssue制約で禁止)
+### 設計上の判断・備考
+- Firestoreに全文検索が無いため、期間範囲の取引取得→`transactionMatchesQuery` でサーバー側フィルタ。期間未指定は既存と同じ全期間rangeを使う
+- 検索対象は confirmed/locked(=確定済み)に限定。入力履歴サジェストは入力補助のため下書きも含める
+- 金額検索はトークンの数字以外を除去して部分一致(「12,000」「¥12000」「12000円」「１２０００」いずれも金額12000に一致)
+- 結果行のリンク先は `/transactions`(同画面は月単位表示・deep link未対応のため一覧入口への遷移)
+- datalistは `<input>` 専用のため摘要フィールドを `Textarea(rows=1)` → `TextInput` に変更。単一行UI・スキーマ(max 500)は不変
+- `queries.ts`/`api-client.ts` は変更なし。検索・履歴ともドメインstore(`getStore().listTransactionsInRange`)とServer Action経由で既存パターンの範囲に収まった
+- E2E(`pnpm test:e2e`)は未実施。新規画面のE2Eカバレッジは別タスク
 ## 2026-11-02: 取引の一括操作(Issue #64)
 - Worktree: bulk-ops
-### 実装内容
 取引一覧 `/transactions` に下書き取引への一括操作を追加。変更は `transactions-screen.tsx` のみ(`api-client.ts`・他画面・domain・rules等は変更不要だった)。依存追加なし。
 - 選択列: `canEdit`(viewer以外)時のみテーブル先頭にチェック列を追加。ヘッダのチェックで表示中の下書き行を全選択/全解除(一部選択時は indeterminate 表示)。行チェックは `stopPropagation` で展開トグルと分離
 - 選択不可行: confirmed は「確定済みの取引は一括操作できません(行の展開から個別に操作してください)」、locked(締め済み期間)は「締め済み期間の取引は一括操作できません」を `title` ツールチップ+`aria-label`で表示し disabled チェックボックスを描画。選択可能行は `status === "draft"` のみ(`toggleSelect` ガードと操作対象の派生フィルタで二重に防御)
@@ -1177,14 +1222,11 @@ ui-polish の表記統一(証憑→領収書、紐付け済み→紐付済み)�
 - 科目一括変更: 選択行の `type` 全てに適用できる科目の共通部分(`optionsFor` の積集合。混在時は kind=any のみ)を選択肢として提示し、行ごとに `updateTransaction` を順次呼出し。taxCategory/taxRate は省略(=サーバー側で既存値保持)
 - 結果表示: `Alert` で「N件成功 / M件失敗(失敗分は選択したまま)」+先頭の失敗メッセージを表示し、手動で閉じられる。失敗行のみ選択を残して再実行可能
 - 月送り・種別/状態フィルタ変更時は選択と結果をリセット(onChangeで明示実行)し、非表示行への誤操作を防止。選択対象は「表示中かつdraft」の派生集合なので、リロード後に確定・削除された行は自然に対象外となる
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功
 - `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(37ファイル483件、skip 10)
 - `pnpm build` — 合格
 - Firebase Emulator tests — 未実施(Issue制約でEmulator起動禁止。rules・サーバー書き込み経路の変更なし)
-### 設計上の判断・備考
 - 一括操作は draft のみ対象とし、confirmed はIssue仕様どおり選択不可(確定データの一括変更は個別操作に限定)。締め済みは `status === "locked"` で判定(締め処理は期間内draft残存を拒否するため、closed期間内のdraftは存在しない)
 - `react-hooks/set-state-in-effect` が有効なため、選択リセットは useEffect ではなく各フィルタの onChange から呼ぶ方式とした
 - 一括処理は全件トランザクションではなく行ごとの逐次呼出しで部分失敗を許容(既存のCSV取込/明細インポートと同設計)。実行中はチェック・操作類を disabled にして選択の変更を防ぐ

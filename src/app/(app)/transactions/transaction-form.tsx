@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { TaxCategory, Transaction } from "@/lib/accounting/types";
 import { useAccounts } from "@/lib/hooks/use-accounts";
+import { useApiData } from "@/lib/hooks/use-api-data";
+import { useApp } from "@/components/auth-provider";
+import { listTransactionInputHistory } from "@/lib/actions/transactions";
+import { callApi } from "@/lib/api-client";
 import type { ConsumptionTaxRate } from "@/lib/accounting/domain/tax";
 import {
   parseForm,
@@ -18,7 +22,6 @@ import {
   NumberInput,
   Select,
   TextInput,
-  Textarea,
 } from "@/components/ui";
 
 const TYPE_OPTIONS = [
@@ -97,6 +100,18 @@ export function TransactionForm({
 
   const { optionsFor, label } = useAccounts();
   const accounts = optionsFor(type);
+
+  // 取引先・摘要の入力履歴サジェスト(datalist)。履歴取得はフォーム内で完結させる
+  const { businessId } = useApp();
+  const counterpartyListId = useId();
+  const descriptionListId = useId();
+  const { data: history } = useApiData(
+    () =>
+      businessId
+        ? callApi(() => listTransactionInputHistory(businessId))
+        : Promise.resolve({ counterparties: [], descriptions: [] }),
+    [businessId],
+  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,17 +210,28 @@ export function TransactionForm({
             value={counterparty}
             onChange={(e) => setCounterparty(e.target.value)}
             placeholder="例: 〇〇商店"
+            list={counterpartyListId}
           />
         </Field>
         <Field label="摘要">
-          <Textarea
-            rows={1}
+          <TextInput
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="例: 備品購入"
+            list={descriptionListId}
           />
         </Field>
       </div>
+      <datalist id={counterpartyListId}>
+        {(history?.counterparties ?? []).map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
+      <datalist id={descriptionListId}>
+        {(history?.descriptions ?? []).map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
       {error && <Alert tone="error">{error}</Alert>}
       <div className="flex gap-2">
         <Button type="submit" loading={busy}>
