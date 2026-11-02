@@ -75,7 +75,7 @@ jobs:
       # ダウンロードされるためキャッシュしてCI時間を短縮する。
       # lockfile(firebase-toolsのバージョン)変化で無効化される
       - name: Cache Firebase Emulator JARs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/firebase/emulators
           key: firebase-emulators-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -105,7 +105,7 @@ jobs:
       # ダウンロードされるためキャッシュしてCI時間を短縮する。
       # lockfile(firebase-toolsのバージョン)変化で無効化される
       - name: Cache Firebase Emulator JARs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/firebase/emulators
           key: firebase-emulators-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -115,7 +115,7 @@ jobs:
       # ブラウザ本体(~/.cache/ms-playwright)も同様にキャッシュ。
       # @playwright/test のバージョン=lockfile由来のため同一キーでよい
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
