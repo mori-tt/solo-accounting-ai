@@ -14,6 +14,7 @@ import type {
   ReceiptStatus,
   RecurringTemplate,
   Transaction,
+  WithholdingRecord,
 } from "../types";
 
 /**
@@ -34,6 +35,7 @@ export type CollectionName =
   | "recurringTemplates"
   | "fixedAssets"
   | "fiscalPeriods"
+  | "withholdingRecords"
   | "auditLogs"
   | "idempotencyKeys";
 
@@ -95,6 +97,14 @@ export interface AccountingReader {
     businessId: string,
     invoiceId: string,
   ): Promise<Payment[]>;
+  /** 取引に紐付く源泉徴収記録(ドキュメントID = transactionId) */
+  getWithholdingRecord(
+    businessId: string,
+    transactionId: string,
+  ): Promise<WithholdingRecord | undefined>;
+  listWithholdingRecords(
+    businessId: string,
+  ): Promise<WithholdingRecord[]>;
   listFiscalPeriods(businessId: string): Promise<FiscalPeriod[]>;
   listAuditLogs(businessId: string): Promise<AuditLogEntry[]>;
 }

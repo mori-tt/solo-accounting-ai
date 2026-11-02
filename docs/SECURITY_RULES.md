@@ -38,6 +38,8 @@ Firebase Security Rules(Firestore / Storage)の方針。
   - transactions: `status='draft'` のみ削除可
   - invoices: `status='draft'` のみ削除可
   - receipts: `status='unprocessed'` のみ削除可
+  - withholdingRecords: リンク先取引がopen期間かつ非lockedなら削除可
+    (取引の付属データとして取引と同一ライフサイクル)
   - 上記以外の削除はownerのみ
 - `businesses` ドキュメントのdeleteはクライアントから不可
   (サブコレクション残骸防止のためAdmin SDKのみ)
@@ -52,6 +54,9 @@ Firebase Security Rules(Firestore / Storage)の方針。
   update/deleteを拒否する
 - `status` を `locked` に変更する操作自体もクライアントからは不可(Admin SDKのみ)
 - `receipts` は紐付くTransactionがlockedならupdate/deleteを拒否する
+- `withholdingRecords` はドキュメントID=取引IDで取引に1:1紐付く。
+  `transactionId` とdoc IDの一致を強制し、リンク先取引がlocked・
+  締め済み期間・expense型以外・不存在ならcreate/updateを拒否する
 - `invoices` は `issueDate`、`payments` は `date` が締め済み期間に属する場合
   create/update/deleteを拒否する(期間IDは business の `fiscalYearStartMonth`
   から `fy{会計年度}` を導出。締め後の正当な更新はAdmin SDK経由のため影響しない)

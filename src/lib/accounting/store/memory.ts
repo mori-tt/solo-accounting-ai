@@ -14,6 +14,7 @@ import type {
   ReceiptStatus,
   RecurringTemplate,
   Transaction,
+  WithholdingRecord,
 } from "../types";
 import type {
   AccountingReader,
@@ -221,6 +222,27 @@ export class MemoryStore implements AccountingStore {
       businessId,
       "payments",
       (p) => p.invoiceId === invoiceId,
+    );
+  }
+
+  getWithholdingRecord(
+    businessId: string,
+    transactionId: string,
+  ): Promise<WithholdingRecord | undefined> {
+    return this.get<WithholdingRecord>(
+      businessId,
+      "withholdingRecords",
+      transactionId,
+    );
+  }
+
+  listWithholdingRecords(
+    businessId: string,
+  ): Promise<WithholdingRecord[]> {
+    return this.list<WithholdingRecord>(
+      businessId,
+      "withholdingRecords",
+      () => true,
     );
   }
 

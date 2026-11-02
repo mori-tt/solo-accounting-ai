@@ -25,6 +25,7 @@ import type {
   ReceiptStatus,
   RecurringTemplate,
   Transaction,
+  WithholdingRecord,
 } from "../types";
 import type {
   AccountingReader,
@@ -270,6 +271,21 @@ class FirestoreAccountingReader implements AccountingReader {
     );
   }
 
+  getWithholdingRecord(
+    businessId: string,
+    transactionId: string,
+  ): Promise<WithholdingRecord | undefined> {
+    return this.readDoc(businessId, "withholdingRecords", transactionId);
+  }
+
+  listWithholdingRecords(
+    businessId: string,
+  ): Promise<WithholdingRecord[]> {
+    return this.readQuery<WithholdingRecord>(
+      this.col(businessId, "withholdingRecords"),
+    );
+  }
+
   listFiscalPeriods(businessId: string): Promise<FiscalPeriod[]> {
     return this.readQuery<FiscalPeriod>(
       this.col(businessId, "fiscalPeriods"),
@@ -366,6 +382,12 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listPaymentsForInvoice(businessId: string, invoiceId: string) {
     return this.reader.listPaymentsForInvoice(businessId, invoiceId);
+  }
+  getWithholdingRecord(businessId: string, transactionId: string) {
+    return this.reader.getWithholdingRecord(businessId, transactionId);
+  }
+  listWithholdingRecords(businessId: string) {
+    return this.reader.listWithholdingRecords(businessId);
   }
   listFiscalPeriods(businessId: string) {
     return this.reader.listFiscalPeriods(businessId);

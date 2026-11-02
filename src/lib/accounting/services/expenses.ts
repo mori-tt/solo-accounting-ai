@@ -3,7 +3,11 @@ import { assertTaxAmountConsistent } from "../domain/tax";
 import { TAX_CATEGORIES } from "../domain/validate";
 import { DomainError } from "../errors";
 import { assertYenAmount } from "../money";
-import type { AccountingReader, AccountingStore } from "../store/types";
+import type {
+  AccountingReader,
+  AccountingStore,
+  PutOp,
+} from "../store/types";
 import type {
   Expense,
   TaxCategory,
@@ -18,6 +22,10 @@ import {
   scopedIdempotencyKey,
   type ActorContext,
 } from "./common";
+import {
+  planWithholdingRecord,
+  type WithholdingInput,
+} from "./withholding";
 
 export interface RegisterExpenseInput {
   id?: string;
@@ -35,6 +43,8 @@ export interface RegisterExpenseInput {
   taxAmount?: number;
   /** 支払期日 YYYY-MM-DD(未払管理する場合) */
   paymentDueDate?: string;
+  /** 源泉徴収の記録(任意)。withholdingRecords に同一コミットで記録する */
+  withholding?: WithholdingInput;
 }
 
 /**
@@ -108,21 +118,36 @@ export async function registerExpense(
         taxAmount,
         paymentDueDate,
       };
+      const puts: PutOp[] = [
+        { collection: "transactions", id: transactionId, data: transaction },
+        { collection: "expenses", id: expenseId, data: expense },
+      ];
+      const auditTargets = [
+        { collection: "transactions", id: transactionId },
+        { collection: "expenses", id: expenseId },
+      ];
+      // 源泉徴収対象の支出は記録を取引と同一コミットで作成する
+      if (input.withholding !== undefined) {
+        const record = planWithholdingRecord(
+          transaction,
+          input.withholding,
+          actor,
+          at,
+        );
+        puts.push({
+          collection: "withholdingRecords",
+          id: transactionId,
+          data: record,
+        });
+        auditTargets.push({
+          collection: "withholdingRecords",
+          id: transactionId,
+        });
+      }
       return {
         batch: {
-          puts: [
-            { collection: "transactions", id: transactionId, data: transaction },
-            { collection: "expenses", id: expenseId, data: expense },
-          ],
-          audits: auditsFor(
-            businessId,
-            [
-              { collection: "transactions", id: transactionId },
-              { collection: "expenses", id: expenseId },
-            ],
-            "create",
-            actor,
-          ),
+          puts,
+          audits: auditsFor(businessId, auditTargets, "create", actor),
         },
         value: { transaction, expense },
       };

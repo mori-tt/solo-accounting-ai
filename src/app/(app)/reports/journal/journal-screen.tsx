@@ -98,31 +98,39 @@ export function JournalScreen() {
                 </tr>
               </thead>
               <tbody>
-                {data.entries.map((e) => {
-                  const [debit, credit] = e.lines;
-                  return (
-                    <tr key={e.transactionId}>
+                {data.entries.flatMap((e) => {
+                  // 源泉徴収対象取引は貸方が複数行(現金+預り金)になるため、
+                  // 借方行・貸方行を並べて入力行数だけ行を出す
+                  const debits = e.lines.filter((l) => l.debit > 0);
+                  const credits = e.lines.filter((l) => l.credit > 0);
+                  const rowCount = Math.max(debits.length, credits.length);
+                  return Array.from({ length: rowCount }, (_, i) => (
+                    <tr key={`${e.transactionId}-${i}`}>
                       <td className="whitespace-nowrap">
-                        {formatDateJP(e.date)}
+                        {i === 0 ? formatDateJP(e.date) : ""}
                       </td>
-                      <td>{label(debit.account)}</td>
+                      <td>{debits[i] ? label(debits[i].account) : ""}</td>
                       <td className="text-right">
-                        <Amount value={debit.debit} />
+                        {debits[i] && <Amount value={debits[i].debit} />}
                       </td>
-                      <td>{label(credit.account)}</td>
+                      <td>{credits[i] ? label(credits[i].account) : ""}</td>
                       <td className="text-right">
-                        <Amount value={credit.credit} />
+                        {credits[i] && <Amount value={credits[i].credit} />}
                       </td>
                       <td>
-                        {e.description || "-"}
-                        {e.counterparty && (
-                          <span className="ml-2 text-xs text-zinc-400">
-                            {e.counterparty}
-                          </span>
+                        {i === 0 && (
+                          <>
+                            {e.description || "-"}
+                            {e.counterparty && (
+                              <span className="ml-2 text-xs text-zinc-400">
+                                {e.counterparty}
+                              </span>
+                            )}
+                          </>
                         )}
                       </td>
                     </tr>
-                  );
+                  ));
                 })}
               </tbody>
             </table>

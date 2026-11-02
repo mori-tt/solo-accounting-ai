@@ -24,6 +24,7 @@ businesses/{businessId}/customers/{customerId}
 businesses/{businessId}/projects/{projectId}
 businesses/{businessId}/transactions/{transactionId}
 businesses/{businessId}/expenses/{expenseId}
+businesses/{businessId}/withholdingRecords/{transactionId}
 businesses/{businessId}/receipts/{receiptId}
 businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/payments/{paymentId}
@@ -124,6 +125,26 @@ receipts(証憑ファイル)
 | taxAmount | number | 消費税額(円・整数・0以上)。非課税・免税・不課税は0固定 |
 | paymentDueDate | string? | YYYY-MM-DD(未払管理) |
 | paidAt | string? | YYYY-MM-DD(支払済み日付) |
+
+### businesses/{businessId}/withholdingRecords/{transactionId}
+
+源泉徴収記録。`type=expense` のTransactionと1対1で紐付き、
+ドキュメントIDは取引IDと同一(記録の存在自体が源泉徴収の対象フラグ)。
+取引の登録・編集・削除と同一コミットで同期され、締め済み期間の保護は
+リンク先取引の `status`/`date` から導出される(自身は日付を持たない)。
+仕訳展開では `taxAmount` を貸方の預り金(源泉所得税)行として分離する。
+
+| Field | Type | Note |
+|---|---|---|
+| transactionId | string | リンク先の支出取引(ドキュメントIDと同一) |
+| category | string | `service_fee`(報酬・料金等) / `salary`(給与)。支払調書はservice_fee、源泉徴収票はsalary+専従者給与科目が対象 |
+| paymentAmount | number | 源泉徴収の対象となる支払金額(円・整数・正数)。取引額以下 |
+| taxAmount | number | 源泉徴収税額(円・整数・0以上) |
+| calculation | string | `auto`(区分の税率で自動計算) / `manual`(手入力)。税額の由来を保持 |
+| note | string? | 支払調書の細目欄に使うメモ |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
 
 ### businesses/{businessId}/receipts/{receiptId}
 

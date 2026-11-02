@@ -315,11 +315,12 @@ describe("翌年度への繰越", () => {
       "2025-04-10",
     );
     expect(checklist.carryForward?.nextFiscalYear).toBe(2026);
-    // 現金 = 売上100,000 - 振替30,000 / 預金 = 30,000 / 売掛金 = 0
+    // 現金 = 売上100,000 - 振替30,000 / 預金 = 30,000 / 売掛金・源泉税預り金 = 0
     expect(checklist.carryForward?.balances).toEqual([
       { accountCode: "cash", amount: 70_000 },
       { accountCode: "deposits", amount: 30_000 },
       { accountCode: "receivables", amount: 0 },
+      { accountCode: "withholding_payable", amount: 0 },
     ]);
     // 翌年度の既存レコードが上書き確認用に返る
     expect(checklist.carryForward?.existing).toEqual([

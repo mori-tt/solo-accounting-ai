@@ -1,11 +1,12 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { TaxCategory, Transaction } from "@/lib/accounting/types";
 import { useAccounts } from "@/lib/hooks/use-accounts";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { useApp } from "@/components/auth-provider";
 import { listTransactionInputHistory } from "@/lib/actions/transactions";
+import { getWithholdingRecordForTransaction } from "@/lib/actions/withholding";
 import { callApi } from "@/lib/api-client";
 import type { ConsumptionTaxRate } from "@/lib/accounting/domain/tax";
 import {
@@ -23,6 +24,12 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import {
+  initialWithholdingFields,
+  WithholdingFields,
+  withholdingInputFrom,
+  type WithholdingFieldsValue,
+} from "./withholding-fields";
 
 const TYPE_OPTIONS = [
   { value: "expense", label: "支出" },
@@ -96,6 +103,13 @@ export function TransactionForm({
   const [taxOption, setTaxOption] = useState<TaxOptionValue>(
     taxOptionValueOf(initial),
   );
+  // 源泉徴収の入力値。既存レコードは編集時にサーバーから取得して初期化する
+  const [withholding, setWithholding] = useState<WithholdingFieldsValue>(() =>
+    initialWithholdingFields(
+      undefined,
+      initial ? String(initial.amount) : "",
+    ),
+  );
   const [error, setError] = useState<string>();
 
   const { optionsFor, label } = useAccounts();
@@ -103,6 +117,29 @@ export function TransactionForm({
 
   // 取引先・摘要の入力履歴サジェスト(datalist)。履歴取得はフォーム内で完結させる
   const { businessId } = useApp();
+  const { data: withholdingRecord } = useApiData(
+    () =>
+      businessId && initial
+        ? callApi(() =>
+            getWithholdingRecordForTransaction(businessId, initial.id),
+          )
+        : Promise.resolve(null),
+    [businessId, initial],
+  );
+  const withholdingInitialized = useRef(false);
+  useEffect(() => {
+    // 取得完了(新規は即null、編集はフェッチ後)の初回だけ初期値を流し込む
+    if (withholdingInitialized.current || withholdingRecord === undefined) {
+      return;
+    }
+    withholdingInitialized.current = true;
+    setWithholding(
+      initialWithholdingFields(
+        withholdingRecord,
+        initial ? String(initial.amount) : "",
+      ),
+    );
+  }, [withholdingRecord, initial]);
   const counterpartyListId = useId();
   const descriptionListId = useId();
   const { data: history } = useApiData(
@@ -123,6 +160,9 @@ export function TransactionForm({
       counterparty: counterparty || undefined,
       description: description || undefined,
       ...taxFieldsFrom(taxOption),
+      // 支出のみ源泉徴収を送る(それ以外はnull。未指定時は既存値を保持される)
+      withholding:
+        type === "expense" ? withholdingInputFrom(withholding) : null,
     };
     const parsed = parseForm(transactionSchema, input);
     if (!parsed.success) {
@@ -222,6 +262,13 @@ export function TransactionForm({
           />
         </Field>
       </div>
+      {type === "expense" && (
+        <WithholdingFields
+          value={withholding}
+          defaultPaymentAmount={amount}
+          onChange={setWithholding}
+        />
+      )}
       <datalist id={counterpartyListId}>
         {(history?.counterparties ?? []).map((v) => (
           <option key={v} value={v} />

@@ -70,6 +70,17 @@ async function openingEntriesFor(
   );
 }
 
+/**
+ * withholdingRecords から transactionId→源泉徴収税額 のマップを組み立てる。
+ * 仕訳展開で貸方を現金(差引額)と預り金(税額)に分けるために使う。
+ */
+async function withholdingTaxByTransaction(
+  businessId: string,
+): Promise<Map<string, number>> {
+  const records = await getStore().listWithholdingRecords(businessId);
+  return new Map(records.map((r) => [r.transactionId, r.taxAmount]));
+}
+
 /** 仕訳帳。月内の確定済み取引を複式仕訳へ展開し日付順で返す。 */
 export async function getJournalReport(
   businessId: string,
@@ -83,12 +94,12 @@ export async function getJournalReport(
     const actor = await requireViewer(businessId);
     actionReadRateLimiter.consume(actor.uid);
     const { startDate, endDate } = monthKeyRange(parsed.data);
-    const transactions = await getStore().listTransactionsInRange(
-      businessId,
-      startDate,
-      endDate,
-    );
-    return { entries: buildJournal(transactions) };
+    const store = getStore();
+    const [transactions, withholdingTax] = await Promise.all([
+      store.listTransactionsInRange(businessId, startDate, endDate),
+      withholdingTaxByTransaction(businessId),
+    ]);
+    return { entries: buildJournal(transactions, withholdingTax) };
   });
 }
 
@@ -117,14 +128,14 @@ export async function getAccountLedgerReport(
     const actor = await requireViewer(businessId);
     actionReadRateLimiter.consume(actor.uid);
     const { startDate, endDate } = monthKeyRange(parsed.data);
-    const transactions = await getStore().listTransactionsInRange(
-      businessId,
-      "0001-01-01",
-      endDate,
-    );
+    const store = getStore();
+    const [transactions, withholdingTax] = await Promise.all([
+      store.listTransactionsInRange(businessId, "0001-01-01", endDate),
+      withholdingTaxByTransaction(businessId),
+    ]);
     // 期首残高の仮想仕訳を末尾に連結し、繰越残高へ反映する
     const entries = [
-      ...buildJournal(transactions),
+      ...buildJournal(transactions, withholdingTax),
       ...(await openingEntriesFor(businessId, startDate)),
     ];
 
@@ -159,13 +170,13 @@ export async function getTrialBalanceReport(
     const actor = await requireViewer(businessId);
     actionReadRateLimiter.consume(actor.uid);
     const { startDate, endDate } = monthKeyRange(parsed.data);
-    const transactions = await getStore().listTransactionsInRange(
-      businessId,
-      startDate,
-      endDate,
-    );
+    const store = getStore();
+    const [transactions, withholdingTax] = await Promise.all([
+      store.listTransactionsInRange(businessId, startDate, endDate),
+      withholdingTaxByTransaction(businessId),
+    ]);
     return buildTrialBalance([
-      ...buildJournal(transactions),
+      ...buildJournal(transactions, withholdingTax),
       ...(await openingEntriesFor(businessId, startDate)),
     ]);
   });

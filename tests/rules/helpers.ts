@@ -214,3 +214,19 @@ export function fiscalPeriod(status: "open" | "closed" = "open") {
     ...(closed ? { closedBy: OWNER } : {}),
   };
 }
+
+/** 源泉徴収記録。ドキュメントID=transactionId の1:1付属データ */
+export function withholdingRecord(extra: Record<string, unknown> = {}) {
+  return {
+    transactionId: "w-tx",
+    category: "service_fee",
+    paymentAmount: 100000,
+    taxAmount: 10210,
+    calculation: "auto",
+    note: "原稿料",
+    createdBy: "seed",
+    createdAt: "2026-10-15T00:00:00.000Z",
+    updatedAt: "2026-10-15T00:00:00.000Z",
+    ...extra,
+  };
+}
