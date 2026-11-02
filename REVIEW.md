@@ -1377,6 +1377,26 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - 構造化ログはfieldsをエントリへ平準化し、予約キー(level/msg/ts/err/redactedKeys)衝突は除去対象。`logger.error`と別に`logger.exception(msg, error, fields)`を設けError畳込みを明示化
 - `connection()`はリクエストストア外でthrowするため、route.test.tsでは`next/server`と`@/lib/firebase/admin`をvi.mockして疎通3分岐(skipped/ok/error)を検証
 - Sentry導入タスクでの拡張点は`createMonitoringProvider`(DSN設定時に実SDK初期化のプロバイダを返す)。`NEXT_PUBLIC_SENTRY_DSN`はクライアント捕捉の将来用で現状未使用
+## 2026-11-02: 法務ページ(Issue #79)
+- Worktree: legal-pages
+公開用の法務3ページをプレースホルダー骨組みとして新設し、アプリ各面の末尾から辿れるリンクフッターを設置。
+- `src/app/legal/terms/page.tsx`: 利用規約の条項骨組み(適用・定義・登録・サービス内容・AI提案の性質・料金・禁止事項・データ取扱・知財・免責・変更/停止・解約・規約変更・準拠法/管轄・附則)。AI提案は確定仕訳ではなく利用者の最終判断が必要、税務・会計助言ではない旨の構造を確保
+- `src/app/legal/privacy/page.tsx`: プライバシーポリシー骨組み(事業者情報・取得情報・利用目的・AI機能でのデータ取扱・第三者提供/委託・安全管理措置・保持/削除・利用者の権利・Cookie/ログ・変更・準拠法)
+- `src/app/legal/tokusho/page.tsx`: 特定商取引法に基づく表記を表形式で骨組み化(事業者名・責任者・所在地・連絡先・価格・支払・提供時期・返品/解約・動作環境・特別条件)
+- `src/app/legal/clause.tsx`: 3ページ共用の部品。`Clause`(条項セクション)と`ReviewNote`(「【要法務レビュー】」のamber破線注記)。本文は未作成で全項目にレビュー必須の注記を表示
+- `src/app/legal/layout.tsx`: max-w-3xl コンテナ + 末尾に LegalFooter(legalページ間の回遊用)
+- `src/components/legal-footer.tsx`: 新規。3ページへのリンクフッター(server component、Linkのみ)
+- `src/app/login/page.tsx`: Suspense 内末尾に `<LegalFooter />` 追加(import+1行のみ)
+- `src/app/(app)/layout.tsx`: Suspense 内末尾(AppShellの後)に `<LegalFooter />` 追加(import+1行のみ)。既存コード改変なし
+- `pnpm install --frozen-lockfile` — 成功
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- `pnpm build` — 合格。`/legal/terms`・`/legal/privacy`・`/legal/tokusho` は static prerender(○)
+- Firebase Emulator tests — 未実施(rules・サーバー書き込み経路の変更なし)
+- 3ページは認証ゲート((app)グループ)の外に配置し、未ログインでも閲覧可能(規約・特商法表記は登録前に提示されるべきため)。middleware/proxy は本repoに存在しない
+- legal ページはリクエスト依存データを読まない完全静的のため `instant` export は不要(cacheComponents環境でもそのまま static shell 検証を通過)
+- フッターは page/layout の return 末尾・Suspense内へ追加する方式で既存行の改変ゼロを維持。AppShellに手を入れないため認証ローディング中はフッターも fallback に含まれる挙動
+- 条項本文は意図的に未作成(「要法務レビュー」注記のみ)。公開前に法務レビューで各条項を肉付けする前提
+- `app/page.tsx`・`next.config.ts`・`app-shell.tsx` はIssue指定どおり未変更
 ## 2026-11-02: リリース運用整備(Issue #85)
 - Worktree: release-ops
 - `package.json`: version を 0.1.0 → 1.0.0(変更はversion行のみ)
@@ -1385,8 +1405,8 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - `firebase.json`: `hosting` セクション新設。`/_next/static/**`(ハッシュ付き)を `public, max-age=31536000, immutable` の長期キャッシュ、それ以外(HTMLを含む `**`)を `public, max-age=0, must-revalidate` の短い再検証に。Hosting のヘッダールールは last match wins のため catch-all → 個別の順で記述
 - `firebase.json` `emulators.hosting.port`: 5005 に固定。hosting 追加により `pnpm emulators` で Hosting Emulator も起動するようになるが、デフォルト 5000 は macOS AirPlay Receiver(ControlCe 実在確認済み・LISTEN中)と衝突するため変更
 - `README.md`: デプロイ指針に「Firebase Hosting / CDN キャッシュ」節を追記(ヘッダー方針・last match wins の注意・`.next/static` を `public/_next/static` へコピーして `firebase deploy --only hosting` する手順・Hosting Emulator port 5005 の備考)
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(version.ts の package.json import も型解決)
-- `pnpm test` — 合格(40ファイル504件、skip 10)
 - `pnpm build` — 合格
 - Firebase Emulator tests — `firebase emulators:exec --only hosting` で Hosting Emulator が port 5005 で正常起動・終了することを確認(firebase.json の妥当性検証)。rules テスト自体は rules・データ経路の変更がないため未実施
 ### 備考
