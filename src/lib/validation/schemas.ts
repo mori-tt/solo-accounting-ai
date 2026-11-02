@@ -237,6 +237,8 @@ export const paymentSchema = z.object({
   invoiceId: z.string().min(1),
   date: dateString,
   amount: yenAmount,
+  /** 消込対象の収入取引ID(任意)。空文字は未指定扱い */
+  transactionId: z.string().max(200).optional(),
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
 

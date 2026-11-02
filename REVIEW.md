@@ -16,9 +16,36 @@
 
 ## Log
 
+## 2026-11-02: 入金消込の取引紐付け強化(Issue #65)
+- Worktree: payment-matching
+### 実装内容
+請求書の入金記録時に対応する収入取引(売上取引)を選択して消込を記録し、消込状態を一覧で可視化。`Payment.transactionId` は既存フィールドをそのまま使用(types.ts変更不要)。依存追加なし。
+- `src/lib/payment-matching.ts`(新規): 純粋関数3本。`rankPaymentLinkCandidates`(同顧客=counterparty一致を先頭・日付降順、既紐付取引をexcludeIdsで除外)、`invoicePaymentProgress`(draft以外で 未入金/一部入金/入金済 を導出)、`invoiceSettlement`(paymentsのtransactionId有無で matched/unmatched 判定)
+- `src/lib/validation/schemas.ts`: `paymentSchema` に `transactionId`(任意・最大200文字)を追加。クライアント/サーバー両側で同じスキーマ検証が効く
+- `src/lib/actions/sales.ts`:
+  - `InvoiceRow` に `payments: Payment[]`(日付昇順)を追加し、`listInvoiceRows` は入金をinvoiceId別にグルーピングして返す(入金額集計は同リストから算出)
+  - `listPaymentLinkCandidates` 新設(viewer可)。請求書の `issueDate〜asOf` の `type=income` 取引を取得し、他の入金に紐付済みの取引を除いた候補を `rankPaymentLinkCandidates` で返す。顧客は `counterparty === customer.name` で判定(TransactionにcustomerIdは無いため)
+  - `registerPaymentAction`: `transactionId` を受け取り、存在チェック+`type==="income"` チェックを行ってから `registerPayment` へ渡す(サービス層は既存フィールド対応済みで無変更)
+- `src/app/(app)/invoices/invoices-screen.tsx`:
+  - `PaymentForm` に「対応する収入取引(任意)」Selectを追加。同顧客グループ/その他(同期間)のoptgroupで候補表示。選択時に `transactionId` を送信。候補取得失敗時はヒントを出し紐付けなしで登録可能。フォーム上部に既存入金履歴も表示
+  - 一覧の状態列に導出バッジを追加: `未入金`(gray)/`一部入金`(amber)/`未消込`(amber)/`消込済`(sky)。入金済は従来の StatusBadge「入金済み」が担う
+  - 「入金履歴(n)」トグルで入金一覧を展開(viewer含む全ロール可)。消込済み入金は `取引を参照` リンクで `/transactions` へ遷移可能。履歴パネルと入金フォームは排他で開く
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功。依存追加なし
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
+- `pnpm test` — 合格(38ファイル491件、skip 10。payment-matching.test.ts 8件追加)
+- `pnpm build` — 合格
+- Emulator系(`test:rules`/`test:emulators`)・`next dev` — 未実施(Issue制約で禁止。rules・サーバー書き込み経路の変更もなし)
+### 設計上の判断・備考
+- 「同期間」は請求書の発行日〜当日(asOf)の範囲と解釈(発行後〜入金遅延までをカバー)。発行前の前受金取引は候補に出ない(必要なら範囲拡張は別Issue)
+- 「同顧客」は `counterparty === customer.name` の完全一致(TransactionにcustomerIdフィールドが無いため)。不一致の取引も「その他」グループに残し、表記ゆれの取引を選べるようにした
+- 既に他の入金へ紐付いた取引は候補から除外するが、サーバー側では一意性を強制していない(1取引が複数請求の一括入金を兼ねる実態があり得るため寛容)
+- 「取引側からの参照リンク」は請求書側→取引一覧(`/transactions`)へのリンクで実現。取引画面は変更範囲外のため取引詳細へのディープリンクや取引側からの逆リンクは未対応(URLパラメータ対応は別タスク)
+- transactionId検証(存在+income)はaction層で実施。チェックと書込みは非アトミックだが紐付けは参照情報のため許容(消込の一意性競合も同様)
+- ダッシュボード連携はIssue範囲外(別タスク)
 ## 2026-11-02: ダッシュボードのアラート通知とAI使用量表示(Issue #62)
 - Worktree: alerts-quota
-### 実装内容
 依存追加なし。`pnpm install --frozen-lockfile` 実行済み。
 - `src/lib/api/rate-limit.ts`: `AI_RUN_LIMIT_PER_HOUR = 60` をexportし `aiRunRateLimiter` の limit に使用(APIが上限値を定数から返せるようにした)
 - `src/app/api/ai/usage/route.ts`(新規): `GET ?businessId=` → `requireViewer` 後 `{ remaining: aiRunRateLimiter.remaining(businessId), limit: AI_RUN_LIMIT_PER_HOUR }` を返す軽量API。既存Route Handlerパターン(ApiError/toErrorResponse・`{ok,data}`エンベロープ)踏襲。回数消費はしない
@@ -28,9 +55,7 @@
 - `dashboard-screen.tsx`: 要対応カードに「未締めの月(前月以前)」項目追加(`AttentionItem` に `unit` propを追加し `Nヶ月` 表示、リンク先 `/closing`、allClear条件にも追加)。カード見出し右側に「今時間のAI提案 残りN回」Badge(0回時amber)。AI使用量は `useApiData(fetchAiUsage)` で本体とは独立して取得し、失敗・未取得時は何も表示しない(Alertではなく非表示フォールバック)
 - Issue指定のアラート(a)未入金・期限超過の請求書/(b)未処理領収書は既存の要対応カードに `/invoices`・`/receipts` 導線付きで実装済みだったため、不足していた(c)未締め月のみ追加
 - `src/lib/unclosed-months.test.ts`(新規): 7件。空・取引月のみ・当月除外・open期間月(前月で頭打ち)・closed期間除外・和集合・重複除去
-### 実行したテスト
 - `pnpm exec next typegen` — 成功(/api/ai/usage のroute型生成)
-- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>`)
 - `pnpm typecheck` — 合格
 - `pnpm test` — 合格(38ファイル491件、skip 10)
 - `pnpm build` — 合格(`/api/ai/usage` が動的ルートとして登録)
@@ -48,7 +73,6 @@
 - `src/app/(app)/reports/print-header.test.tsx`(新規): 帳票名・期間・事業名・印刷日の出力と `hidden`/`print-only`/`print-header` クラスを検証
 - `pnpm install --frozen-lockfile` — 成功。依存追加なし
 - `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
-- `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm test` — 合格(38ファイル485件、skip 10。print-header.test.tsx 2件追加)
 - `pnpm build` — 合格(3ルートとも静的生成)
 - Emulator系は未実施(タスク指定により起動禁止。rules 未変更)
