@@ -6,6 +6,8 @@ import type {
   FiscalPeriod,
   FixedAsset,
   FixedAssetStatus,
+  InventoryCount,
+  InventoryItem,
   Invoice,
   MonthlySummary,
   Payment,
@@ -211,6 +213,28 @@ export class MemoryStore implements AccountingStore {
       );
     }
     return all;
+  }
+
+  getInventoryItem(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryItem | undefined> {
+    return this.get<InventoryItem>(businessId, "inventoryItems", id);
+  }
+
+  listInventoryItems(businessId: string): Promise<InventoryItem[]> {
+    return this.list<InventoryItem>(businessId, "inventoryItems", () => true);
+  }
+
+  getInventoryCount(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryCount | undefined> {
+    return this.get<InventoryCount>(businessId, "inventoryCounts", id);
+  }
+
+  listInventoryCounts(businessId: string): Promise<InventoryCount[]> {
+    return this.list<InventoryCount>(businessId, "inventoryCounts", () => true);
   }
 
   listPaymentsForInvoice(

@@ -17,6 +17,8 @@ import type {
   FiscalPeriod,
   FixedAsset,
   FixedAssetStatus,
+  InventoryCount,
+  InventoryItem,
   Invoice,
   MonthlySummary,
   Payment,
@@ -261,6 +263,32 @@ class FirestoreAccountingReader implements AccountingReader {
     );
   }
 
+  getInventoryItem(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryItem | undefined> {
+    return this.readDoc(businessId, "inventoryItems", id);
+  }
+
+  listInventoryItems(businessId: string): Promise<InventoryItem[]> {
+    return this.readQuery<InventoryItem>(
+      this.col(businessId, "inventoryItems"),
+    );
+  }
+
+  getInventoryCount(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryCount | undefined> {
+    return this.readDoc(businessId, "inventoryCounts", id);
+  }
+
+  listInventoryCounts(businessId: string): Promise<InventoryCount[]> {
+    return this.readQuery<InventoryCount>(
+      this.col(businessId, "inventoryCounts"),
+    );
+  }
+
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,
@@ -363,6 +391,18 @@ export class FirestoreAccountingStore implements AccountingStore {
   }
   listFixedAssets(businessId: string, status?: FixedAssetStatus) {
     return this.reader.listFixedAssets(businessId, status);
+  }
+  getInventoryItem(businessId: string, id: string) {
+    return this.reader.getInventoryItem(businessId, id);
+  }
+  listInventoryItems(businessId: string) {
+    return this.reader.listInventoryItems(businessId);
+  }
+  getInventoryCount(businessId: string, id: string) {
+    return this.reader.getInventoryCount(businessId, id);
+  }
+  listInventoryCounts(businessId: string) {
+    return this.reader.listInventoryCounts(businessId);
   }
   listPaymentsForInvoice(businessId: string, invoiceId: string) {
     return this.reader.listPaymentsForInvoice(businessId, invoiceId);

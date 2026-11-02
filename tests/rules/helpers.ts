@@ -191,6 +191,36 @@ export function recurringTemplate(extra: Record<string, unknown> = {}) {
   };
 }
 
+export function inventoryItem(extra: Record<string, unknown> = {}) {
+  return {
+    name: "商品A",
+    unit: "個",
+    standardUnitPrice: 1000,
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
+export function inventoryCount(
+  fiscalYear = 2026,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    fiscalYear,
+    lines: [
+      {
+        itemId: "i1",
+        name: "商品A",
+        unit: "個",
+        quantity: 3,
+        unitPrice: 1000,
+      },
+    ],
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
 export function fixedAsset(extra: Record<string, unknown> = {}) {
   return {
     name: "複合機",

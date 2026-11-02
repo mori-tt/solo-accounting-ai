@@ -6,6 +6,8 @@ import type {
   FiscalPeriod,
   FixedAsset,
   FixedAssetStatus,
+  InventoryCount,
+  InventoryItem,
   Invoice,
   MonthlySummary,
   Payment,
@@ -33,6 +35,8 @@ export type CollectionName =
   | "monthlySummaries"
   | "recurringTemplates"
   | "fixedAssets"
+  | "inventoryItems"
+  | "inventoryCounts"
   | "fiscalPeriods"
   | "auditLogs"
   | "idempotencyKeys";
@@ -91,6 +95,17 @@ export interface AccountingReader {
     businessId: string,
     status?: FixedAssetStatus,
   ): Promise<FixedAsset[]>;
+  getInventoryItem(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryItem | undefined>;
+  listInventoryItems(businessId: string): Promise<InventoryItem[]>;
+  /** id は `fy{fiscalYear}` 形式の決定的ID */
+  getInventoryCount(
+    businessId: string,
+    id: string,
+  ): Promise<InventoryCount | undefined>;
+  listInventoryCounts(businessId: string): Promise<InventoryCount[]>;
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,
