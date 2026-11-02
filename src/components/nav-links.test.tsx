@@ -26,7 +26,7 @@ describe("NavLinks", () => {
         screen.getByRole("heading", { name: heading }),
       ).toBeTruthy();
     }
-    expect(screen.getAllByRole("link")).toHaveLength(25);
+    expect(screen.getAllByRole("link")).toHaveLength(27);
   });
 
   it("現在のパスに対応するリンクだけをアクティブ表示にする", () => {
