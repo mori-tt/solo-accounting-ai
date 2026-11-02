@@ -4,6 +4,8 @@ import type {
   Customer,
   Expense,
   FiscalPeriod,
+  FixedAsset,
+  FixedAssetStatus,
   Invoice,
   MonthlySummary,
   Payment,
@@ -30,6 +32,7 @@ export type CollectionName =
   | "payments"
   | "monthlySummaries"
   | "recurringTemplates"
+  | "fixedAssets"
   | "fiscalPeriods"
   | "auditLogs"
   | "idempotencyKeys";
@@ -79,6 +82,15 @@ export interface AccountingReader {
   listRecurringTemplates(
     businessId: string,
   ): Promise<RecurringTemplate[]>;
+  getFixedAsset(
+    businessId: string,
+    id: string,
+  ): Promise<FixedAsset | undefined>;
+  /** status 指定時は取得日昇順(status+acquiredDateの複合indexを使う) */
+  listFixedAssets(
+    businessId: string,
+    status?: FixedAssetStatus,
+  ): Promise<FixedAsset[]>;
   listPaymentsForInvoice(
     businessId: string,
     invoiceId: string,

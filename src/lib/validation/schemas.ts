@@ -270,6 +270,35 @@ export type RecurringTemplateUpdateInput = z.infer<
   typeof recurringTemplateUpdateSchema
 >;
 
+export const depreciationMethodSchema = z.enum([
+  "straightLine",
+  "decliningBalance",
+]);
+
+export const fixedAssetSchema = z.object({
+  name: z.string().min(1, "資産名を入力してください").max(200),
+  acquiredDate: dateString,
+  acquisitionCost: yenAmount,
+  usefulLifeYears: z
+    .number({ error: "耐用年数は数値で入力してください" })
+    .int("耐用年数は整数で入力してください")
+    .min(1, "耐用年数は1〜100年で入力してください")
+    .max(100, "耐用年数は1〜100年で入力してください"),
+  method: depreciationMethodSchema,
+  /** 家事按分の事業割合(0-100整数)。100=全額事業用 */
+  businessRatio: z
+    .number({ error: "事業割合は数値で入力してください" })
+    .int("事業割合は整数で入力してください")
+    .min(0, "事業割合は0〜100で入力してください")
+    .max(100, "事業割合は0〜100で入力してください"),
+});
+export type FixedAssetInput = z.infer<typeof fixedAssetSchema>;
+
+export const disposeFixedAssetSchema = z.object({
+  disposedDate: dateString,
+});
+export type DisposeFixedAssetInput = z.infer<typeof disposeFixedAssetSchema>;
+
 // ---------- AI提案 API(api/ai/suggestions) ----------
 
 export const aiTargetTypeSchema = z.enum([

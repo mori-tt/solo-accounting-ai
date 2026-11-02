@@ -190,6 +190,20 @@ export function recurringTemplate(extra: Record<string, unknown> = {}) {
   };
 }
 
+export function fixedAsset(extra: Record<string, unknown> = {}) {
+  return {
+    name: "複合機",
+    acquiredDate: "2026-01-15",
+    acquisitionCost: 300000,
+    usefulLifeYears: 5,
+    method: "straightLine",
+    businessRatio: 80,
+    status: "active",
+    createdBy: "seed",
+    ...extra,
+  };
+}
+
 export function fiscalPeriod(status: "open" | "closed" = "open") {
   const closed = status === "closed";
   return {

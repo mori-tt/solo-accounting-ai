@@ -57,6 +57,14 @@
       ]
     },
     {
+      "collectionGroup": "fixedAssets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "acquiredDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "closingChecks",
       "queryScope": "COLLECTION",
       "fields": [

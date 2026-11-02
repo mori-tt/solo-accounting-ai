@@ -305,6 +305,35 @@ service cloud.firestore {
           && (!('lastGeneratedMonth' in d) || d.lastGeneratedMonth is string);
       }
 
+      // ---------- fixedAssets ----------
+      // 固定資産台帳。償却費の取引生成はAdmin SDK経由(ルールは台帳データ自体を保護)
+      match /fixedAssets/{assetId} {
+        allow get, list: if isMember(businessId);
+        allow create: if canEdit(businessId)
+          && validFixedAsset(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canEdit(businessId)
+          && validFixedAsset(request.resource.data)
+          && unaffected(['createdBy', 'createdAt']);
+        allow delete: if canEdit(businessId);
+      }
+
+      function validFixedAsset(d) {
+        return d.name is string
+          && dateString(d.acquiredDate)
+          && d.acquisitionCost is int
+          && d.acquisitionCost > 0
+          && d.usefulLifeYears is int
+          && d.usefulLifeYears >= 1
+          && d.method in ['straightLine', 'decliningBalance']
+          && d.businessRatio is int
+          && d.businessRatio >= 0
+          && d.businessRatio <= 100
+          && d.status in ['active', 'disposed']
+          && (!('disposedDate' in d) || dateString(d.disposedDate))
+          && (!('lastBookedFiscalYear' in d) || d.lastBookedFiscalYear is int);
+      }
+
       // ---------- closingChecks ----------
       // 締めチェック項目。対象・種別は生成後に変えられない(改ざん防止)
       match /closingChecks/{checkId} {
