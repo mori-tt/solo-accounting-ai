@@ -9,10 +9,19 @@ const PAGES = [
 
 /**
  * Firebase Auth Emulator が画面下部に挿入する警告バナーは、
- * フッターリンク上に被さってクリックを妨げるため除去する
+ * フッターリンク上に被さってクリックを妨げるため非表示にする
  * (エミュレータ固有の要素で、アプリUIではない)。
+ *
+ * バナーは Auth の Emulator 接続完了後に「非同期」でDOMへ追加される。
+ * 存在する要素をその場で除去するだけだと、除去→挿入のレースで
+ * 後から現れたバナーがクリックを遮り click timeout になる(CIで再現済み)。
+ * CSSで常時非表示にしておけば、挿入タイミングに関係なく遮られない。
+ * なお本操作は現在のdocumentにのみ効くため、ページ遷移のたびに呼ぶ。
  */
-async function removeEmulatorBanner(page: Page): Promise<void> {
+async function suppressEmulatorBanner(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: ".firebase-emulator-warning{display:none!important}",
+  });
   await page
     .locator(".firebase-emulator-warning")
     .evaluateAll((els) => els.forEach((el) => el.remove()));
@@ -35,23 +44,46 @@ test("ログイン画面のフッターから法務ページへ遷移できる",
   await expect(legalNav).toBeVisible();
 
   for (const { path, heading } of PAGES) {
-    await removeEmulatorBanner(page);
-    await legalNav.getByRole("link", { name: heading }).click();
+    await suppressEmulatorBanner(page);
+    const link = legalNav.getByRole("link", { name: heading });
+    await expect(link).toBeVisible();
+    await link.click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(
       page.getByRole("heading", { name: heading }),
     ).toBeVisible();
     await page.goBack();
+    // SPA遷移ではdocumentが維持されるが、戻り先の描画を待ってから次を操作する
+    await expect(legalNav).toBeVisible();
   }
 });
 
 test("法務ページ間をフッターナビで回遊できる", async ({ page }) => {
   await page.goto("/legal/terms");
   const legalNav = page.getByRole("navigation", { name: "法務情報" });
-  await removeEmulatorBanner(page);
-  await legalNav.getByRole("link", { name: "プライバシーポリシー" }).click();
+  await suppressEmulatorBanner(page);
+  await expect(legalNav).toBeVisible();
+
+  const privacyLink = legalNav.getByRole("link", {
+    name: "プライバシーポリシー",
+  });
+  await expect(privacyLink).toBeVisible();
+  await privacyLink.click();
   await expect(page).toHaveURL(/\/legal\/privacy$/);
-  await removeEmulatorBanner(page);
-  await legalNav.getByRole("link", { name: "特定商取引法に基づく表記" }).click();
+  // 遷移先の描画完了を確認してから次のリンクを操作する
+  // (URL更新とレンダー確定の間にclickすると不安定になりうる)
+  await expect(
+    page.getByRole("heading", { name: "プライバシーポリシー" }),
+  ).toBeVisible();
+
+  await suppressEmulatorBanner(page);
+  const tokushoLink = legalNav.getByRole("link", {
+    name: "特定商取引法に基づく表記",
+  });
+  await expect(tokushoLink).toBeVisible();
+  await tokushoLink.click();
   await expect(page).toHaveURL(/\/legal\/tokusho$/);
+  await expect(
+    page.getByRole("heading", { name: "特定商取引法に基づく表記" }),
+  ).toBeVisible();
 });
