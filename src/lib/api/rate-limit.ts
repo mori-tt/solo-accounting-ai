@@ -91,8 +91,10 @@ export function createRateLimiter(
  * - RUN: AI提案生成(LLM/外部API呼び出しを伴うため厳しめに60回/時)
  * - READ_WRITE: 一覧取得・承認/却下(240回/時)
  */
+export const AI_RUN_LIMIT_PER_HOUR = 60;
+
 export const aiRunRateLimiter = createRateLimiter({
-  limit: 60,
+  limit: AI_RUN_LIMIT_PER_HOUR,
   windowMs: 60 * 60 * 1000,
 });
 
