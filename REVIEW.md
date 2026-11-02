@@ -1340,3 +1340,17 @@ domain/types.ts の camelCase(`nonTaxable`/`outOfScope`)は旧世代 `validate.t
 - domain側の `lastDayOfMonth` はルート側に委譲したことで不正な月(0/13)を明示的に拒否するようになった(domain側は従来ロールオーバー)。全呼出箇所は正常な月のみ渡すため実害なし
 - domain関数の DomainError がルート側クラスと統一され、`api/result.ts` の `DOMAIN_ERROR_MESSAGES` にないコード(VALIDATION_FAILED等)は「処理に失敗しました」+実コードで返る(従来はINTERNAL固定だった点を改善)。メッセージ追加は api 層なので本タスク範囲外
 - 未対応(別タスク): `index.ts` barrel の整理、`store.ts`/`memory-store.ts`/`service.ts` 旧世代ポートのFirestore実装または撤去、`*Entity`とルート側ドキュメント型の wire形式統一(移行作業が必要)
+## 2026-11-02: 会計ライブラリ旧層の死コード削除(Issue #74)
+- Worktree: cleanup-old-layer
+- `src/lib/accounting/` 直下の旧層クラスタを削除。`AccountingService`(service.ts)・旧フラット `AccountingStore`/`EntityByCollection`/`CollectionName`/`IDEMPOTENT_COLLECTIONS`(store.ts)・`InMemoryAccountingStore`(memory-store.ts)・テスト用 `setup`/`expectDomainError`/`NOW`/`BIZ`/`ACTOR`(test-helpers.ts)は、import 網羅調査の結果これら5ファイル+旧serviceテスト3件の内部でしか参照されておらず、services//store//ai//actions//app//api/ 等の他層からの参照なしを確認して一括削除
+- 旧 `AccountingService` のテスト `service.billing.test.ts`/`service.closing.test.ts`/`service.transactions.test.ts` もテスト対象ごと削除
+- `index.ts` から `./memory-store`・`./service`・`./store` の re-export を除去(domain/* の re-export は維持)。barrel import(`@/lib/accounting` 直下)の利用者は repo 内にゼロ
+- `testing.ts` は削除せず保持。`testActor`/`setupStore`/`seedClosedPeriod` が services/*.test.ts 8件と tests/emulator/firestoreStore.test.ts から使用中で、実質新層向けテストヘルパーのため
+- 同名注意点: 旧 `store.ts`(get/list/create/remove 系フラットIF)と `store/types.ts`(新層 `AccountingStore`)は別物。`@/lib/api/store.ts` の `getStore()` は新層 `store/firestore.ts` を返しており旧層と無関係
+- `pnpm install --frozen-lockfile` — 成功(依存追加なし)
+- `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(worktree作成直後は `.next/types` 未生成で `LayoutProps` エラーになるため typegen を先行)
+- `pnpm test` — 合格(40ファイル504件、skip 10)
+- Firebase Emulator tests — 未実施(Issue制約で起動禁止。rules・エミュレータ経路の変更なし)
+- 削除対象の判定は「exportシンボル列挙→import元の網羅grep」で実施。`from "./store"`/`from "../store"` は `store/` ディレクトリではなく旧 `store.ts` に解決されるため、パス解決を個別に確認した
+- `domain/`・`services/`・`store/` のリファクタは別タスクのため一切未変更。変更は旧層ファイル削除と index.ts の re-export 除去のみ
