@@ -1868,3 +1868,27 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   write枠1200/時が実質の歯止め)。インメモリ制限のためサーバー再起動で
   カウントはリセット、マルチインスタンスではインスタンス単位の
   最良努力制限(厳密化は共有ストア化が別タスク)
+
+## 2026-11-02: リポジトリメタ整備(Issue #115)
+- Worktree: repo-meta
+- `LICENSE` 新設: 商用前提の無難な形として Proprietary License(All rights reserved、
+  無断複製・頒布・改変・公開を禁止)を採用。OSS化しない私有リポジトリの標準形。
+  `package.json` に `"license": "UNLICENSED"` を併記(`private: true` と整合)
+- `package.json` engines を `node: ">=26"`, `pnpm: ">=12"` に一本化。
+  `.node-version`=26 / `packageManager`=pnpm@12.16.1 と整合する単一ソースに揃えた
+- `.github/dependabot.yml` 新設: npm(ルート)と github-actions を週次更新
+- e2e の CI 組込み可否を調査 → 実装可能と判断し `ci.yml` に `e2e` ジョブを追加
+  - 判断根拠: e2e spec は外部サービス非依存(Firebase Emulator + heuristic AI
+    プロバイダのみ、OPENAI_API_KEY 等の secret 不要)。Emulator 接続設定は
+    コミット済み `.env.development`(demo-* プロジェクト)が `next dev` に
+    自動読込される。Playwright の webServer が `next dev` を自前起動
+    (`reuseExistingServer: !CI`)するため別途サーバー起動手順も不要
+  - 必要な追加セットアップ: JDK 21(test:rules と同じ・Emulator 起動に必須)、
+    `playwright install --with-deps chromium`(runner にブラウザ非搭載のため)
+  - Emulator JAR と ~/.cache/ms-playwright を lockfile キーでキャッシュし
+    再実行を高速化。失敗時は playwright-report を artifact 保存(7日)。
+    timeout は spec 26ファイル・retry 2 を見込んで 45 分に設定
+  - 残リスク: `next dev` の初回コンパイル込みで実行時間が伸びる可能性。
+    実運用で 45 分を超える/不安定な場合は spec 分割か shards 化を検討
+- `pnpm lint` — 合格(既存 warning 1件のみ)
+- `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
