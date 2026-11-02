@@ -42,8 +42,13 @@ function assertSameOrigin(request: Request): void {
  */
 export async function POST(request: Request) {
   try {
-    // verifyIdToken の署名検証コストを悪用した連打をIP単位で制限する
-    sessionRateLimiter.consume(clientIpKey(request));
+    // verifyIdToken の署名検証コストを悪用した連打をIP単位で制限する。
+    // Emulator環境(開発/E2E)では全クライアントが同一IPキーになり、
+    // テストで生成する多数のユーザーが確実に上限へ達するためスキップする。
+    // 本番では FIREBASE_AUTH_EMULATOR_HOST は設定されず常に有効。
+    if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+      sessionRateLimiter.consume(clientIpKey(request));
+    }
     assertSameOrigin(request);
     const body: unknown = await request.json().catch(() => {
       throw new ApiError("INVALID_INPUT", "JSONボディが不正です");

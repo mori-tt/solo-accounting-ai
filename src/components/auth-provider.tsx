@@ -16,12 +16,37 @@ import {
 } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { clearSession } from "@/lib/api-client";
+import { captureMessage } from "@/lib/monitoring";
 import {
   listMyBusinesses,
   type MyBusiness,
 } from "@/lib/actions/businesses";
 
 const BUSINESS_STORAGE_KEY = "sai.currentBusinessId";
+
+/**
+ * /api/session へIDトークンをPOSTしてセッションCookieを発行する。
+ * 失敗(429・5xx・ネットワーク)時は短い間隔でリトライし、
+ * 最終的に失敗しても監視へ送ったうえでセッション確立を諦める
+ * (従来は失敗を握りつぶし、Server Action が「ログインが必要です」で
+ * 全滅する状態になっていた)。
+ */
+async function postSession(idToken: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      });
+      if (res.ok) return;
+    } catch {
+      // ネットワーク断など。リトライで復帰を試みる
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+  }
+  captureMessage("session cookie issuance failed", "error");
+}
 
 export type AuthStatus = "loading" | "signed_out" | "signed_in";
 
@@ -65,13 +90,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       void nextUser
         .getIdToken()
-        .then((idToken) =>
-          fetch("/api/session", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ idToken }),
-          }),
-        )
+        .then(postSession)
         .catch(() => undefined)
         .finally(() => {
           setSessionReady(true);
