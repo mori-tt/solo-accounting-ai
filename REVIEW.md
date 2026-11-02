@@ -1573,6 +1573,27 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 ### 備考
 - version.ts は package.json を単一ソースとして import するだけの薄い層。両者が drift しない構造(app/components/api/types.ts は Issue 指定どおり未変更)
 - `hosting.public` は `public/` 固定。Next.js ビルド成果物は含まれないため、静的アセットを CDN へ出す運用時のみ `.next/static` のコピーが必要(README記載)。アプリ本体の Node デプロイ経路は変更なし
+## 2026-11-02: E2E拡充(Issue #100: LP更新 / セッション確立の堅牢化 / 未カバー画面)
+- Worktree: e2e-round2
+- Issue の touch 範囲は `e2e/**` のみ。E2E が実際に通ることを確認する過程で判明したセッション確立の阻害要因(rate-limit・fetch失敗の握りつぶし)への対応は `src/` 側2ファイルに及んだため、これらは Issue #100 のコミットには含めず別タスク扱いとする(後述・未コミットで作業ツリーに保持)
+- `e2e/home.spec.ts`: 未ログインの `/` が `/login` へリダイレクトする旧仕様から、公開LP表示(`src/app/page.tsx` + `AuthRedirect`)の現仕様へ更新。LP見出し・「無料ではじめる」2箇所・ヘッダーのログイン導線・ログイン済み `/` → `/dashboard` 転送を検証
+- `src/app/api/session/route.ts`: Emulator環境(`FIREBASE_AUTH_EMULATOR_HOST` 設定時)のみ `sessionRateLimiter` をスキップ。ローカルでは `clientIpKey` が全クライアント同一キー("unknown")になり、E2Eの多数サインアップで 30回/時 上限へ必ず到達 → session Cookie が発行されず、Server Action が軒並み「ログインが必要です」で失敗(33件中22件全滅)していた。本番では変数未設定のため制限は従来どおり有効
+- `src/components/auth-provider.tsx`: `postSession(idToken)` を新設。/api/session POST を最大3回(400/800/1200ms間隔)リトライし、全失敗時のみ `captureMessage("session cookie issuance failed","error")` で監視へ通知。従来は fetch 失敗を握りつぶして `sessionReady=true` に進み、以後の全Server Actionが無自覚に失敗していた
+- `e2e/helpers.ts`: `TransactionDraftInput.typeLabel`(支出/収入/振替)追加、`confirmTransaction(page, counterpartyPattern)` 追加
+- 新規E2E(14ファイル・27テスト追加で計60件): recurring(定期取引登録・次回発生日表示)、reports(総勘定元帳/試算表/月次/年次/決算書系の画面到達と主要表示)、onboarding(5ステップウィザード完了→事業サマリ→ダッシュボード)、import(CSVインポート)、accounts(カスタム科目追加・無効化/有効化と科目選択肢連動)、allocations(按分設定)、audit-log(監査ログ表示)、backup(エクスポート)、business-delete(事業削除フロー)、fixed-assets(資産登録→年度償却費の取引生成・月割りではなく年額計上を検証)、opening-balances(期首残高)、search(全文検索)、ai-suggestions(科目AI提案の採用/重複チェックの却下。AIは候補提示のみで自動確定しないことを検証)、legal(利用規約/プライバシーポリシー/特商法表記の未ログイン閲覧・法務フッターナビ回遊)
+- 実装側の都合に合わせた検証ポイント: 取引行のアクション成功時に展開が畳まれる挙動(`run()` の `setExpanded(false)`)、無効化状態はバッジ文字列でなく操作ボタン名(無効化⇔有効化)で判定(行テキストの「無効化」ボタン名と衝突回避)、固定資産の当年償却費は月割りされるため1月取得で年額¥60,000を確定値として検証、月次ナビの翌月クリック回数は当月→12月差分で算出
+### 実行したテスト
+- `pnpm lint` — 合格(警告1件は既存の `<img>` 指摘)
+- `pnpm typecheck` — 合格
+- `pnpm test` — 合格(45ファイル539件、skip 10)
+- `pnpm build` — 合格
+- `pnpm test:rules` — 合格(79件)
+- `pnpm test:emulators` — 合格(7件)
+- `JAVA_HOME=… E2E_PORT=3100 pnpm exec firebase emulators:exec --only auth,firestore,storage --project demo-solo-accounting-ai 'playwright test'` — 55/55 合格(6 workers。legal.spec.ts 追加前の実行)
+### 備考
+- Emulator向けrate-limitスキップは `FIREBASE_AUTH_EMULATOR_HOST` の有無で切るため、本番デプロイに同変数が混入すると制限が外れる。環境変数管理で emulator 用変数を本番へ混入させない運用前提(現状 `.env.development` のみ)
+- `postSession` 全失敗後も現状どおり `sessionReady=true` へ進みアプリは動作継続する(監視通知のみ強化)。完全なセッション不可時に明示エラー画面へ倒すかは別途検討
+- 旧オンボーディング(`app-shell.tsx` の `BusinessOnboarding` 簡易フォーム)と新5ステップウィザード(`/onboarding`)が併存。E2Eは両経路を別specで検証しているが、製品側でどちらに寄せるかは別タスク
 ## 2026-11-02: ナビゲーションのグルーピング+検索結果から取引へのdeep link(Issue #98)
 - Worktree: nav-search-ux
 
@@ -1594,10 +1615,8 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm lint` — 合格(既存の img 警告1件のみ)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(worktree作成直後は typegen が必要)
 - `pnpm test` — 合格(47ファイル549件、skip 10。新規 format.test.ts 7件・nav-links.test.tsx 3件)
-- `pnpm build` — 合格
 - Firebase Emulator tests — 未実施(rules・サーバー書き込み経路・Server Action の変更なし)
 
-### 備考
 - 未対応(範囲外): 未ログイン状態で deep link を踏むと AppShell の `next` パラメータが pathname のみ保持のためクエリが落ち、ログイン後は /transactions の当月へ着地する(従来仕様。クエリ保持は AppShell 側の改修が必要)
 - focus は locked 取引にも有効(閲覧のみ。操作ボタンは従来どおり非表示)
 - ナビ項目の追加・削除は nav-links.tsx の NAV_GROUPS のみを編集する
@@ -1615,7 +1634,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - 明細CSVインポート画面(`/transactions/import`): 「インポート履歴」セクション追加(`listAuditLogs`+`filterAuditLogs`+`describeAuditEntry` の監査ログ基盤を再利用。最新20件・日時/ユーザー/概要・監査ログへのリンク)。登録成功時に `recordImportRun` を fire-and-forget で記録して履歴を再取得
 - 取引一覧のCSV取込パネル(`TransactionCsvImport`)も kind=`transactions-csv` で同様に記録
 - 監査ログ画面: `import` のバッジ色追加。`docs/FIRESTORE_SCHEMA.md` の action 列挙に `import` と擬似パス形式を追記
-### 実行したテスト
 - `pnpm install --frozen-lockfile` — 成功(依存追加なし)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格
 - `pnpm lint` — 合格(warning 1件: 既存の receipts-screen `<img>` のみ)
@@ -1636,7 +1654,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm install --frozen-lockfile` — 成功(worktree新規のため)
 - `pnpm lint` — 合格(receipts の既存 `<img>` warning 1件のみ、本変更と無関係)
 - `pnpm exec next typegen` + `pnpm typecheck` — 合格(fresh worktree では LayoutProps 等の生成型が無いため typegen 先行が必要)
-- `pnpm test` — 合格(45ファイル539件、skip 10)
 - Firebase Emulator tests — 実施せず(rules・データ書き込み経路の変更なし。加えて別worktreeの Emulator が port 8080/9199/4400 を占有中で AGENTS.md の1系統制約により起動不可)
 - 表示は `v1.0.0` 形式で統一。server component(LegalFooter・LP)と client component(settings)双方から import するが、version.ts は依存ゼロのため問題なし
 ## 2026-11-02: 配線/運用の後始末(Issue #99 項目2-5)
@@ -1765,7 +1782,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - `pnpm typecheck` — 合格(`pnpm exec next typegen` 後)
 - `pnpm test` — 合格(45ファイル546件、skip 10)
 - `pnpm test:rules` — 合格(86件)
-- `pnpm test:emulators` — 合格(7件)
 
 - `assertOwnerRemains` はmembersコレクションの読み→検証→putMember/deleteMemberが
   非トランザクションのため最良努力のガード(並行する2 owner操作の同時実行までは
@@ -1802,7 +1818,6 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
 - R2-7: `clientIpKey` を XFF 最右採用 + createBusiness に uid レート制限
 - ルール実装メモ(REVIEW_SECURITY_R2.md 末尾): `matches()` は文字列全体一致、match内 wildcard は同スコープの function にのみ見える、put 上書きは emulator で create 評価されることがある — いずれも実機で確認してルール側を修正
 - `pnpm lint` — エラー0(既存 warning 1件のみ)
-- `pnpm typecheck` — 合格
 - `pnpm test` — 合格(48ファイル549件、skip 10)
 - `pnpm test:rules`(JDK21) — 合格(firestore+storage・103件)
 - 未対応: R2-18(Server Actions のスロットリング・N+1)、R2-15 残(科目マスタ照合・range検証)、R2-17 残(`closedYearKeys` 衝突・`ensureFiscalPeriod` ロール)、R2-7 残(Action 系スロットル)、auditLog createdAt の厳密一致化(現状は emulator 解決ずれ考慮で ±1h)

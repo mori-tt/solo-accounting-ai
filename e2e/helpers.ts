@@ -99,6 +99,8 @@ export interface TransactionDraftInput {
   counterparty?: string;
   description?: string;
   date?: string;
+  /** 種別。省略時はフォーム既定の支出 */
+  typeLabel?: "支出" | "収入" | "振替";
 }
 
 /**
@@ -115,10 +117,16 @@ export async function createTransactionDraft(
     counterparty = "テスト商店",
     description = "E2E備品購入",
     date,
+    typeLabel,
   } = input;
   await page.goto("/transactions");
   await page.getByRole("button", { name: "取引を登録" }).click();
   const form = page.locator("form");
+  if (typeLabel) {
+    await form
+      .getByRole("combobox", { name: "種別", exact: true })
+      .selectOption({ label: typeLabel });
+  }
   if (date) await form.getByLabel("日付").fill(date);
   await form.getByLabel("金額(円)").fill(amount);
   await form
@@ -130,4 +138,16 @@ export async function createTransactionDraft(
   await expect(
     page.getByRole("row", { name: new RegExp(counterparty) }),
   ).toBeVisible();
+}
+
+/** 一覧で指定行を開き「確定する」を押して確定表示になるまで待つ */
+export async function confirmTransaction(
+  page: Page,
+  counterpartyPattern: RegExp,
+): Promise<void> {
+  await page.goto("/transactions");
+  const row = page.getByRole("row", { name: counterpartyPattern });
+  await row.click();
+  await page.getByRole("button", { name: "確定する" }).click();
+  await expect(row).toContainText("確定");
 }
