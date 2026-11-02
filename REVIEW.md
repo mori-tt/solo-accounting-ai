@@ -16,6 +16,46 @@
 
 ## Log
 
+## 2026-11-02: 定期請求書テンプレートと自動ドラフト請求書生成(Issue #130)
+- Worktree: recurring-invoices
+### 実装内容
+既存 `recurringTemplates`(取引)とは別コレクション `recurringInvoiceTemplates` を新設し、期日到来分のドラフト請求書生成を追加。請求書番号は既存の事業カウンタ連番を使用。依存追加なし。
+- `src/lib/accounting/types.ts`: `RecurringInvoiceTemplate`(name/customerId/projectId?/items/intervalMonths/dayOfMonth/startDate/endDate?/maxOccurrences?/dueDays/active/lastGeneratedMonth?/generatedCount/createdBy/createdAt/updatedAt)を追加
+- `src/lib/accounting/dates.ts`: `addDays(date, days)` 追加(支払期日 = 発行日 + dueDays)
+- `src/lib/accounting/store/types.ts`: `CollectionName` に `"recurringInvoiceTemplates"` 追加。`AccountingReader` に `getRecurringInvoiceTemplate`/`listRecurringInvoiceTemplates`、`AccountingWriter` に `putRecurringInvoiceTemplate` を追加。`store/memory.ts`・`store/firestore.ts` に実装(createdAt昇順)
+- `src/lib/accounting/services/recurring-invoices.ts`(新規):
+  - `registerRecurringInvoiceTemplate` — customerの存在確認・フィールド検証(intervalMonths 1-36、dayOfMonth 1-31、dueDays 0-366、maxOccurrences 1-999、endDate>=startDate)・明細正規化(数量/単価/税率からamount・taxAmount・合計を再計算)・冪等キー
+  - `updateRecurringInvoiceTemplate` / `setRecurringInvoiceTemplateActive` — 同検証+存在確認。更新時も明細・顧客を再検証
+  - `generateRecurringInvoices(store, businessId, actor, monthKey)` — 指定月(yyyyMM)に `active && lastGeneratedMonth !== monthKey` のテンプレートから draft 請求書を1transactで一括生成。請求書IDは `recurring-invoice-{templateId}-{yyyyMM}` で決定的(二重実行の安全網)。startDateの月を起点にintervalMonthsごとの月のみ生成、endDate超過・maxOccurrences到達は生成せず lastGeneratedMonth のみ進める。dayOfMonthが月末超過時は末日へ調整。`assertDateInOpenPeriod` で締め済み期間への生成を拒否
+  - 請求書番号: `registerInvoice` と同じく business.invoiceCounter をループ内で進め `INV-{5桁}` 採番、バッチ末尾で1回書き戻す(既存連番と重複しない)
+- `src/lib/accounting/services/sales.ts`: `normalizeInvoiceItems` / `formatInvoiceNumber` を export(再利用のため。挙動変更なし)
+- `src/lib/validation/schemas.ts`: `invoiceItemSchema`(description/quantity/unitPrice/amount/taxRate/taxAmount)、`recurringInvoiceTemplateSchema` / `recurringInvoiceTemplateUpdateSchema`(+active)追加。endDate>=startDate をrefineで検証
+- `src/lib/actions/recurring-invoices.ts`(新規・Server Actions): `listRecurringInvoiceTemplates`(requireViewer)、`createRecurringInvoiceTemplate` / `updateRecurringInvoiceTemplateAction` / `setRecurringInvoiceTemplateActiveAction` / `generateRecurringInvoicesForMonth`(すべてrequireEditor+zod再検証)。生成は `{ created }` 件数を返す
+- `/recurring-invoices` ページ新設(`page.tsx`+`loading.tsx`+`recurring-invoices-screen.tsx`): 一覧(名前/顧客/間隔・発行日/開始日・終了条件/金額/状態/最終生成月/生成回数)・登録/編集フォーム(明細行の追加削除・税率指定)・有効化/無効化・「今月分を生成」ボタン(ConfirmDialog→件数Alert)。生成された請求書への導線として各行に `/invoices` へのLinkを配置。viewerは操作系を全て非表示
+- `src/components/nav-links.tsx`: ナビに「定期請求書」追加(「定期取引」の次)。`nav-links.test.tsx` の件数を24→25に更新
+- `firestore.rules`: `recurringInvoiceTemplates` match追加(get/list=isMember、create=canEdit+`validRecurringInvoiceTemplate`+createdBy一致、update=canEdit+valid+`unaffected(['createdBy','createdAt'])`、delete=ownerのみ)。`validRecurringInvoiceTemplate` は name(string)/customerId(string)/items(list・各明細の型)/intervalMonths(int 1-36)/dayOfMonth(int 1-31)/startDate(string)/endDate・maxOccurrences・dueDays・active・generatedCount・lastGeneratedMonth・projectId を存在時のみ型・範囲検証
+- `docs/FIRESTORE_SCHEMA.md`: recurringInvoiceTemplates のフィールド表・生成仕様(決定的ID・冪等・締め期間拒否・連番採番)を追記
+- `src/lib/backup.ts`: `BACKUP_COLLECTIONS` に `recurringTemplates`/`recurringInvoiceTemplates`/`fixedAssets` を追加(前2者はIssue #47実装後にコレクション追加されexportが漏れていた既存バグ。`RESTORE_ACTOR_FIELDS` には既に定義済みだった)。`RESTORE_ACTOR_FIELDS` に `recurringInvoiceTemplates: ["createdBy"]`、`SINGLE_REF_FIELDS` に customerId→customers / projectId→projects を追加
+- `src/lib/audit-log-view.ts`: `AUDIT_TARGET_TYPES` に 定期取引/定期請求書/固定資産 の表示名を追加(同じく既存の漏れ)
+- `tests/rules/helpers.ts` に `recurringInvoiceTemplate()` fixture、`tests/rules/firestore.rules.test.ts` に `recurringInvoiceTemplates` describe 追加(member読取/editor作成/viewer作成拒否/createdBy不一致拒否/dayOfMonth・interval・startDate・dueDays・maxOccurrences・active・items不正拒否/editor更新・active切替・generatedCount更新/createdBy・createdAt不変/viewer更新・削除拒否/owner削除)
+- `src/lib/accounting/services/recurring-invoices.test.ts`(新規): 20件。登録・検証・冪等、顧客なし拒否、更新・有効化切替、ドラフト生成、支払期日計算、endDate・maxOccurrences上限、intervalMonths間隔、月末調整(31日→2/28)、同月再実行冪等、翌月再生成、締め期間拒否、請求書連番採番、既存請求書作成への非影響
+- `e2e/recurring-invoices.spec.ts`(新規): テンプレート作成→一覧表示→「今月分を生成」→/invoices で生成請求書確認(startDateは過去日固定で当月必ず対象になるよう安定化)
+### 実行したテスト
+- `pnpm install --frozen-lockfile` — 成功・依存追加なし
+- `pnpm lint` — 合格(warning 1件: receipts-screen の `<img>`、既存)
+- `pnpm exec next typegen` + `pnpm typecheck` — 合格(/recurring-invoices のroute型生成)
+- `pnpm test` — 合格(52ファイル637件、skip 10。`recurring-invoices.test.ts` 20件新規)
+- `pnpm build` — 合格(/recurring-invoices が静的路由として生成)
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home pnpm test:rules` — 合格(2ファイル118件。recurringInvoiceTemplates を含む)
+### 判断事項・次の担当者への注意事項
+- 発火タイミングは既存定期取引(`generateRecurringForMonth`)と同じく画面の「今月分を生成」ボタンからのServer Action呼び出し。自動スケジューラ(Cloud Functions scheduled function等)はこのリポジトリに存在しないため未実装。将来スケジューラを載せる場合も `generateRecurringInvoices` は月キー・決定的ID・lastGeneratedMonthで冪等なのでそのまま呼べる
+- 「今月分を生成」のtransactには全体idempotencyKeyを付けていない(月キーで固定すると当月追加されたテンプレートが生成されなくなるため。定期取引と同じ判断)。lastGeneratedMonthの読み書き不可分 + 決定的請求書ID + business.invoiceCounterのトランザクション内更新で冪等性を担保
+- 生成された請求書は通常の `invoices` ドキュメント(status=draft)。発行・入金は既存の請求書フローに委譲。テンプレート削除しても生成済み請求書は残る(取引と同じ方針)
+- 顧客削除済みのテンプレートは生成時にエラーになる(生成対象月でcustomerを解決できないため)。テンプレート自体は無効化して停止可能
+- `recurringTemplates`/`fixedAssets` が `BACKUP_COLLECTIONS` から漏れていた既存バグを合わせて修正(exportされず復元も不可能だった)。backup.test.ts 21件は従来通り合格
+- E2E(`e2e/recurring-invoices.spec.ts`)は作成済みだが `pnpm test:e2e` は未実行(next dev起動が必要・別レーンとのポート衝突回避のため)
+- Emulator利用: `JAVA_HOME` export 後 `pnpm test:rules` のみ実行(next dev 未使用)
+
 ## 2026-11-02: 減価償却(固定資産台帳)(Issue #58)
 - Worktree: depreciation
 ### 実装内容

@@ -37,6 +37,9 @@ export const BACKUP_COLLECTIONS = [
   "journalEntries",
   "fiscalPeriods",
   "closingChecks",
+  "recurringTemplates",
+  "recurringInvoiceTemplates",
+  "fixedAssets",
   "aiSuggestions",
   "monthlySummaries",
   "auditLogs",
@@ -266,6 +269,7 @@ const RESTORE_ACTOR_FIELDS: Record<string, readonly string[] | undefined> = {
   receipts: ["createdBy"],
   journalEntries: ["createdBy"],
   recurringTemplates: ["createdBy"],
+  recurringInvoiceTemplates: ["createdBy"],
   fixedAssets: ["createdBy"],
   closingChecks: ["createdBy", "resolvedBy"],
   fiscalPeriods: ["closedBy"],
@@ -365,6 +369,10 @@ const SINGLE_REF_FIELDS: Record<string, [field: string, collection: string][]> =
     payments: [
       ["invoiceId", "invoices"],
       ["transactionId", "transactions"],
+    ],
+    recurringInvoiceTemplates: [
+      ["customerId", "customers"],
+      ["projectId", "projects"],
     ],
     closingChecks: [["fiscalPeriodId", "fiscalPeriods"]],
   };

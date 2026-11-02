@@ -29,6 +29,7 @@ businesses/{businessId}/invoices/{invoiceId}
 businesses/{businessId}/payments/{paymentId}
 businesses/{businessId}/journalEntries/{journalEntryId}
 businesses/{businessId}/recurringTemplates/{templateId}
+businesses/{businessId}/recurringInvoiceTemplates/{templateId}
 businesses/{businessId}/fixedAssets/{assetId}
 businesses/{businessId}/fiscalPeriods/{periodId}
 businesses/{businessId}/closingChecks/{checkId}
@@ -220,6 +221,37 @@ receipts(証憑ファイル)
 | dayOfMonth | number | 毎月の生成日(1-31)。その月に存在しない日は末日へ調整 |
 | active | boolean | 無効化は削除ではなく `false` |
 | lastGeneratedMonth | string? | 最後に生成した月(yyyyMM) |
+| createdBy | string | uid |
+| createdAt | Timestamp | |
+| updatedAt | Timestamp | |
+
+### businesses/{businessId}/recurringInvoiceTemplates/{templateId}
+
+定期請求書テンプレート。「今月分を生成」操作で、期日の来たテンプレートから
+指定月の請求書(`status=draft`)を一括作成する。生成物は `invoices` で、
+請求書番号は既存の連番(`businesses.invoiceCounter`)から採番する。
+スケジュールは `startDate` の月を起点に `intervalMonths` ごとの月の
+`dayOfMonth` 日(その月に存在しない日は末日へ調整)を発行日とし、
+`endDate`・`maxOccurrences` で終了条件を指定する。
+生成済み管理は `lastGeneratedMonth`・`generatedCount` で行い、
+同じ月の再生成はしない。生成される請求書IDは
+`recurring-invoice-{templateId}-{yyyyMM}` で決定的。
+
+| Field | Type | Note |
+|---|---|---|
+| name | string | テンプレート名 |
+| customerId | string | 請求先顧客 |
+| projectId | string? | 紐付く案件 |
+| items | array | invoicesと同形式 [{ description, quantity, unitPrice, amount, taxRate, taxAmount }]。登録時に正規化済み |
+| intervalMonths | number | 生成間隔(月・1-36)。1=毎月、3=3か月ごと、12=毎年 |
+| dayOfMonth | number | 各生成月の発行日(1-31)。その月に存在しない日は末日へ調整 |
+| startDate | string | YYYY-MM-DD。この日以降の発行日のみ生成対象 |
+| endDate | string? | YYYY-MM-DD。この日を超える発行日は生成しない |
+| maxOccurrences | number? | 生成回数の上限(1-999)。generatedCountが達したら生成しない |
+| dueDays | number | 支払期日=発行日+N日後(0-366) |
+| active | boolean | 無効化は削除ではなく `false` |
+| generatedCount | number | これまでに生成した請求書の累計数 |
+| lastGeneratedMonth | string? | 最後に生成処理を行った月(yyyyMM) |
 | createdBy | string | uid |
 | createdAt | Timestamp | |
 | updatedAt | Timestamp | |
