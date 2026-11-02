@@ -249,6 +249,36 @@ describe("owner権限", () => {
     await assertFails(owner.doc(`businesses/${BIZ}`).update({ ownerUid: EDITOR }));
   });
 
+  it("planはクライアントから作成・更新できない(課金基盤のみ)", async () => {
+    const owner = asUser(testEnv, OWNER);
+    // 作成時にplanを持ち込めない(自己アップグレード防止)
+    await assertFails(
+      owner.doc("businesses/new-biz").set({
+        name: "新規事業",
+        ownerUid: OWNER,
+        fiscalYearStartMonth: 1,
+        taxMode: "exempt",
+        plan: "pro",
+      }),
+    );
+    await assertSucceeds(
+      owner.doc("businesses/new-biz").set({
+        name: "新規事業",
+        ownerUid: OWNER,
+        fiscalYearStartMonth: 1,
+        taxMode: "exempt",
+      }),
+    );
+    // 更新時もplanを変更できない(未設定→freeへの設定すら不可)
+    await assertFails(
+      owner.doc(`businesses/${BIZ}`).update({ plan: "pro" }),
+    );
+    // plan以外の更新は従来通り許可される
+    await assertSucceeds(
+      owner.doc(`businesses/${BIZ}`).update({ fiscalYearStartMonth: 4 }),
+    );
+  });
+
   it("confirmedなTransactionを削除できる", async () => {
     await seed(testEnv, { [tPath(BIZ, "t1")]: tx("confirmed") });
     await assertSucceeds(asUser(testEnv, OWNER).doc(tPath(BIZ, "t1")).delete());

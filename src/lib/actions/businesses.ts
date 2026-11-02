@@ -4,9 +4,11 @@ import { registerBusiness } from "@/lib/accounting/services/business";
 import { auditsFor } from "@/lib/accounting/services/common";
 import type {
   Business,
+  BusinessPlan,
   CustomAccount,
   MemberRole,
 } from "@/lib/accounting/types";
+import { toBusinessPlan } from "@/lib/billing";
 import { getAdminBucket, getAdminDb } from "@/lib/firebase/admin";
 import {
   findUidByEmail,
@@ -59,6 +61,8 @@ export interface MyBusiness {
   issuerName?: string;
   /** 請求書に記載する発行者住所 */
   issuerAddress?: string;
+  /** 料金プラン。未設定(課金導入前データ)はfree扱い */
+  plan?: BusinessPlan;
 }
 
 /** ログインユーザーが所属する事業一覧 */
@@ -95,6 +99,8 @@ export async function listMyBusinesses(): Promise<
         invoiceRegistrationNumber: business.invoiceRegistrationNumber,
         issuerName: business.issuerName,
         issuerAddress: business.issuerAddress,
+        // 未知値はundefinedへ正規化(読み出し側はtoMemberRoleと同じ方針)
+        plan: toBusinessPlan(business.plan),
       });
     }
     return result;
@@ -142,6 +148,7 @@ export async function createBusiness(
       role: "owner" as const,
       fiscalYearStartMonth: business.fiscalYearStartMonth,
       taxMode: business.taxMode,
+      plan: business.plan,
     };
   });
 }

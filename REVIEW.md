@@ -2430,7 +2430,65 @@ REVIEW_SECURITY.md S6 の指摘対応として `next.config.ts` にセキュリ�
   - PERIOD_CLOSED等で生成不能な事業は日次errorログが継続する(テンプレ無効化等で解消)。
     再試行はしない(翌日実行がリトライを兼ねる)
   - firestore.rules/storage.rules の変更なし(Admin SDK経路のため)
-
+## 2026-11-02: 課金基盤の抽象層(プラン/entitlement)(Issue #148)
+- Worktree: plan-billing
+### 実装内容
+Stripe等の実接続を伴わない課金基盤の抽象層。プラン保持(Business.plan)、
+機能可否の判定(PlanEntitlements)、表示(設定画面)、entitlementチェックの
+サンプル適用までの縦割り実装。現行プランでは全機能有効のため動作は変わらない。
+- `src/lib/accounting/types.ts`: `BusinessPlan`(`"free" | "pro"`)と
+  `Business.plan?: BusinessPlan` を追加(未設定はfree扱い・後方互換)
+- `src/lib/billing.ts`(新規): 課金抽象層。`BUSINESS_PLANS`/`PLAN_LABELS`、
+  `BillingFeature`(ai_suggestions/ai_receipt_ocr/csv_export/backup_restore/
+  member_invite/filing_support)+`FEATURE_LABELS`、
+  `PlanEntitlements = Record<BillingFeature, boolean>`、
+  `PLAN_ENTITLEMENTS`(プラン×機能の対応表・現行は全true)、
+  `toBusinessPlan`(生データ検証・toMemberRoleと同方針)/`resolveBusinessPlan`/
+  `businessPlanOf`/`entitlementsFor`/`hasEntitlement`。
+  firebase非依存の純粋モジュールのためclient/server双方から利用可
+- `src/lib/api/entitlements.ts`(新規): `assertFeatureEntitled(businessId, feature)`。
+  実効ゲートは必ずサーバー側で行う(client側hasEntitlementはUX用)。
+  非対応なら FORBIDDEN(ApiError)
+- entitlementチェックのサンプル適用(3箇所):
+  - `POST /api/ai/suggestions`: `ai_suggestions`(認可後・rate limit消費前)
+  - `POST /api/ai/receipt-ocr`: `ai_receipt_ocr`(同)
+  - `monthly-ai-explanation.tsx`: `hasEntitlement`で生成ボタンの表示制御
+    (非対応時は「現在のプランではAI機能を利用できません」を表示)
+- `src/lib/accounting/services/business.ts`: `registerBusiness` が
+  `plan: "free"` を新規事業へ書き込む(既存データは未設定のまま=free扱い)
+- `src/lib/actions/businesses.ts`: `MyBusiness.plan?: BusinessPlan` を追加し
+  `listMyBusinesses`/`createBusiness` で返却。読み出し値は `toBusinessPlan`
+  で正規化(未知値→undefined)
+- 設定画面(`settings-screen.tsx`): `PlanCard` を追加
+  - 現在のプラン(Badge)・機能比較表(BILLING_FEATURES×BUSINESS_PLANSを
+    PLAN_ENTITLEMENTSから機械的に組み立て・現在プラン列に「(現在)」表示)
+  - 将来の課金接続点を明示: 「課金機能は未接続です…」の注記+disabledの
+    「プランを変更(準備中)」ボタン(コードコメントでも接続点を明記)
+- `firestore.rules`: businessesのcreateで `!('plan' in request.resource.data)`、
+  updateで `unaffected(['plan'])` を追加。クライアントからの
+  plan設定・変更を禁止(自己アップグレード防止。変更はAdmin SDKのみ)
+- `docs/FIRESTORE_SCHEMA.md`: businessesに `plan` 行を追加、
+  `docs/SECURITY_RULES.md`: 権限モデルにplan不変性を追記
+- `tests/rules/firestore.rules.test.ts`: planのクライアント作成・更新拒否と
+  他フィールド更新は引き続き許可されることのケース追加
+### 判断事項
+- プラン値は `"free" | "pro"` のみ。「現planでは全て有効」の要件に従い
+  PLAN_ENTITLEMENTSは両プラン全true。料金差別化時は対応表の値のみ変更し
+  判定経路は変えない設計(機能比較表・entitlementチェックがそのまま効く)
+- BillingFeatureはアプリの実機能に対応させた6項目。サンプル適用は
+  課金対象として最も自然なAI系2機能+月次AI説明の表示制御を選択
+- `Business.plan` はoptionalのまま(課金導入前の既存ドキュメントは
+  フィールドを持たないため)。新規作成時のみ明示的に `"free"` を書き込む
+- バックアップ復元ではplanを引き継がない(backupBusinessSchemaが
+  name/fiscalYearStartMonth/taxModeのみ適用する既存仕様のまま。
+  復元先事業のプランをバックアップ内容で上書きしないのが適切)
+- plan変更の専用経路(課金webhook等)は未実装。接続時は
+  settingsの「プランを変更」ボタンを課金ポータル遷移へ置き換え、
+  webhook側でBusiness.planを更新する想定(コメントで接続点を明記)
+### Checks
+- `pnpm test` — 合格(62ファイル764件、skip 10。billing.test.ts 8件新規)
+- `pnpm test:rules`(JAVA_HOME=openjdk@21) — 合格(2ファイル157件)
+- `pnpm test:emulators`(JAVA_HOME=openjdk@21) — 合格(2ファイル7件)
 ## 2026-11-02: 複数年比較レポート(Issue #149)
 - Worktree: reports-compare
 ### 実装内容

@@ -45,6 +45,8 @@ Firebase Security Rules(Firestore / Storage)の方針。
 - `businesses` ドキュメントのdeleteはクライアントから不可
   (サブコレクション残骸防止のためAdmin SDKのみ)
 - `ownerUid` はクライアントから変更不可(所有権移転防止)
+- `plan`(料金プラン)はクライアントから設定・変更不可
+  (自己アップグレード防止。課金基盤=Admin SDKのみが変更する)
 - `users/{uid}` は本人のみ読み書き可(個人情報保護)
 - `monthlySummaries` はクライアントから書き込み不可(集計はFunctionsのみ)
 
